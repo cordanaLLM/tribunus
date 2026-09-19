@@ -1,0 +1,211 @@
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/cordanaLLM/praetor/tribunus/catalog"
+	"github.com/cordanaLLM/praetor/tribunus/internal/sources/codexlocal"
+	"github.com/cordanaLLM/praetor/tribunus/internal/sources/litellmgateway"
+	"github.com/cordanaLLM/praetor/tribunus/internal/sources/ollamalocal"
+	"github.com/cordanaLLM/praetor/tribunus/internal/sources/publiccatalog"
+)
+
+// defaultSnapshotPath is where sync writes when --out is not given.
+const defaultSnapshotPath = "tribunus-snapshot.json"
+
+// defaultOllamaEndpoint is Ollama's standard local daemon address.
+const defaultOllamaEndpoint = "http://localhost:11434"
+
+// syncTimeout bounds the whole sync command, on top of each source's own
+// per-request timeout, so a hung DNS lookup or similar cannot block forever
+// (HISS-02).
+const syncTimeout = 3 * time.Minute
+
+// maxSnapshotFileBytes bounds the snapshot file sync writes (HISS-02).
+const maxSnapshotFileBytes = 64 << 20
+
+// allSourceNames lists every source sync knows, in the order runSync
+// attempts them.
+var allSourceNames = []string{
+	codexlocal.SourceName,
+	litellmgateway.SourceName,
+	ollamalocal.SourceName,
+	publiccatalog.SourceName,
+}
+
+// syncFlags holds sync's parsed command-line flags.
+type syncFlags struct {
+	sources          string
+	out              string
+	litellmBase      string
+	litellmToken     string
+	ollama           string
+	openRouterURL    string
+	litellmPricesURL string
+	sessionsDir      string
+}
+
+func parseSyncFlags(args []string) (syncFlags, error) {
+	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
+	var f syncFlags
+	fs.StringVar(&f.sources, "sources", strings.Join(allSourceNames, ","), "comma-separated source names to run")
+	fs.StringVar(&f.out, "out", defaultSnapshotPath, "path to write the JSON snapshot")
+	fs.StringVar(&f.litellmBase, "litellm-base", "", "LiteLLM gateway base URL (required for litellm-gateway)")
+	fs.StringVar(&f.litellmToken, "litellm-token-file", "", "path to a file holding the LiteLLM bearer token (required for litellm-gateway)")
+	fs.StringVar(&f.ollama, "ollama", defaultOllamaEndpoint, "Ollama daemon endpoint")
+	fs.StringVar(&f.openRouterURL, "openrouter-url", publiccatalog.DefaultOpenRouterURL, "OpenRouter public models API URL")
+	fs.StringVar(&f.litellmPricesURL, "litellm-prices-url", publiccatalog.DefaultLiteLLMPriceMapURL, "LiteLLM public price map URL")
+	fs.StringVar(&f.sessionsDir, "sessions-dir", "", "Codex CLI sessions directory (default: ~/.codex/sessions)")
+	if err := fs.Parse(args); err != nil {
+		return syncFlags{}, err
+	}
+	return f, nil
+}
+
+// runSync is tribunusctl's "sync" subcommand: it runs every selected
+// source, prints one ok/skip/fail line per source, and writes the combined
+// snapshot to --out. It returns an error only for flag/argument problems or
+// a write failure; a source failing is reported on its own line, not
+// treated as a command failure, because sources fail independently by
+// design.
+func runSync(args []string) error {
+	f, err := parseSyncFlags(args)
+	if err != nil {
+		return err
+	}
+	selected, err := selectSources(f.sources)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
+	defer cancel()
+
+	snap := catalog.Snapshot{GeneratedAt: time.Now().UTC()}
+	for _, name := range selected {
+		run := runOneSource(ctx, name, f)
+		snap.SourceRuns = append(snap.SourceRuns, run.SourceRun(name))
+		snap.Records = append(snap.Records, run.Records...)
+		fmt.Println(formatSourceLine(name, run))
+	}
+
+	data, err := snap.Marshal()
+	if err != nil {
+		return fmt.Errorf("marshal snapshot: %w", err)
+	}
+	if len(data) > maxSnapshotFileBytes {
+		return fmt.Errorf("snapshot exceeds %d bytes, refusing to write", maxSnapshotFileBytes)
+	}
+	if err := writeSnapshotFile(f.out, data); err != nil {
+		return err
+	}
+	fmt.Printf("wrote %d records to %s\n", len(snap.Records), f.out)
+	return nil
+}
+
+// selectSources parses the --sources flag into a validated, ordered list.
+func selectSources(raw string) ([]string, error) {
+	fields := strings.Split(raw, ",")
+	known := make(map[string]bool, len(allSourceNames))
+	for _, n := range allSourceNames {
+		known[n] = true
+	}
+	var out []string
+	for _, field := range fields {
+		name := strings.TrimSpace(field)
+		if name == "" {
+			continue
+		}
+		if !known[name] {
+			return nil, fmt.Errorf("unknown source %q (known: %s)", name, strings.Join(allSourceNames, ", "))
+		}
+		out = append(out, name)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("--sources selected no sources")
+	}
+	return out, nil
+}
+
+// sourceOutcome normalizes every source package's own Result type into one
+// shape runSync can report and fold into a Snapshot.
+type sourceOutcome struct {
+	Records []catalog.Record
+	Status  catalog.Status
+	Count   int
+	Detail  string
+}
+
+func (o sourceOutcome) SourceRun(name string) catalog.SourceRun {
+	return catalog.SourceRun{Source: name, Status: o.Status, Count: o.Count, Detail: o.Detail}
+}
+
+// runOneSource dispatches to the named source's Fetch and normalizes its
+// result. Flag values a source needs but was not given (e.g. litellm-base
+// for litellm-gateway) are reported as a skip, not a crash.
+func runOneSource(ctx context.Context, name string, f syncFlags) sourceOutcome {
+	switch name {
+	case codexlocal.SourceName:
+		return runCodexLocal(ctx, f)
+	case litellmgateway.SourceName:
+		return runLiteLLMGateway(ctx, f)
+	case ollamalocal.SourceName:
+		res := ollamalocal.Fetch(ctx, f.ollama)
+		return sourceOutcome{Records: res.Records, Status: res.Status, Count: res.Count, Detail: res.Detail}
+	case publiccatalog.SourceName:
+		res := publiccatalog.Fetch(ctx, f.openRouterURL, f.litellmPricesURL)
+		return sourceOutcome{Records: res.Records, Status: res.Status, Count: res.Count, Detail: res.Detail}
+	default:
+		return sourceOutcome{Status: catalog.StatusSkip, Detail: "unknown source"}
+	}
+}
+
+func runCodexLocal(ctx context.Context, f syncFlags) sourceOutcome {
+	dir := f.sessionsDir
+	if dir == "" {
+		resolved, err := codexlocal.DefaultSessionsDir()
+		if err != nil {
+			return sourceOutcome{Status: catalog.StatusFail, Detail: err.Error()}
+		}
+		dir = resolved
+	}
+	res := codexlocal.Fetch(ctx, dir)
+	return sourceOutcome{Records: res.Records, Status: res.Status, Count: res.Count, Detail: res.Detail}
+}
+
+func runLiteLLMGateway(ctx context.Context, f syncFlags) sourceOutcome {
+	if f.litellmBase == "" || f.litellmToken == "" {
+		return sourceOutcome{Status: catalog.StatusSkip, Detail: "--litellm-base and --litellm-token-file are required for litellm-gateway"}
+	}
+	res := litellmgateway.Fetch(ctx, f.litellmBase, f.litellmToken)
+	return sourceOutcome{Records: res.Records, Status: res.Status, Count: res.Count, Detail: res.Detail}
+}
+
+func formatSourceLine(name string, o sourceOutcome) string {
+	line := fmt.Sprintf("%-16s %-4s count=%d", name, o.Status, o.Count)
+	if o.Detail != "" {
+		line += " " + o.Detail
+	}
+	return line
+}
+
+// writeSnapshotFile writes data to path, creating parent directories as
+// needed. path comes from a local CLI flag the operator controls directly,
+// not untrusted input, so a plain create-or-truncate write is sufficient.
+func writeSnapshotFile(path string, data []byte) error {
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return fmt.Errorf("create output directory %s: %w", dir, err)
+		}
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("write snapshot %s: %w", path, err)
+	}
+	return nil
+}

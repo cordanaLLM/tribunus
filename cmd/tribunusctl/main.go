@@ -1,7 +1,8 @@
-// Command tribunusctl syncs the Tribunus model catalog from a handful of
-// local and remote sources and can render the resulting snapshot as a
-// table. See tribunus/catalog for the record shape and
-// docs/tribunus/data-sync.md for what each source does and does not know.
+// Command tribunusctl syncs the model data the Tribunus graph router will
+// route on from a handful of local and remote sources, and can render the
+// resulting snapshot as a table. See tribunus/catalog for the record shape
+// and docs/tribunus/data-sync.md for what each source does and does not
+// know.
 package main
 
 import (
@@ -36,7 +37,7 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println("tribunusctl - Tribunus model catalog data sync")
+	fmt.Println("tribunusctl - model data sync for the Tribunus graph router")
 	fmt.Println()
 	fmt.Println("Usage:")
 	fmt.Println("  tribunusctl sync [--sources=a,b] [--out=file] [--litellm-base=url] [--litellm-token-file=path] [--ollama=url]")

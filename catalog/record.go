@@ -1,9 +1,10 @@
-// Package catalog defines the Tribunus model catalog record and snapshot shape.
+// Package catalog defines the record and snapshot shape of the model data the
+// Tribunus graph router routes on.
 //
 // This package holds no I/O and no source-specific logic; it is the boundary
 // tribunus/internal/sources packages write into and tribunus/cmd/tribunusctl
 // serializes. It is also the only tribunus package praetor may import once
-// Tribunus grows a routing policy, so it stays free of praetor internal
+// the router itself is built, so it stays free of praetor internal
 // dependencies and free of os/net calls.
 package catalog
 

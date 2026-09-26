@@ -22,7 +22,7 @@ func TestSnapshotMarshalParse_Positive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseSnapshot() = %v, want nil", err)
 	}
-	if len(got.Records) != 1 || got.Records[0].ModelID != "cordana/auto" {
+	if len(got.Records) != 1 || got.Records[0].ModelID != "example/auto" {
 		t.Fatalf("ParseSnapshot() round-trip = %+v", got)
 	}
 }

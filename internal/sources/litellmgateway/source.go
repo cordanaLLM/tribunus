@@ -1,12 +1,11 @@
 // Package litellmgateway lists models a LiteLLM gateway exposes to the
 // caller's token via GET /v1/models.
 //
-// Verified live against https://litellm.ai.cauda.dev on 2026-09-18 with the
-// operator's agent token: HTTP 200, {"data":[{"id":"cordana/auto",
-// "object":"model","created":...,"owned_by":"openai"}, ...]}, 28 entries.
-// /model/info returned 403 for the same token, so this source cannot see
-// price/context metadata for gateway models in slice 1 (see design doc,
-// sources table) -- every record it produces says so via Record.Absent.
+// Verified live against a LiteLLM gateway on 2026-09-18: HTTP 200 for
+// GET /v1/models; /model/info returned 403 for an agent token, so this
+// source cannot see price/context metadata for gateway models in slice 1
+// (see design doc, sources table) -- every record it produces says so
+// via Record.Absent.
 //
 // The bearer token is read from a file and used only in the Authorization
 // header; it is never logged, wrapped into an error, or otherwise surfaced.

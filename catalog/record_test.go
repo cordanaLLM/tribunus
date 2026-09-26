@@ -7,7 +7,7 @@ import (
 
 func validRecord() Record {
 	return Record{
-		ModelID:    "cordana/auto",
+		ModelID:    "example/auto",
 		AccessPath: AccessGateway,
 		Provenance: Provenance{
 			Source:    "litellm-gateway",

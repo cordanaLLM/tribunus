@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/cordanaLLM/praetor/tribunus/catalog"
@@ -75,7 +76,7 @@ func TestRunSync_Positive(t *testing.T) {
 	defer ollama.Close()
 
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"data":[{"id":"cordana/auto","owned_by":"openai"}]}`)) //nolint:errcheck // test httptest server response; a write failure here would fail the test's own HTTP round trip, not silently corrupt anything
+		_, _ = w.Write([]byte(`{"data":[{"id":"example/auto","owned_by":"openai"}]}`)) //nolint:errcheck // test httptest server response; a write failure here would fail the test's own HTTP round trip, not silently corrupt anything
 	}))
 	defer gateway.Close()
 
@@ -166,5 +167,48 @@ func TestRunSync_Boundary(t *testing.T) {
 	}
 	if !strings.Contains(snap.SourceRuns[0].Detail, "--litellm-base") {
 		t.Fatalf("Detail = %q, want it to name the missing flags", snap.SourceRuns[0].Detail)
+	}
+}
+
+// TestRunSync_GatewayUnsetBase_ZeroRequests asserts that when --litellm-base is
+// unset, litellm-gateway is skipped and any gateway server receives zero requests.
+func TestRunSync_GatewayUnsetBase_ZeroRequests(t *testing.T) {
+	var requestCount int32
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requestCount, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer gateway.Close()
+
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("tok"), 0o600); err != nil {
+		t.Fatalf("setup token: %v", err)
+	}
+
+	out := filepath.Join(t.TempDir(), "out.json")
+	err := runSync([]string{
+		"--sources=litellm-gateway",
+		"--litellm-token-file=" + tokenFile,
+		"--out=" + out,
+	})
+	if err != nil {
+		t.Fatalf("runSync() = %v, want ok with skipped source", err)
+	}
+	if got := atomic.LoadInt32(&requestCount); got != 0 {
+		t.Fatalf("httptest server received %d requests, want 0", got)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+	snap, err := catalog.ParseSnapshot(data)
+	if err != nil {
+		t.Fatalf("ParseSnapshot() = %v", err)
+	}
+	if len(snap.SourceRuns) != 1 || snap.SourceRuns[0].Status != catalog.StatusSkip {
+		t.Fatalf("SourceRuns = %+v, want one skipped run", snap.SourceRuns)
+	}
+	if !strings.Contains(snap.SourceRuns[0].Detail, "--litellm-base") {
+		t.Fatalf("Detail = %q, want mention of --litellm-base", snap.SourceRuns[0].Detail)
 	}
 }

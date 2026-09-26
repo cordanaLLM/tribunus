@@ -30,7 +30,7 @@ func TestFetch_Positive(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"id":"cordana/auto","object":"model","created":1,"owned_by":"openai"},{"id":"cordana/chat","object":"model","created":1,"owned_by":"openai"}]}`)) //nolint:errcheck // test httptest server response; a write failure here would fail the test's own HTTP round trip, not silently corrupt anything
+		_, _ = w.Write([]byte(`{"data":[{"id":"example/auto","object":"model","created":1,"owned_by":"openai"},{"id":"example/chat","object":"model","created":1,"owned_by":"openai"}]}`)) //nolint:errcheck // test httptest server response; a write failure here would fail the test's own HTTP round trip, not silently corrupt anything
 	}))
 	defer server.Close()
 
@@ -54,6 +54,16 @@ func TestFetch_Positive(t *testing.T) {
 			t.Fatalf("AccessPath = %v, want gateway", rec.AccessPath)
 		}
 	}
+
+	t.Run("trailing slash handled", func(t *testing.T) {
+		resSlash := Fetch(context.Background(), server.URL+"/", tokenPath)
+		if resSlash.Status != catalog.StatusOK {
+			t.Fatalf("Status = %v, detail = %q, want ok with trailing slash", resSlash.Status, resSlash.Detail)
+		}
+		if resSlash.Count != 2 {
+			t.Fatalf("Count = %d, want 2", resSlash.Count)
+		}
+	})
 }
 
 // TestFetch_NeverLeaksToken asserts the token never appears verbatim in any
@@ -78,6 +88,17 @@ func TestFetch_NeverLeaksToken(t *testing.T) {
 		res := Fetch(context.Background(), server.URL, tokenPath)
 		if res.Status != catalog.StatusFail {
 			t.Fatalf("Status = %v, want fail for HTTP 403", res.Status)
+		}
+		if strings.Contains(res.Detail, secret) {
+			t.Fatalf("Detail leaked the token: %q", res.Detail)
+		}
+	})
+
+	t.Run("missing token file", func(t *testing.T) {
+		missingPath := filepath.Join(t.TempDir(), "missing-token-file")
+		res := Fetch(context.Background(), "http://example.invalid", missingPath)
+		if res.Status != catalog.StatusFail {
+			t.Fatalf("Status = %v, want fail for a missing token file", res.Status)
 		}
 		if strings.Contains(res.Detail, secret) {
 			t.Fatalf("Detail leaked the token: %q", res.Detail)

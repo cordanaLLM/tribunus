@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cordanaLLM/praetor/tribunus/catalog"
-	"github.com/cordanaLLM/praetor/tribunus/internal/sources/codexlocal"
-	"github.com/cordanaLLM/praetor/tribunus/internal/sources/litellmgateway"
-	"github.com/cordanaLLM/praetor/tribunus/internal/sources/ollamalocal"
-	"github.com/cordanaLLM/praetor/tribunus/internal/sources/publiccatalog"
+	"github.com/cordanaLLM/tribunus/catalog"
+	"github.com/cordanaLLM/tribunus/internal/sources/codexlocal"
+	"github.com/cordanaLLM/tribunus/internal/sources/litellmgateway"
+	"github.com/cordanaLLM/tribunus/internal/sources/ollamalocal"
+	"github.com/cordanaLLM/tribunus/internal/sources/publiccatalog"
 )
 
 // defaultSnapshotPath is where sync writes when --out is not given.

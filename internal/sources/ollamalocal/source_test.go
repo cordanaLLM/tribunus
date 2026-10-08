@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/cordanaLLM/praetor/tribunus/catalog"
+	"github.com/cordanaLLM/tribunus/catalog"
 )
 
 func newServer(t *testing.T, tags, ps string, psStatus int) *httptest.Server {

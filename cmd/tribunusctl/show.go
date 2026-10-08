@@ -9,7 +9,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/cordanaLLM/praetor/tribunus/catalog"
+	"github.com/cordanaLLM/tribunus/catalog"
 )
 
 // maxSnapshotReadBytes bounds how large a snapshot file show will read

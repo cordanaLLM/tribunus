@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cordanaLLM/praetor/tribunus/catalog"
+	"github.com/cordanaLLM/tribunus/catalog"
 )
 
 func writeTokenFile(t *testing.T, contents string) string {

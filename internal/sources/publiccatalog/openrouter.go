@@ -37,8 +37,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cordanaLLM/praetor/tribunus/catalog"
-	"github.com/cordanaLLM/praetor/tribunus/internal/sources/httpfetch"
+	"github.com/cordanaLLM/tribunus/catalog"
+	"github.com/cordanaLLM/tribunus/internal/sources/httpfetch"
 )
 
 // DefaultOpenRouterURL is the OpenRouter public models endpoint verified

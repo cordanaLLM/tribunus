@@ -1,0 +1,7 @@
+version = 1
+
+[[annotations]]
+path = ["**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 cordanaLLM contributors"
+SPDX-License-Identifier = "EUPL-1.2"

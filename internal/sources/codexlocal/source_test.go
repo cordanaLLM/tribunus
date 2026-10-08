@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cordanaLLM/praetor/tribunus/catalog"
+	"github.com/cordanaLLM/tribunus/catalog"
 )
 
 func writeSession(t *testing.T, dir, name, body string, modTime time.Time) string {

@@ -31,7 +31,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/cordanaLLM/praetor/tribunus/catalog"
+	"github.com/cordanaLLM/tribunus/catalog"
 )
 
 // SourceName identifies this source in Snapshot.SourceRuns and CLI flags.

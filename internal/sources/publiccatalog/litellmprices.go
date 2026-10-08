@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cordanaLLM/praetor/tribunus/catalog"
-	"github.com/cordanaLLM/praetor/tribunus/internal/sources/httpfetch"
+	"github.com/cordanaLLM/tribunus/catalog"
+	"github.com/cordanaLLM/tribunus/internal/sources/httpfetch"
 )
 
 // DefaultLiteLLMPriceMapURL is LiteLLM's published, unauthenticated model

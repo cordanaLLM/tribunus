@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cordanaLLM/praetor/tribunus/catalog"
+	"github.com/cordanaLLM/tribunus/catalog"
 )
 
 // failingWriter always refuses a Write, so a test can force renderTable's

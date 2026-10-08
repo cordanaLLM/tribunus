@@ -1,0 +1,54 @@
+# Agent onboarding
+
+Read this first when you work in `cordanaLLM/tribunus`.
+
+## What Tribunus is
+
+An agent runtime and task-graph engine for the cordanaLLM ecosystem. It reads its organisation (agents, routines, budgets) from files in Git, not from a database wizard.
+
+Planned stack:
+
+- Control plane: Go 1.27+ (`cmd/`, `internal/`).
+- Vector kernel: Rust (`crates/tribunus-graph`), SIMD skill matching.
+- Operator UI: Svelte 5 (`ui/`).
+
+Today only the model catalog exists (`catalog/`, `cmd/tribunusctl`, `internal/sources/`). The rest lands per milestone 0.2 to 0.5.
+
+## Rules for source code
+
+Tribunus code follows the HISS code standards that Praetor enforces:
+
+| Rule | Limit |
+| --- | --- |
+| HISS-01 | no recursion, call graph is a DAG |
+| HISS-02 | scalar bound on every loop, context timeout on every I/O |
+| HISS-04 | cyclomatic <= 10, cognitive <= 15, function <= 60 lines, statements <= 50 |
+| HISS-07 | no unchecked errors, no `panic` in library code |
+| HISS-10 | zero warnings from compiler, linter and formatter |
+
+## Runtime invariants
+
+The runtime has its own namespace, RT. These are never HISS rules.
+
+| Id | Invariant |
+| --- | --- |
+| RT-01 | deterministic edges: temperature 0 plus schema-validated output |
+| RT-02 | side-effect idempotency keys: `(task_id, action_type)` |
+| RT-03 | control-plane isolation |
+| RT-04 | event-sourced state |
+
+Each RT rule gets fixtures replayed in both directions, like HISS-20.
+
+## Models
+
+Call models only through router aliases such as `cordana/auto`, `cordana/light`, `cordana/coding`, `cordana/reasoning`. Never hard-code a concrete model. Accelerators are one dynamic pool: placement comes from measured free memory, never from a per-device map.
+
+## Files
+
+- `AGENTS.md`: canonical agent briefing (to be added; vendor files are compiled from it).
+- `REUSE.toml`, `LICENSES/`: licensing (EUPL-1.2).
+- `docs/`: these documents.
+
+## Workflow
+
+Run `go vet ./...` and `go test -race ./...` before every push. Do not add a relational database or a setup wizard; state flows through the event log.

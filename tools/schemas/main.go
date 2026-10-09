@@ -61,7 +61,7 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	mode := flag.String("mode", "refresh", "refresh or check")
+	mode := flag.String("mode", "refresh", "refresh, repin or check")
 	root := flag.String("root", ".", "repository root")
 	out := flag.String("out", ".", "output root for refresh")
 	flag.Parse()
@@ -72,7 +72,9 @@ func run(ctx context.Context) error {
 	}
 	switch *mode {
 	case "refresh":
-		return refresh(ctx, manifest, *out)
+		return refresh(ctx, manifest, *out, false)
+	case "repin":
+		return refresh(ctx, manifest, *out, true)
 	case "check":
 		return check(ctx, manifest, *root)
 	default:
@@ -92,13 +94,21 @@ func readManifest(root string) (schemaManifest, error) {
 	return manifest, nil
 }
 
-func refresh(ctx context.Context, manifest schemaManifest, outRoot string) error {
+func refresh(ctx context.Context, manifest schemaManifest, outRoot string, repin bool) error {
 	for i := 0; i < len(manifest.Sources); i++ {
-		source := manifest.Sources[i]
-		full, err := fetchPinned(ctx, source)
+		full, err := fetchPinned(ctx, manifest.Sources[i])
 		if err != nil {
 			return err
 		}
+		old := manifest.Sources[i].FullDocumentSHA256
+		changed, err := recordDigest(&manifest.Sources[i], full, repin)
+		if err != nil {
+			return err
+		}
+		if changed {
+			fmt.Printf("%s: full_document_sha256 %s -> %s at %s\n", manifest.Sources[i].ID, old, manifest.Sources[i].FullDocumentSHA256, manifest.Sources[i].PinnedRevision)
+		}
+		source := manifest.Sources[i]
 		fragments, err := generateFragments(source, full)
 		if err != nil {
 			return err
@@ -118,7 +128,7 @@ func check(ctx context.Context, manifest schemaManifest, root string) error {
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
 	}
-	if err := refresh(ctx, manifest, tmp); err != nil {
+	if err := refresh(ctx, manifest, tmp, false); err != nil {
 		return err
 	}
 	return compareFragments(manifest, root, tmp)
@@ -144,9 +154,6 @@ func fetchPinned(ctx context.Context, source schemaSource) ([]byte, error) {
 	}
 	if len(body) > maxFetchBytes {
 		return nil, fmt.Errorf("%s: response exceeds %d bytes", source.ID, maxFetchBytes)
-	}
-	if got := shaHex(body); got != source.FullDocumentSHA256 {
-		return nil, fmt.Errorf("%s: sha256 %s, want %s", source.ID, got, source.FullDocumentSHA256)
 	}
 	return body, nil
 }
@@ -955,4 +962,20 @@ func joinSections(sections ...string) string {
 func shaHex(body []byte) string {
 	sum := sha256.Sum256(body)
 	return hex.EncodeToString(sum[:])
+}
+
+// recordDigest compares the fetched document with the digest the manifest
+// records. refresh and check refuse a mismatch. repin, run after a pin moved,
+// records the new digest instead and reports that it changed, so the change
+// shows up in the manifest diff a reviewer reads.
+func recordDigest(source *schemaSource, full []byte, repin bool) (bool, error) {
+	got := shaHex(full)
+	if got == source.FullDocumentSHA256 {
+		return false, nil
+	}
+	if !repin {
+		return false, fmt.Errorf("%s: sha256 %s, want %s (after a pin moved, run make schemas-repin)", source.ID, got, source.FullDocumentSHA256)
+	}
+	source.FullDocumentSHA256 = got
+	return true, nil
 }

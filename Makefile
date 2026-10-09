@@ -35,9 +35,13 @@ docs-figures:
 	@node tools/figures/build.mjs sources
 # END praetor documentation gate
 
-.PHONY: schemas-refresh schemas-check
+.PHONY: schemas-refresh schemas-repin schemas-check
 schemas-refresh:
 	@go run -tags schemasrefresh ./tools/schemas -mode=refresh -root=. -out=.
+
+# After Renovate moves a pin: record the new documents' digests and regenerate the fragments.
+schemas-repin:
+	@go run -tags schemasrefresh ./tools/schemas -mode=repin -root=. -out=.
 
 schemas-check:
 	@go run -tags schemasrefresh ./tools/schemas -mode=check -root=.

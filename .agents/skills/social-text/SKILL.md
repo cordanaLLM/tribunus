@@ -10,6 +10,8 @@ metadata:
 
 # Social register for the forge (`social-text`)
 
+Adapted from [i-have-adhd](https://github.com/ayghri/i-have-adhd) by Ayoub Ghriss and [contributors](https://github.com/ayghri/i-have-adhd/graphs/contributors) via adhd-format; MIT licence.
+
 Use this skill for forge text a person reads: issue, pull-request body, review comment, commit body, changelog fragment title. = `social` register of text-register policy (`register:` in `.standards.yaml`; "Text Register" section of AGENTS.md). Agent-to-agent text -> `internal` register, documentation -> `docs` register; neither uses this skill.
 
 ## Inherited from adhd-format
@@ -25,7 +27,7 @@ Overrides rest of adhd-format for humans: at most 1 GitHub alert per text; no Me
 ## Voice
 
 - Full sentences, plain words. Maintainer must act on text without opening diff.
-- One idea per paragraph or bullet. Name file and line (`internal/config/register.go:42`) when reader will look there.
+- One idea per paragraph or bullet. Name file and line (`.agents/skills/caveman/SKILL.md:42`) when reader will look there.
 - Say 4 things, then stop: what changed, why, how verified, what reviewer must decide. Pull-request summary stays around 250 words before evidence links.
 - No meta-commentary (`as requested`, `based on my analysis`), no hedging filler, no code restatement diff already shows.
 - Quote operator paraphrased in neutral English; never verbatim colloquial line.
@@ -37,11 +39,11 @@ Link or attach evidence; never paste beyond inline bound (`register.evidence`, d
 
 ## Standards this register does not change
 
-**Pull-request body.** Fill `.github/pull_request_template.md` exactly as shipped. Social register governs only prose under `## Summary of Changes`. Sections 1-4 (HISS-16 checklist, 3D-testing verification, context-integrity checklist, receipt) = filled, never rewritten, reordered or removed. Receipt goes inside fence labelled `receipt`; unlabelled fence not read by validator.
+**Pull-request body.** Fill the pull request template exactly as shipped. Social register governs only prose under `## Summary of Changes`. Sections 1-4 (HISS-16 checklist, 3D-testing verification, context-integrity checklist, receipt) = filled, never rewritten, reordered or removed. Receipt goes inside fence labelled `receipt`; unlabelled fence not read by validator.
 
-**Commit message.** Subject stays conventional commit, `type(scope): subject`, `type` one of `feat | fix | docs | style | refactor | perf | test | build | ci | chore | revert`. Commit-msg hook (`.config/lefthook/scripts/hooks.py`) rejects other shape, requires `Signed-off-by` trailer. Keep subject near 72 characters; hook does not measure it, reader's terminal does. Breaking change carries `!` in subject, `Migration:` footer (HISS-14). Only body written in this register: why first, then what, wrapped at 72 columns.
+**Commit message.** Subject stays conventional commit, `type(scope): subject`, `type` one of `feat | fix | docs | style | refactor | perf | test | build | ci | chore | revert`. Commit-msg hook rejects other shape, requires `Signed-off-by` trailer. Keep subject near 72 characters; hook does not measure it, reader's terminal does. Breaking change carries `!` in subject, `Migration:` footer (HISS-14). Only body written in this register: why first, then what, wrapped at 72 columns.
 
-**Changelog.** Never edit `CHANGELOG.md` directly. Write one fragment `changelog.d/<date>-<slug>.yaml` with `type` from `added | changed | deprecated | removed | fixed | security`, one-sentence imperative `title`, optional `issue`, `breaking: true` when applicable. Register shapes title only.
+**Changelog.** Never edit `CHANGELOG.md` directly. Write one fragment `<date>-<slug>.yaml` in the changelog fragment directory with `type` from `added | changed | deprecated | removed | fixed | security`, one-sentence imperative `title`, optional `issue`, `breaking: true` when applicable. Register shapes title only.
 
 **Issue.** Title = defect in one sentence. Body: observed, expected, reproduction commands, evidence pointers. Search open issues, pull requests before filing (AGENTS.md rule 5).
 

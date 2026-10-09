@@ -65,6 +65,36 @@ Operator view built with runes (`$state`, `$derived`, `$effect`) and snippets.
 
 RT rules are separate from the HISS code standards. Source code in this repository also meets HISS-01, -02, -04 (function limit 60 lines), -07 and -10.
 
+### RT-03: control-plane isolation
+
+The control plane is the Go process that owns the task graph, the event log, the broker, budgets and the operator's credentials. Task execution is everything that runs a unit of work: the sandboxed runner ([#25](https://github.com/cordanaLLM/tribunus/issues/25)), the agents it starts and the commands they run. RT-03 holds when task execution can affect the control plane only by sending messages it validates. A task never gets the control plane's process, credentials, writable paths or network reach:
+
+| Boundary | The control plane never shares | A task gets instead |
+| --- | --- | --- |
+| Process | its process, process group or session; signals and `ptrace` access to it; its memory and open file descriptors | a separate process tree, started by the runner, that reports through the broker |
+| Credentials | its tokens and keys (gateway admin, forge, receipt signing), its environment and its credential files | an environment built from an allowlist, plus a short-lived credential minted for that task and scoped to the router aliases and forge actions the task declares |
+| Writable paths | the event log, the graph store, config, its working tree and `.git`, credential files and every path outside the task workspace | one writable workspace per task and read-only views of declared inputs; paths resolve inside them without symlink escape |
+| Network reach | its own listeners (API, MCP, metrics) and loopback services it did not grant | egress to the destinations the task declares, such as the gateway behind a router alias |
+
+A task's results reach the control plane as broker messages, and the control plane validates them before it appends to the event log. The task never writes control-plane state directly. A violation is refused, and the refusal is recorded as an event naming the boundary, so the run fails loudly instead of degrading.
+
+#### RT-03 fixtures
+
+RT-03 is proven by fixtures replayed in both directions, as HISS-20 asks of every enforcement claim. Each fixture is one case file:
+
+| Field | Meaning |
+| --- | --- |
+| `id` | a stable name, such as `rt03-credentials-env-leak` |
+| `boundary` | `process`, `credentials`, `paths` or `network` |
+| `direction` | `violation` (the attempt must be refused) or `compliant` (the action must succeed) |
+| `task` | the task spec under test: environment allowlist, mounts, declared egress, minted credential scope |
+| `attempt` | the one action the task performs: read a variable or file, write a path, connect to a destination, or signal a process |
+| `expect` | `refused` or `allowed`, and for `refused` the event the control plane must record (type `rt03.violation`, the boundary, the task id) |
+
+Every boundary has at least one `violation` and one `compliant` case. The checker fails when a violation is allowed and when a compliant action is refused, so neither an open sandbox nor one that blocks everything passes. A fixture is trusted only after it is shown failing against a runner without the rule (rule 13).
+
+The definition and this format land first. The runner and the checker that replays the fixtures follow with the sandboxed runner (#25), on top of config (#31) and the event log (#32).
+
 ## Models and accelerators
 
 Every model call goes through a router alias. No concrete model name appears in code or config. Accelerators form one dynamic pool; an arbiter places models from measured free memory. Work is admitted only when the resolved model reports ready.

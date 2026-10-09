@@ -1,4 +1,0 @@
-type: added
-title: Version the catalog snapshot with schema_version 1 and publish its JSON Schema
-issue: "29"
-breaking: true

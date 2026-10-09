@@ -1,4 +1,0 @@
-type: added
-title: Publish tribunusctl binaries, the snapshot schema, CycloneDX SBOMs, signed checksums and build provenance for every release tag
-issue: "29"
-breaking: false

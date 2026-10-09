@@ -1,4 +1,0 @@
-type: fixed
-title: Refuse silent fallback in catalog source collection and surface degraded source runs explicitly
-issue: "27"
-breaking: false

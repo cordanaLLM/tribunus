@@ -1,0 +1,18 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/cordanaLLM/tribunus/blob/main/security/vex/go.openvex.json",
+  "author": "Tribunus maintainers",
+  "timestamp": "2026-10-09T02:03:44Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "GO-2026-5932"
+      },
+      "last_updated": "2026-10-09T02:03:44Z",
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "The advisory covers golang.org/x/crypto/openpgp, which no Tribunus build contains: go list -deps ./... names only golang.org/x/crypto/sha3 from golang.org/x/crypto, required through golusoris httpx/client and go-playground/validator. govulncheck reports the module as required but not called."
+    }
+  ]
+}

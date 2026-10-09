@@ -1,0 +1,43 @@
+name: Upstream schemas
+
+# Fetches the pinned upstream documents and checks that the committed schema
+# fragments still match what they give. It runs only when the pins, the
+# fragments or their extractor change: nothing else can change its answer.
+# Because the trigger is path-filtered, it is not a required check, so an
+# upstream outage cannot block unrelated merges. A hand-edited fragment is
+# still refused on every pull request by the digest test in go test.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'internal/sources/upstream-schemas.json'
+      - 'internal/sources/*/testdata/upstream/**'
+      - 'tools/schemas/**'
+      - 'Makefile'
+      - '.github/workflows/schemas.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'internal/sources/upstream-schemas.json'
+      - 'internal/sources/*/testdata/upstream/**'
+      - 'tools/schemas/**'
+      - 'Makefile'
+      - '.github/workflows/schemas.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  schemas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: 'go.mod'
+      - name: Upstream schema fragments match their pinned documents
+        run: make schemas-check

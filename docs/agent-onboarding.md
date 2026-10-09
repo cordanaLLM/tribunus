@@ -48,6 +48,7 @@ Call models only through router aliases such as `cordana/auto`, `cordana/light`,
 ## Files
 
 - `AGENTS.md`: canonical agent briefing, rendered by Praetor; the vendor files are compiled from it.
+- `docs/config.schema.json`: published Tribunus config schema; `internal/config.Load` validates files against the embedded byte-identical copy.
 - `REUSE.toml`, `LICENSES/`: licensing (EUPL-1.2).
 - `docs/`: these documents.
 

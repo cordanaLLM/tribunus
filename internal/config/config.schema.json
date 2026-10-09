@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cordanallm.example/tribunus/config.schema.json",
+  "title": "Tribunus configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "graph": {
+      "type": "object",
+      "default": {
+        "max_depth": 12
+      },
+      "additionalProperties": false,
+      "properties": {
+        "max_depth": {
+          "type": "integer",
+          "default": 12,
+          "minimum": 1,
+          "maximum": 64
+        }
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "default": {
+        "default": {
+          "tokens": 200000,
+          "wall_clock_seconds": 3600
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "type": "object",
+          "default": {
+            "tokens": 200000,
+            "wall_clock_seconds": 3600
+          },
+          "additionalProperties": false,
+          "properties": {
+            "tokens": {
+              "type": "integer",
+              "default": 200000,
+              "minimum": 0,
+              "maximum": 10000000
+            },
+            "wall_clock_seconds": {
+              "type": "integer",
+              "default": 3600,
+              "minimum": 0,
+              "maximum": 86400
+            }
+          }
+        }
+      }
+    },
+    "jobs": {
+      "type": "array",
+      "default": [],
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "schedule",
+          "router_alias"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "default": "",
+            "pattern": "^[a-z][a-z0-9-]{0,62}$"
+          },
+          "schedule": {
+            "type": "string",
+            "default": "",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "router_alias": {
+            "type": "string",
+            "default": "cordana/auto",
+            "pattern": "^cordana/[a-z][a-z0-9-]*$"
+          }
+        }
+      }
+    },
+    "watches": {
+      "type": "array",
+      "default": [],
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "trigger",
+          "router_alias"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "default": "",
+            "pattern": "^[a-z][a-z0-9-]{0,62}$"
+          },
+          "trigger": {
+            "type": "string",
+            "default": "",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "router_alias": {
+            "type": "string",
+            "default": "cordana/auto",
+            "pattern": "^cordana/[a-z][a-z0-9-]*$"
+          }
+        }
+      }
+    },
+    "router": {
+      "type": "object",
+      "default": {
+        "aliases": [
+          "cordana/auto"
+        ]
+      },
+      "additionalProperties": false,
+      "properties": {
+        "aliases": {
+          "type": "array",
+          "default": [
+            "cordana/auto"
+          ],
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^cordana/[a-z][a-z0-9-]*$"
+          }
+        }
+      }
+    },
+    "admission": {
+      "type": "object",
+      "default": {
+        "probe": {
+          "timeout_seconds": 30,
+          "interval_seconds": 5,
+          "ready_threshold": 2
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "probe": {
+          "type": "object",
+          "default": {
+            "timeout_seconds": 30,
+            "interval_seconds": 5,
+            "ready_threshold": 2
+          },
+          "additionalProperties": false,
+          "properties": {
+            "timeout_seconds": {
+              "type": "integer",
+              "default": 30,
+              "minimum": 1,
+              "maximum": 300
+            },
+            "interval_seconds": {
+              "type": "integer",
+              "default": 5,
+              "minimum": 1,
+              "maximum": 60
+            },
+            "ready_threshold": {
+              "type": "integer",
+              "default": 2,
+              "minimum": 1,
+              "maximum": 10
+            }
+          }
+        }
+      }
+    }
+  }
+}

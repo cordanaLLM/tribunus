@@ -62,6 +62,9 @@ func readSnapshotFile(path string) (snap catalog.Snapshot, err error) {
 
 	snap, err = catalog.ParseSnapshot(data)
 	if err != nil {
+		if strings.Contains(err.Error(), "schema_version") {
+			return catalog.Snapshot{}, fmt.Errorf("parse snapshot %s: %w; re-run tribunusctl sync", path, err)
+		}
 		return catalog.Snapshot{}, fmt.Errorf("parse snapshot %s: %w", path, err)
 	}
 	return snap, nil

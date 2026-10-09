@@ -39,6 +39,12 @@ go vet ./...
 go test -race ./...
 ```
 
+## CLI usage
+
+`tribunusctl sync` writes a versioned catalog snapshot with `schema_version: 1`.
+The contract is described by `catalog/snapshot.schema.json`, and
+`tribunusctl schema` prints the embedded copy for downstream pin checks.
+
 ## Documents
 
 - [Agent onboarding](docs/agent-onboarding.md)

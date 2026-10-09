@@ -25,4 +25,23 @@ func TestHelpOutputFramesTribunusAsGraphRouter(t *testing.T) {
 	if !bytes.Contains(output, []byte("\nUsage:\n")) {
 		t.Fatalf("tribunusctl --help lost usage section: %q", output)
 	}
+	if !bytes.Contains(output, []byte("tribunusctl schema")) {
+		t.Fatalf("tribunusctl --help missing schema command: %q", output)
+	}
+}
+
+func TestSchemaCommandPrintsSnapshotSchema(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	output, err := exec.CommandContext(ctx, "go", "run", ".", "schema").CombinedOutput()
+	if err != nil {
+		t.Fatalf("tribunusctl schema: %v\n%s", err, output)
+	}
+	if !bytes.Contains(output, []byte(`"schema_version"`)) {
+		t.Fatalf("tribunusctl schema output missing schema_version: %s", output)
+	}
+	if !bytes.Contains(output, []byte(`"https://github.com/cordanaLLM/tribunus/catalog/snapshot.schema.json"`)) {
+		t.Fatalf("tribunusctl schema output missing $id: %s", output)
+	}
 }

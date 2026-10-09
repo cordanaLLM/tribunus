@@ -23,6 +23,8 @@ func main() {
 		err = runSync(os.Args[2:])
 	case "show":
 		err = runShow(os.Args[2:])
+	case "schema":
+		err = runSchema(os.Stdout)
 	case "help", "-h", "--help":
 		printUsage()
 		return
@@ -43,4 +45,5 @@ func printUsage() {
 	fmt.Println("Usage:")
 	fmt.Println("  tribunusctl sync [--sources=a,b] [--out=file] [--litellm-base=url] [--litellm-token-file=path] [--ollama=url]")
 	fmt.Println("  tribunusctl show [--in=file]")
+	fmt.Println("  tribunusctl schema")
 }

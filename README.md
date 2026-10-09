@@ -51,6 +51,7 @@ Releases, their signed artefacts and how to verify them are described in [Releas
 
 - [Agent onboarding](docs/agent-onboarding.md)
 - [Roadmap](docs/roadmap.md)
+- [Catalog data sync](docs/data-sync.md): installing `tribunusctl`, the sources and their limits
 - [Releasing](docs/releasing.md)
 - [Architecture](docs/architecture-v2.md)
 - [Repository layout](docs/repository-layout-v2.md)

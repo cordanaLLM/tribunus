@@ -52,6 +52,7 @@ docs_surfaces:
     docs:
       - "README.md"
       - "docs/agent-onboarding.md"
+      - "docs/data-sync.md"
   - name: "model catalog and sources"
     paths:
       - "catalog/*.go"
@@ -62,3 +63,4 @@ docs_surfaces:
     docs:
       - "docs/agent-onboarding.md"
       - "docs/architecture-v2.md"
+      - "docs/data-sync.md"

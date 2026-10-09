@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 const sampleOpenRouter = `{"data":[{"id":"openai/gpt-4","name":"GPT-4","context_length":8192,"architecture":{"input_modalities":["text"],"output_modalities":["text"]},"pricing":{"prompt":"0.00003","completion":"0.00006"}},{"id":"","name":"skip me, no id"}]}`
@@ -59,7 +60,7 @@ func TestFetchOpenRouter_Negative(t *testing.T) {
 // read: it must be dropped as absent, not crash or fabricate a price.
 func TestFetchOpenRouter_Boundary(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"data":[{"id":"weird/model","pricing":{"prompt":"not-a-number","completion":""}}]}`)) //nolint:errcheck // test httptest server response; a write failure here would fail the test's own HTTP round trip, not silently corrupt anything
+		_, _ = w.Write([]byte(`{"data":[{"id":"vendor-a/model-1","pricing":{"prompt":"not-a-number","completion":""}}]}`)) //nolint:errcheck // test httptest server response; a write failure here would fail the test's own HTTP round trip, not silently corrupt anything
 	}))
 	defer server.Close()
 
@@ -72,5 +73,95 @@ func TestFetchOpenRouter_Boundary(t *testing.T) {
 	}
 	if records[0].PriceInPerM != nil || records[0].PriceOutPerM != nil {
 		t.Fatalf("PriceInPerM/PriceOutPerM = %v/%v, want both nil for unparsable pricing", records[0].PriceInPerM, records[0].PriceOutPerM)
+	}
+	if records[0].Absent["price_in_per_m"] == "" || records[0].Absent["price_out_per_m"] == "" {
+		t.Fatalf("Absent = %+v, want reasons for both missing prices", records[0].Absent)
+	}
+	if records[0].Absent["context_window"] == "" {
+		t.Fatalf("Absent = %+v, want a reason for missing context_window", records[0].Absent)
+	}
+}
+
+func TestFetchOpenRouter_VariablePriceIsAbsent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"id":"vendor-a/model-1","context_length":1024,"pricing":{"prompt":"-1","completion":"-1"}}]}`)) //nolint:errcheck // test server response
+	}))
+	defer server.Close()
+
+	records, err := fetchOpenRouter(context.Background(), server.URL)
+	if err != nil {
+		t.Fatalf("fetchOpenRouter() = %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("got %d records, want 1", len(records))
+	}
+	if records[0].PriceInPerM != nil || records[0].PriceOutPerM != nil {
+		t.Fatalf("prices = %v/%v, want nil for variable price", records[0].PriceInPerM, records[0].PriceOutPerM)
+	}
+	if records[0].Absent["price_in_per_m"] != "variable price" {
+		t.Fatalf("Absent[price_in_per_m] = %q, want variable price", records[0].Absent["price_in_per_m"])
+	}
+	if records[0].Absent["price_out_per_m"] != "variable price" {
+		t.Fatalf("Absent[price_out_per_m] = %q, want variable price", records[0].Absent["price_out_per_m"])
+	}
+}
+
+func TestOpenRouterRecord_AbsentReasons(t *testing.T) {
+	rec, err := openRouterRecord(openRouterEntry{
+		ID: "vendor-a/model-1",
+		Pricing: openRouterPricing{
+			Prompt:     "not-a-number",
+			Completion: "",
+		},
+	}, time.Unix(1, 0).UTC())
+	if err != nil {
+		t.Fatalf("openRouterRecord() = %v", err)
+	}
+	if rec.Absent["context_window"] == "" {
+		t.Fatalf("Absent = %+v, want context_window reason", rec.Absent)
+	}
+	if rec.Absent["price_in_per_m"] == "" || rec.Absent["price_out_per_m"] == "" {
+		t.Fatalf("Absent = %+v, want price reasons", rec.Absent)
+	}
+}
+
+func TestOpenRouterRecord_VariablePriceIsAbsent(t *testing.T) {
+	rec, err := openRouterRecord(openRouterEntry{
+		ID:            "vendor-a/model-1",
+		ContextLength: 1024,
+		Pricing: openRouterPricing{
+			Prompt:     "-1",
+			Completion: "-1",
+		},
+	}, time.Unix(1, 0).UTC())
+	if err != nil {
+		t.Fatalf("openRouterRecord() = %v", err)
+	}
+	if rec.PriceInPerM != nil || rec.PriceOutPerM != nil {
+		t.Fatalf("prices = %v/%v, want nil", rec.PriceInPerM, rec.PriceOutPerM)
+	}
+	if rec.Absent["price_in_per_m"] != "variable price" || rec.Absent["price_out_per_m"] != "variable price" {
+		t.Fatalf("Absent = %+v, want variable price reasons", rec.Absent)
+	}
+}
+
+func TestFetchOpenRouter_OversizedModalitiesRejectOnlyThatEntry(t *testing.T) {
+	mods := `"text","image","audio","video","file","a6","a7","a8","a9","a10","a11","a12","a13","a14","a15","a16","a17"`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[` + //nolint:errcheck // test server response
+			`{"id":"vendor-a/model-1","architecture":{"input_modalities":[` + mods + `]}},` +
+			`{"id":"vendor-a/model-2","context_length":1024,"architecture":{"input_modalities":["text"]}}]}`))
+	}))
+	defer server.Close()
+
+	res, err := fetchOpenRouterWithReport(context.Background(), server.URL)
+	if err != nil {
+		t.Fatalf("fetchOpenRouterWithReport() = %v, want the oversized entry rejected and the rest kept", err)
+	}
+	if len(res.Records) != 1 || res.Records[0].ModelID != "vendor-a/model-2" {
+		t.Fatalf("records = %+v, want only vendor-a/model-2", res.Records)
+	}
+	if res.Rejected != 1 {
+		t.Fatalf("Rejected = %d, want 1", res.Rejected)
 	}
 }

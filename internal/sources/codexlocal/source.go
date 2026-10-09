@@ -38,6 +38,9 @@ import (
 const SourceName = "codex-local"
 
 const (
+	// MaxRecords is the maximum number of records this source can contribute
+	// to one snapshot.
+	MaxRecords = 1
 	// maxSessionFilesScanned bounds the directory walk (HISS-02).
 	maxSessionFilesScanned = 20000
 	// maxSessionFileBytes bounds how much of the newest session file Fetch
@@ -94,7 +97,10 @@ func Fetch(ctx context.Context, sessionsDir string) Result {
 		return Result{Status: catalog.StatusSkip, Detail: fmt.Sprintf("newest session %s rate_limits carries no primary window", newest)}
 	}
 
-	rec := toRecord(*rl, time.Now().UTC())
+	rec, recErr := toRecord(*rl, time.Now().UTC())
+	if recErr != nil {
+		return Result{Status: catalog.StatusFail, Detail: recErr.Error()}
+	}
 	return Result{Records: []catalog.Record{rec}, Status: catalog.StatusOK, Count: 1}
 }
 
@@ -251,10 +257,10 @@ func parseRateLimitsLine(raw []byte) *rateLimits {
 // describing the Codex CLI subscription's usage window. There is no single
 // "model" behind a CLI-wide rate limit, so the record id names the CLI and
 // the limit bucket it measured.
-func toRecord(rl rateLimits, fetchedAt time.Time) catalog.Record {
+func toRecord(rl rateLimits, fetchedAt time.Time) (catalog.Record, error) {
 	limitID := rl.LimitID
 	if limitID == "" {
-		limitID = "unknown"
+		return catalog.Record{}, fmt.Errorf("codex-local: rate_limits.limit_id is empty")
 	}
 	rec := catalog.Record{
 		ModelID:    "codex-cli/" + limitID,
@@ -287,5 +293,5 @@ func toRecord(rl rateLimits, fetchedAt time.Time) catalog.Record {
 	if rl.PlanType != "" {
 		rec.Capabilities = []string{"plan:" + rl.PlanType}
 	}
-	return rec
+	return rec, nil
 }

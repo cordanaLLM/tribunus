@@ -13,6 +13,10 @@ import (
 // package doc for why they are not reported as separate CLI sources.
 const SourceName = "public-catalog"
 
+// MaxRecords is the maximum number of records this source can contribute to
+// one snapshot.
+const MaxRecords = MaxOpenRouterRecords + MaxLiteLLMPriceRecords
+
 // Result is one Fetch attempt's outcome.
 type Result struct {
 	Records []catalog.Record
@@ -30,20 +34,20 @@ func Fetch(ctx context.Context, openRouterURL, liteLLMPriceMapURL string) Result
 	var records []catalog.Record
 	var notes []string
 
-	orRecords, orErr := fetchOpenRouter(ctx, openRouterURL)
+	orResult, orErr := fetchOpenRouterWithReport(ctx, openRouterURL)
 	if orErr != nil {
 		notes = append(notes, "openrouter: fail: "+orErr.Error())
 	} else {
-		notes = append(notes, fmt.Sprintf("openrouter: ok (%d)", len(orRecords)))
-		records = append(records, orRecords...)
+		notes = append(notes, openRouterDetail(orResult))
+		records = append(records, orResult.Records...)
 	}
 
-	llmRecords, llmErr := fetchLiteLLMPrices(ctx, liteLLMPriceMapURL)
+	llmResult, llmErr := fetchLiteLLMPricesWithReport(ctx, liteLLMPriceMapURL)
 	if llmErr != nil {
 		notes = append(notes, "litellm-prices: fail: "+llmErr.Error())
 	} else {
-		notes = append(notes, fmt.Sprintf("litellm-prices: ok (%d)", len(llmRecords)))
-		records = append(records, llmRecords...)
+		notes = append(notes, liteLLMDetail(llmResult))
+		records = append(records, llmResult.Records...)
 	}
 
 	detail := strings.Join(notes, "; ")
@@ -54,4 +58,21 @@ func Fetch(ctx context.Context, openRouterURL, liteLLMPriceMapURL string) Result
 		return Result{Status: catalog.StatusSkip, Detail: detail}
 	}
 	return Result{Records: records, Status: catalog.StatusOK, Count: len(records), Detail: detail}
+}
+
+func openRouterDetail(res openRouterResult) string {
+	if res.Rejected == 0 {
+		return fmt.Sprintf("openrouter: ok (%d)", len(res.Records))
+	}
+	if res.FirstReject == "" {
+		return fmt.Sprintf("openrouter: ok (%d, rejected=%d)", len(res.Records), res.Rejected)
+	}
+	return fmt.Sprintf("openrouter: ok (%d, rejected=%d, first: %s)", len(res.Records), res.Rejected, res.FirstReject)
+}
+
+func liteLLMDetail(res liteLLMPriceResult) string {
+	if res.Malformed == 0 {
+		return fmt.Sprintf("litellm-prices: ok (%d)", len(res.Records))
+	}
+	return fmt.Sprintf("litellm-prices: ok (%d, malformed=%d)", len(res.Records), res.Malformed)
 }

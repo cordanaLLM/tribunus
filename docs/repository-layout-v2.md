@@ -30,9 +30,10 @@ tribunus/
 ## Build targets (planned)
 
 ```makefile
+.RECIPEPREFIX = >
 verify-all: lint test reuse
 build:
-	go build -o bin/tribunusctl ./cmd/tribunusctl
-	cargo build --release --workspace
-	npm run --prefix ui build
+> go build -o bin/tribunusctl ./cmd/tribunusctl
+> cargo build --release --workspace
+> npm run --prefix ui build
 ```

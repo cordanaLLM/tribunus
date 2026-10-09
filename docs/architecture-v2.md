@@ -4,7 +4,7 @@ Status: design draft. Only the catalog exists in code today.
 
 ## Overview
 
-```
+```text
 [ Svelte 5 UI ] <--(SSE / REST / JSON-RPC)--> [ Go control plane ]
                                                   - task graph and state
                                                   - event bus

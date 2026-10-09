@@ -45,3 +45,16 @@ func TestSchemaCommandPrintsSnapshotSchema(t *testing.T) {
 		t.Fatalf("tribunusctl schema output missing $id: %s", output)
 	}
 }
+
+func TestVersionOutputUsesInjectedVersion(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	output, err := exec.CommandContext(ctx, "go", "run", "-ldflags=-X main.version=v9.8.7", ".", "version").CombinedOutput()
+	if err != nil {
+		t.Fatalf("tribunusctl version: %v\n%s", err, output)
+	}
+	if want := []byte("v9.8.7\n"); !bytes.Equal(output, want) {
+		t.Fatalf("tribunusctl version = %q, want %q", output, want)
+	}
+}

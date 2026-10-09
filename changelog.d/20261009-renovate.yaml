@@ -1,0 +1,4 @@
+type: added
+title: Configure Renovate and exclude Praetor-managed assets from direct dependency updates
+issue: "18"
+breaking: false

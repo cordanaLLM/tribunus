@@ -1,0 +1,77 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: tribunusctl
+
+builds:
+  - id: tribunusctl
+    main: ./cmd/tribunusctl
+    binary: tribunusctl
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: tribunusctl
+    ids:
+      - tribunusctl
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "tribunusctl_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - LICENSES/*
+
+sboms:
+  - id: cyclonedx
+    artifacts: archive
+    documents:
+      - "${artifact}.cyclonedx.json"
+    cmd: syft
+    args: ["$artifact", "--output", "cyclonedx-json=${document}"]
+
+signs:
+  - id: cosign-keyless
+    cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args:
+      - "sign-blob"
+      - "--yes"
+      - "--bundle=${signature}"
+      - "${artifact}"
+    artifacts: checksum
+
+checksum:
+  name_template: "checksums.txt"
+
+# The snapshot schema ships beside the binaries, so Praetor can pin the exact
+# contract a release writes (catalog/snapshot.schema.json, version 1).
+release:
+  draft: true
+  replace_existing_draft: true
+  extra_files:
+    - glob: catalog/snapshot.schema.json
+      name_template: snapshot.schema.json
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"

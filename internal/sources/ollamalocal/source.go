@@ -55,6 +55,9 @@ type modelDetails struct {
 	ContextLength     int64  `json:"context_length"`
 }
 
+// tagEntry is hand-written from Ollama docs/api.md at
+// c2b7368d4156656ddb9a23b43f721a841b9c23e0, checked 2026-10-09; no published
+// JSON schema was found for /api/tags.
 type tagEntry struct {
 	Name         string       `json:"name"`
 	Details      modelDetails `json:"details"`
@@ -65,6 +68,9 @@ type tagsResponse struct {
 	Models []tagEntry `json:"models"`
 }
 
+// psEntry is hand-written from Ollama docs/api.md at
+// c2b7368d4156656ddb9a23b43f721a841b9c23e0, checked 2026-10-09; no published
+// JSON schema was found for /api/ps.
 type psEntry struct {
 	Name string `json:"name"`
 }
@@ -99,6 +105,7 @@ func Fetch(ctx context.Context, endpoint string) Result {
 	detail := ""
 	if psErr != nil {
 		detail = fmt.Sprintf("api/ps unavailable, loaded-state omitted: %v", psErr)
+		return Result{Records: records, Status: catalog.StatusDegraded, Count: len(records), Detail: detail}
 	}
 	return Result{Records: records, Status: catalog.StatusOK, Count: len(records), Detail: detail}
 }
@@ -114,6 +121,17 @@ func getTags(ctx context.Context, endpoint string) (tagsResponse, error) {
 	}
 	if len(parsed.Models) > maxModels {
 		return parsed, fmt.Errorf("ollama-local: /api/tags lists more than %d models", maxModels)
+	}
+	// One model without a name becomes a record sync rejects with a reason;
+	// a list in which no model carries a name is an upstream schema change.
+	missing := 0
+	for _, m := range parsed.Models {
+		if m.Name == "" {
+			missing++
+		}
+	}
+	if missing > 0 && missing == len(parsed.Models) {
+		return parsed, fmt.Errorf("ollama-local: none of the %d /api/tags models carries a name; the upstream schema changed", missing)
 	}
 	return parsed, nil
 }
@@ -134,7 +152,10 @@ func loadedModelNames(ctx context.Context, endpoint string) (map[string]bool, er
 		return nil, fmt.Errorf("/api/ps lists more than %d models", maxModels)
 	}
 	loaded := make(map[string]bool, len(parsed.Models))
-	for _, m := range parsed.Models {
+	for i, m := range parsed.Models {
+		if m.Name == "" {
+			return nil, fmt.Errorf("/api/ps models[%d].name is required", i)
+		}
 		loaded[m.Name] = true
 	}
 	return loaded, nil

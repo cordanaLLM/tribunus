@@ -1,14 +1,49 @@
 package publiccatalog
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
 
-const sampleOpenRouter = `{"data":[{"id":"openai/gpt-4","name":"GPT-4","context_length":8192,"architecture":{"input_modalities":["text"],"output_modalities":["text"]},"pricing":{"prompt":"0.00003","completion":"0.00006"}},{"id":"","name":"skip me, no id"}]}`
+const sampleOpenRouter = `{"data":[{"id":"openai/gpt-4","name":"GPT-4","context_length":8192,"architecture":{"input_modalities":["text"],"output_modalities":["text"]},"pricing":{"prompt":"0.00003","completion":"0.00006"}}]}`
+
+func TestOpenRouter_UpstreamContractDocumentPinned(t *testing.T) {
+	body := mustReadFixture(t, "testdata/upstream/openrouter-models-openapi.yaml")
+	for _, marker := range [][]byte{
+		[]byte("openapi: 3.1.0"),
+		[]byte("operationId: getModels"),
+		[]byte("- pricing"),
+		[]byte("- context_length"),
+		[]byte("- architecture"),
+	} {
+		if !bytes.Contains(body, marker) {
+			t.Fatalf("OpenRouter upstream contract missing marker %q", marker)
+		}
+	}
+}
+
+func TestFetchOpenRouter_UpstreamFixtureContract(t *testing.T) {
+	body := mustReadFixture(t, "testdata/fixtures/openrouter-models-response.json")
+	res, err := fetchOpenRouterFromBytes(body)
+	records := res.Records
+	if err != nil {
+		t.Fatalf("fetchOpenRouterFromBytes(valid fixture) = %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("got %d records, want 1", len(records))
+	}
+
+	mutated := strings.Replace(string(body), `"id":"vendor-a/model-1",`, "", 1)
+	if _, err := fetchOpenRouterFromBytes([]byte(mutated)); err == nil {
+		t.Fatal("fetchOpenRouterFromBytes(mutated missing id) = nil error, want refusal")
+	}
+}
 
 func TestFetchOpenRouter_Positive(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -21,7 +56,7 @@ func TestFetchOpenRouter_Positive(t *testing.T) {
 		t.Fatalf("fetchOpenRouter() = %v", err)
 	}
 	if len(records) != 1 {
-		t.Fatalf("got %d records, want 1 (entry with empty id skipped)", len(records))
+		t.Fatalf("got %d records, want 1", len(records))
 	}
 	rec := records[0]
 	if rec.ModelID != "openai/gpt-4" {
@@ -36,6 +71,15 @@ func TestFetchOpenRouter_Positive(t *testing.T) {
 	if err := rec.Validate(); err != nil {
 		t.Fatalf("Validate() = %v", err)
 	}
+}
+
+func mustReadFixture(t *testing.T, path string) []byte {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return body
 }
 
 func TestFetchOpenRouter_Negative(t *testing.T) {

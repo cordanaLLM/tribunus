@@ -29,6 +29,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/cordanaLLM/tribunus/catalog"
@@ -167,6 +168,9 @@ func newestSessionFile(ctx context.Context, root string) (path string, found boo
 }
 
 // sessionLine is the JSONL envelope; only the fields Fetch needs are typed.
+// No published JSONL schema was found; rate-limit payload fields were checked
+// against openai/codex generated rate-limit model sources at
+// 0ada5d8806cdad498230d5b1b2924091e04c8feb on 2026-10-09.
 type sessionLine struct {
 	Payload struct {
 		RateLimits *rateLimits `json:"rate_limits"`
@@ -190,28 +194,42 @@ type window struct {
 // a session log can carry lines this parser does not model, and skipping
 // them is correct, not a data loss, because only rate_limits lines matter.
 func latestRateLimits(ctx context.Context, path string) (result *rateLimits, err error) {
+	f, err := openRegularSessionFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { err = errors.Join(err, f.Close()) }()
+
+	scanner := bufio.NewScanner(io.LimitReader(f, maxSessionFileBytes+1))
+	scanner.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
+	return scanLatestRateLimits(ctx, path, scanner)
+}
+
+func openRegularSessionFile(path string) (*os.File, error) {
 	// #nosec G304 -- path is always the output of newestSessionFile's own
 	// WalkDir scan under the caller-supplied sessions root, not untrusted input.
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("codex-local: open %s: %w", path, err)
 	}
-	defer func() { err = errors.Join(err, f.Close()) }()
-
 	info, err := f.Stat()
 	if err != nil {
-		return nil, fmt.Errorf("codex-local: stat %s: %w", path, err)
+		return nil, closeSessionFile(f, fmt.Errorf("codex-local: stat %s: %w", path, err))
 	}
 	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("codex-local: %s is not a regular file", path)
+		return nil, closeSessionFile(f, fmt.Errorf("codex-local: %s is not a regular file", path))
 	}
 	if info.Size() > maxSessionFileBytes {
-		return nil, fmt.Errorf("codex-local: %s exceeds %d bytes", path, maxSessionFileBytes)
+		return nil, closeSessionFile(f, fmt.Errorf("codex-local: %s exceeds %d bytes", path, maxSessionFileBytes))
 	}
+	return f, nil
+}
 
-	scanner := bufio.NewScanner(io.LimitReader(f, maxSessionFileBytes+1))
-	scanner.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
+func closeSessionFile(f *os.File, err error) error {
+	return errors.Join(err, f.Close())
+}
 
+func scanLatestRateLimits(ctx context.Context, path string, scanner *bufio.Scanner) (*rateLimits, error) {
 	var latest *rateLimits
 	lines := 0
 	for scanner.Scan() {
@@ -222,7 +240,11 @@ func latestRateLimits(ctx context.Context, path string) (result *rateLimits, err
 		if lines > maxScanLines {
 			return nil, fmt.Errorf("codex-local: %s exceeds %d lines scanned", path, maxScanLines)
 		}
-		if rl := parseRateLimitsLine(scanner.Bytes()); rl != nil {
+		rl, lineErr := parseRateLimitsLine(scanner.Bytes())
+		if lineErr != nil {
+			return nil, fmt.Errorf("codex-local: scan %s line %d: %w", path, lines, lineErr)
+		}
+		if rl != nil {
 			latest = rl
 		}
 	}
@@ -239,18 +261,43 @@ func latestRateLimits(ctx context.Context, path string) (result *rateLimits, err
 // primary window (verified live: this workstation's newest session ends on
 // exactly that); returning nil for it, not a zero value, lets the caller
 // keep an earlier line's usable value instead of reporting "no data".
-func parseRateLimitsLine(raw []byte) *rateLimits {
+func parseRateLimitsLine(raw []byte) (*rateLimits, error) {
 	if len(raw) == 0 {
-		return nil
+		return nil, nil
 	}
 	var line sessionLine
 	if err := json.Unmarshal(raw, &line); err != nil {
-		return nil
+		if strings.Contains(string(raw), "rate_limits") {
+			return nil, fmt.Errorf("decode rate_limits line: %w", err)
+		}
+		return nil, nil
 	}
 	if line.Payload.RateLimits == nil || line.Payload.RateLimits.Primary == nil {
-		return nil
+		return nil, nil
 	}
-	return line.Payload.RateLimits
+	if err := validateRateLimits(line.Payload.RateLimits); err != nil {
+		return nil, err
+	}
+	return line.Payload.RateLimits, nil
+}
+
+func validateRateLimits(rl *rateLimits) error {
+	if rl.LimitID == "" {
+		return errors.New("rate_limits.limit_id is required")
+	}
+	if rl.PlanType == "" {
+		return errors.New("rate_limits.plan_type is required")
+	}
+	if rl.Primary.UsedPercent == nil {
+		return errors.New("rate_limits.primary.used_percent is required")
+	}
+	if rl.Primary.WindowMinutes == nil {
+		return errors.New("rate_limits.primary.window_minutes is required")
+	}
+	if rl.Primary.ResetsAt == nil {
+		return errors.New("rate_limits.primary.resets_at is required")
+	}
+	return nil
 }
 
 // toRecord turns a parsed rate_limits payload into one catalog.Record

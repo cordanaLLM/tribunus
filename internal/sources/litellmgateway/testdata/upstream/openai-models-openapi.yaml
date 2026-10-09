@@ -1,0 +1,80 @@
+# Provenance:
+# Source URL: https://raw.githubusercontent.com/openai/openai-openapi/0ef225c4f701046f8fe88cae9d29d0df4d1a9fa9/openapi.yaml
+# Pinned revision: 0ef225c4f701046f8fe88cae9d29d0df4d1a9fa9
+# Full document sha256: 06d914881ac7e73185739ce80bc3ad84bfcd5df022e6bab5527b87d938f67506
+# Extraction date: 2026-10-09
+# SPDX licence: MIT
+# Copyright holder: OpenAI
+# Changes: provenance header added by Tribunus; extracted /models path and ListModelsResponse/Model schema blocks
+
+openapi: 3.1.0
+paths:
+  /models:
+    get:
+      operationId: listModels
+      tags:
+        - Models
+      summary: List models
+      description: Lists the currently available models, and provides basic
+        information about each one such as the owner and availability.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListModelsResponse"
+        "403":
+          description: The API credential does not have permission to list models.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermissionErrorResponse"
+components:
+  schemas:
+    ListModelsResponse:
+      type: object
+      properties:
+        object:
+          type: string
+          enum:
+            - list
+          x-stainless-const: true
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Model"
+      required:
+        - object
+        - data
+    Model:
+      title: Model
+      description: Describes an OpenAI model offering that can be used with the API.
+      properties:
+        id:
+          type: string
+          description: The model identifier, which can be referenced in the API endpoints.
+        created:
+          type: integer
+          format: unixtime
+          description: The Unix timestamp (in seconds) when the model was created.
+        object:
+          type: string
+          description: The object type, which is always "model".
+          enum:
+            - model
+          x-stainless-const: true
+        owned_by:
+          type: string
+          description: The organization that owns the model.
+        shutdown_date:
+          anyOf:
+            - type: string
+              format: date
+            - type: "null"
+          description: The date when the model will shut down, or null if not announced.
+      required:
+        - id
+        - object
+        - created
+        - owned_by

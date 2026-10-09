@@ -27,3 +27,33 @@ SPDX-FileCopyrightText = [
   "Meta Platforms, Inc. and affiliates",
 ]
 SPDX-License-Identifier = "EUPL-1.2 AND MIT"
+
+[[annotations]]
+path = ["internal/sources/litellmgateway/testdata/upstream/openai-models-openapi.yaml"]
+precedence = "override"
+SPDX-FileCopyrightText = "OpenAI"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["internal/sources/publiccatalog/testdata/upstream/litellm-sample-spec.json"]
+precedence = "override"
+SPDX-FileCopyrightText = "Berri AI"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["internal/sources/publiccatalog/testdata/upstream/openrouter-models-openapi.yaml"]
+precedence = "override"
+SPDX-FileCopyrightText = "OpenRouter"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["internal/sources/ollamalocal/testdata/upstream/ollama-api-fragment.md"]
+precedence = "override"
+SPDX-FileCopyrightText = "Ollama"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["internal/sources/codexlocal/testdata/upstream/*.rs"]
+precedence = "override"
+SPDX-FileCopyrightText = "OpenAI"
+SPDX-License-Identifier = "Apache-2.0"

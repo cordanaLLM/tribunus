@@ -35,7 +35,7 @@ func sampleSnapshot() catalog.Snapshot {
 			},
 		}},
 		SourceRuns: []catalog.SourceRun{
-			{Source: "public-catalog", Status: catalog.StatusOK, Count: 1},
+			{Source: "public-catalog", Status: catalog.StatusDegraded, Count: 1},
 		},
 	}
 }
@@ -108,6 +108,9 @@ func TestRenderTable_Positive(t *testing.T) {
 	}
 	if !strings.Contains(out, "public-catalog") {
 		t.Fatalf("renderTable() output missing source run line: %s", out)
+	}
+	if !strings.Contains(out, "degraded") {
+		t.Fatalf("renderTable() output missing degraded status: %s", out)
 	}
 }
 

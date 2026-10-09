@@ -27,26 +27,35 @@ type Result struct {
 
 // Fetch runs both public-catalog sub-fetches and merges them. Each fails
 // independently: one succeeding while the other fails still returns
-// StatusOK with that sub-fetch's records and a Detail line naming the
+// StatusDegraded with that sub-fetch's records and a Detail line naming the
 // other's failure, because "OpenRouter is down" should never hide LiteLLM's
 // price map (or vice versa).
 func Fetch(ctx context.Context, openRouterURL, liteLLMPriceMapURL string) Result {
 	var records []catalog.Record
 	var notes []string
+	degraded := false
 
 	orResult, orErr := fetchOpenRouterWithReport(ctx, openRouterURL)
 	if orErr != nil {
 		notes = append(notes, "openrouter: fail: "+orErr.Error())
+		degraded = true
 	} else {
 		notes = append(notes, openRouterDetail(orResult))
+		if orResult.Rejected > 0 {
+			degraded = true
+		}
 		records = append(records, orResult.Records...)
 	}
 
 	llmResult, llmErr := fetchLiteLLMPricesWithReport(ctx, liteLLMPriceMapURL)
 	if llmErr != nil {
 		notes = append(notes, "litellm-prices: fail: "+llmErr.Error())
+		degraded = true
 	} else {
 		notes = append(notes, liteLLMDetail(llmResult))
+		if llmResult.Malformed > 0 {
+			degraded = true
+		}
 		records = append(records, llmResult.Records...)
 	}
 
@@ -56,6 +65,9 @@ func Fetch(ctx context.Context, openRouterURL, liteLLMPriceMapURL string) Result
 	}
 	if len(records) == 0 {
 		return Result{Status: catalog.StatusSkip, Detail: detail}
+	}
+	if degraded {
+		return Result{Records: records, Status: catalog.StatusDegraded, Count: len(records), Detail: detail}
 	}
 	return Result{Records: records, Status: catalog.StatusOK, Count: len(records), Detail: detail}
 }

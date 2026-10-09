@@ -24,9 +24,11 @@ type SourceRun struct {
 type Status string
 
 const (
-	StatusOK   Status = "ok"
-	StatusSkip Status = "skip"
-	StatusFail Status = "fail"
+	StatusOK Status = "ok"
+	// StatusDegraded means records were produced but upstream data was lost.
+	StatusDegraded Status = "degraded"
+	StatusSkip     Status = "skip"
+	StatusFail     Status = "fail"
 )
 
 // Snapshot is the file-based catalog sync writes: every record gathered in

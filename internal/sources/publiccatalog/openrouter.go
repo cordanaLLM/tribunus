@@ -100,12 +100,22 @@ func fetchOpenRouterWithReport(ctx context.Context, url string) (openRouterResul
 	if err != nil {
 		return openRouterResult{}, fmt.Errorf("openrouter: %w", err)
 	}
+	return fetchOpenRouterFromBytes(body)
+}
+
+// fetchOpenRouterFromBytes parses an OpenRouter models response. One
+// malformed entry rejects only itself; a response in which every entry is
+// rejected is refused, since that is an upstream schema change.
+func fetchOpenRouterFromBytes(body []byte) (openRouterResult, error) {
 	var parsed openRouterResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return openRouterResult{}, fmt.Errorf("openrouter: decode response: %w", err)
 	}
 	if len(parsed.Data) > MaxOpenRouterRecords {
 		return openRouterResult{}, fmt.Errorf("openrouter: response lists more than %d models", MaxOpenRouterRecords)
+	}
+	if len(parsed.Data) == 0 {
+		return openRouterResult{}, fmt.Errorf("openrouter: empty response data list")
 	}
 
 	fetchedAt := time.Now().UTC()
@@ -126,6 +136,9 @@ func fetchOpenRouterWithReport(ctx context.Context, url string) (openRouterResul
 			continue
 		}
 		res.Records = append(res.Records, rec)
+	}
+	if len(res.Records) == 0 && res.Rejected > 0 {
+		return openRouterResult{}, fmt.Errorf("openrouter: all %d entries were rejected; the upstream schema changed", res.Rejected)
 	}
 	return res, nil
 }

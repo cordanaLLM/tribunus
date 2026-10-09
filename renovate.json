@@ -3,6 +3,78 @@
   "extends": [
     "config:recommended"
   ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "OpenAI OpenAPI schema pin in the upstream schema manifest",
+      "managerFilePatterns": [
+        "/^internal/sources/upstream-schemas\\.json$/"
+      ],
+      "matchStrings": [
+        "\"id\": \"openai-openapi\"[\\s\\S]*?\"pinned_revision\": \"(?<currentDigest>[a-f0-9]{40})\""
+      ],
+      "datasourceTemplate": "git-refs",
+      "depNameTemplate": "openai/openai-openapi",
+      "packageNameTemplate": "https://github.com/openai/openai-openapi",
+      "currentValueTemplate": "main"
+    },
+    {
+      "customType": "regex",
+      "description": "LiteLLM price-map schema pin in the upstream schema manifest",
+      "managerFilePatterns": [
+        "/^internal/sources/upstream-schemas\\.json$/"
+      ],
+      "matchStrings": [
+        "\"id\": \"litellm-price-map\"[\\s\\S]*?\"pinned_revision\": \"(?<currentDigest>[a-f0-9]{40})\""
+      ],
+      "datasourceTemplate": "git-refs",
+      "depNameTemplate": "BerriAI/litellm",
+      "packageNameTemplate": "https://github.com/BerriAI/litellm",
+      "currentValueTemplate": "main"
+    },
+    {
+      "customType": "regex",
+      "description": "Ollama API schema pin in the upstream schema manifest",
+      "managerFilePatterns": [
+        "/^internal/sources/upstream-schemas\\.json$/"
+      ],
+      "matchStrings": [
+        "\"id\": \"ollama-api\"[\\s\\S]*?\"pinned_revision\": \"(?<currentDigest>[a-f0-9]{40})\""
+      ],
+      "datasourceTemplate": "git-refs",
+      "depNameTemplate": "ollama/ollama",
+      "packageNameTemplate": "https://github.com/ollama/ollama",
+      "currentValueTemplate": "main"
+    },
+    {
+      "customType": "regex",
+      "description": "Codex rate-limit schema pins in the upstream schema manifest",
+      "managerFilePatterns": [
+        "/^internal/sources/upstream-schemas\\.json$/"
+      ],
+      "matchStrings": [
+        "\"id\": \"codex-rate-limit-[^\"]+\"[\\s\\S]*?\"pinned_revision\": \"(?<currentDigest>[a-f0-9]{40})\""
+      ],
+      "datasourceTemplate": "git-refs",
+      "depNameTemplate": "openai/codex",
+      "packageNameTemplate": "https://github.com/openai/codex",
+      "currentValueTemplate": "main"
+    },
+    {
+      "customType": "regex",
+      "description": "LiteLLM price-map schema pin in Go source",
+      "managerFilePatterns": [
+        "/^internal/sources/publiccatalog/litellmprices\\.go$/"
+      ],
+      "matchStrings": [
+        "const liteLLMPriceMapRevision = \"(?<currentDigest>[a-f0-9]{40})\""
+      ],
+      "datasourceTemplate": "git-refs",
+      "depNameTemplate": "BerriAI/litellm",
+      "packageNameTemplate": "https://github.com/BerriAI/litellm",
+      "currentValueTemplate": "main"
+    }
+  ],
   "packageRules": [
     {
       "description": "praetor-managed files: praetorctl adopt ships their updates and praetorctl audit locks them byte for byte",

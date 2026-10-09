@@ -209,6 +209,8 @@ func rejectInvalidRecords(run sourceOutcome) sourceOutcome {
 	run.Detail = appendDetail(run.Detail, fmt.Sprintf("rejected=%d", rejected))
 	if len(kept) == 0 {
 		run.Status = catalog.StatusFail
+	} else {
+		run.Status = catalog.StatusDegraded
 	}
 	return run
 }

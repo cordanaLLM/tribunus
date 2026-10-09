@@ -10,9 +10,12 @@ import (
 	"github.com/cordanaLLM/tribunus/internal/sources/httpfetch"
 )
 
-// DefaultLiteLLMPriceMapURL is LiteLLM's published, unauthenticated model
-// price/context map, verified live on 2026-09-18.
-const DefaultLiteLLMPriceMapURL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
+// renovate: datasource=git-refs depName=https://github.com/BerriAI/litellm branch=main
+const liteLLMPriceMapRevision = "f48d837cd21208771ee5b15770e4425a32907f1b"
+
+// DefaultLiteLLMPriceMapURL is LiteLLM's pinned, unauthenticated model
+// price/context map, checked 2026-10-09.
+const DefaultLiteLLMPriceMapURL = "https://raw.githubusercontent.com/BerriAI/litellm/" + liteLLMPriceMapRevision + "/model_prices_and_context_window.json"
 
 // litellmSampleSpecKey is the one key in the price map that documents the
 // schema rather than naming a model; it is skipped, not parsed as a record.
@@ -56,6 +59,13 @@ func fetchLiteLLMPricesWithReport(ctx context.Context, url string) (liteLLMPrice
 	if err != nil {
 		return liteLLMPriceResult{}, fmt.Errorf("litellm-prices: %w", err)
 	}
+	return fetchLiteLLMPricesFromBytes(body)
+}
+
+// fetchLiteLLMPricesFromBytes parses a price map. One malformed entry is
+// counted and skipped; a map in which every model entry is malformed is
+// refused, since that is an upstream schema change, not one bad entry.
+func fetchLiteLLMPricesFromBytes(body []byte) (liteLLMPriceResult, error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return liteLLMPriceResult{}, fmt.Errorf("litellm-prices: decode response: %w", err)
@@ -63,26 +73,44 @@ func fetchLiteLLMPricesWithReport(ctx context.Context, url string) (liteLLMPrice
 	if len(raw) > MaxLiteLLMPriceRecords {
 		return liteLLMPriceResult{}, fmt.Errorf("litellm-prices: response lists more than %d models", MaxLiteLLMPriceRecords)
 	}
+	if len(raw) == 0 {
+		return liteLLMPriceResult{}, fmt.Errorf("litellm-prices: empty response price map")
+	}
 
 	fetchedAt := time.Now().UTC()
 	records := make([]catalog.Record, 0, len(raw))
 	malformed := 0
+	seenModels := 0
 	for id, msg := range raw {
-		if id == litellmSampleSpecKey {
+		record, seen, ok := parseLiteLLMPriceRecord(id, msg, fetchedAt)
+		seenModels += seen
+		if !ok {
+			malformed += seen
 			continue
 		}
-		if id == "" {
-			malformed++
-			continue
-		}
-		var e litellmPriceEntry
-		if err := json.Unmarshal(msg, &e); err != nil {
-			malformed++
-			continue // one malformed entry does not cost every other model its record
-		}
-		records = append(records, litellmPriceRecord(id, e, fetchedAt))
+		records = append(records, record)
+	}
+	if len(records) == 0 && malformed > 0 {
+		return liteLLMPriceResult{}, fmt.Errorf("litellm-prices: all %d model entries are malformed; the upstream schema changed", malformed)
+	}
+	if seenModels == 0 {
+		return liteLLMPriceResult{}, fmt.Errorf("litellm-prices: empty response price map contains only sample_spec")
 	}
 	return liteLLMPriceResult{Records: records, Malformed: malformed}, nil
+}
+
+func parseLiteLLMPriceRecord(id string, msg json.RawMessage, fetchedAt time.Time) (catalog.Record, int, bool) {
+	if id == litellmSampleSpecKey {
+		return catalog.Record{}, 0, false
+	}
+	if id == "" {
+		return catalog.Record{}, 1, false
+	}
+	var e litellmPriceEntry
+	if err := json.Unmarshal(msg, &e); err != nil {
+		return catalog.Record{}, 1, false
+	}
+	return litellmPriceRecord(id, e, fetchedAt), 1, true
 }
 
 func litellmPriceRecord(id string, e litellmPriceEntry, fetchedAt time.Time) catalog.Record {

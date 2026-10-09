@@ -1,6 +1,7 @@
 package codexlocal
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -24,6 +25,42 @@ func writeSession(t *testing.T, dir, name, body string, modTime time.Time) strin
 }
 
 const validLine = `{"timestamp":"2026-09-13T12:56:47.753Z","ordinal":1,"type":"event_msg","payload":{"type":"token_count","info":{},"rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":92.0,"window_minutes":10080,"resets_at":1789858494},"secondary":null,"credits":{"has_credits":false,"unlimited":false,"balance":"0"},"plan_type":"pro"}}}`
+
+func TestUpstreamContractDocumentPinned(t *testing.T) {
+	payload := mustReadFixture(t, "testdata/upstream/rate_limit_status_payload.rs")
+	details := mustReadFixture(t, "testdata/upstream/rate_limit_status_details.rs")
+	window := mustReadFixture(t, "testdata/upstream/rate_limit_window_snapshot.rs")
+	for _, marker := range [][]byte{
+		[]byte(`rename = "plan_type"`),
+		[]byte(`rename = "primary_window"`),
+		[]byte(`rename = "used_percent"`),
+		[]byte(`rename = "reset_at"`),
+	} {
+		joined := append(append([]byte{}, payload...), details...)
+		joined = append(joined, window...)
+		if !bytes.Contains(joined, marker) {
+			t.Fatalf("Codex upstream contract missing marker %q", marker)
+		}
+	}
+}
+
+func TestFetch_UpstreamFixtureContract(t *testing.T) {
+	body := string(mustReadFixture(t, "testdata/fixtures/rate-limits.jsonl"))
+	dir := t.TempDir()
+	writeSession(t, dir, "valid.jsonl", body, time.Now())
+	res := Fetch(context.Background(), dir)
+	if res.Status != catalog.StatusOK {
+		t.Fatalf("Status = %v, detail = %q, want ok", res.Status, res.Detail)
+	}
+
+	mutated := strings.Replace(body, `"used_percent":42.0`, `"used_percent":"42.0"`, 1)
+	dir = t.TempDir()
+	writeSession(t, dir, "mutated.jsonl", mutated, time.Now())
+	res = Fetch(context.Background(), dir)
+	if res.Status != catalog.StatusFail {
+		t.Fatalf("Status = %v, detail = %q, want fail for retyped used_percent", res.Status, res.Detail)
+	}
+}
 
 func TestFetch_Positive(t *testing.T) {
 	dir := t.TempDir()
@@ -52,6 +89,15 @@ func TestFetch_Positive(t *testing.T) {
 	if err := rec.Validate(); err != nil {
 		t.Fatalf("Validate() = %v", err)
 	}
+}
+
+func mustReadFixture(t *testing.T, path string) []byte {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return body
 }
 
 func TestFetch_Negative(t *testing.T) {

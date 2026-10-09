@@ -38,8 +38,8 @@ func TestFetch_Negative(t *testing.T) {
 	defer llm.Close()
 
 	res := Fetch(context.Background(), "http://127.0.0.1:1", llm.URL)
-	if res.Status != catalog.StatusOK {
-		t.Fatalf("Status = %v, detail = %q, want ok (litellm-prices alone succeeded)", res.Status, res.Detail)
+	if res.Status != catalog.StatusDegraded {
+		t.Fatalf("Status = %v, detail = %q, want degraded (litellm-prices alone succeeded)", res.Status, res.Detail)
 	}
 	if res.Count != 1 {
 		t.Fatalf("Count = %d, want 1", res.Count)
@@ -72,12 +72,52 @@ func TestFetch_ReportsMalformedLiteLLMEntries(t *testing.T) {
 	defer llm.Close()
 
 	res := Fetch(context.Background(), or.URL, llm.URL)
-	if res.Status != catalog.StatusOK {
-		t.Fatalf("Status = %v, detail = %q, want ok", res.Status, res.Detail)
+	if res.Status != catalog.StatusDegraded {
+		t.Fatalf("Status = %v, detail = %q, want degraded", res.Status, res.Detail)
 	}
 	if !strings.Contains(res.Detail, "malformed=1") {
 		t.Fatalf("Detail = %q, want malformed=1", res.Detail)
 	}
+}
+
+func TestFetch_EmptyPublicCatalogResponsesFail(t *testing.T) {
+	t.Run("openrouter data list", func(t *testing.T) {
+		or := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"data":[]}`)) //nolint:errcheck // test server response
+		}))
+		defer or.Close()
+		llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(sampleLiteLLMPrices)) //nolint:errcheck // test server response
+		}))
+		defer llm.Close()
+
+		res := Fetch(context.Background(), or.URL, llm.URL)
+		if res.Status != catalog.StatusDegraded {
+			t.Fatalf("Status = %v, detail = %q, want degraded", res.Status, res.Detail)
+		}
+		if !strings.Contains(res.Detail, "openrouter: empty response") {
+			t.Fatalf("Detail = %q, want openrouter empty response", res.Detail)
+		}
+	})
+
+	t.Run("litellm price map only sample_spec", func(t *testing.T) {
+		or := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(sampleOpenRouter)) //nolint:errcheck // test server response
+		}))
+		defer or.Close()
+		llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"sample_spec":{"litellm_provider":"doc"}}`)) //nolint:errcheck // test server response
+		}))
+		defer llm.Close()
+
+		res := Fetch(context.Background(), or.URL, llm.URL)
+		if res.Status != catalog.StatusDegraded {
+			t.Fatalf("Status = %v, detail = %q, want degraded", res.Status, res.Detail)
+		}
+		if !strings.Contains(res.Detail, "litellm-prices: empty response") {
+			t.Fatalf("Detail = %q, want litellm-prices empty response", res.Detail)
+		}
+	})
 }
 
 func TestLiteLLMDetailReportsMalformedEntries(t *testing.T) {

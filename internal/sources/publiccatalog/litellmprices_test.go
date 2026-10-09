@@ -1,9 +1,14 @@
 package publiccatalog
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -17,6 +22,63 @@ const sampleLiteLLMPrices = `{
   "sample_spec": {"input_cost_per_token": 0.0, "max_input_tokens": "max input tokens, if the provider specifies it. if not default to max_tokens", "litellm_provider": "one of https://docs.litellm.ai/docs/providers"},
   "gpt-4": {"input_cost_per_token": 0.00003, "output_cost_per_token": 0.00006, "max_input_tokens": 8192, "litellm_provider": "openai", "mode": "chat"}
 }`
+
+func TestLiteLLMPrices_UpstreamContractDocumentPinned(t *testing.T) {
+	body := mustReadFixture(t, "testdata/upstream/litellm-sample-spec.json")
+	for _, marker := range [][]byte{
+		[]byte(`"sample_spec"`),
+		[]byte(`"litellm_provider"`),
+		[]byte(`"max_input_tokens"`),
+		[]byte(`"input_cost_per_token"`),
+	} {
+		if !bytes.Contains(body, marker) {
+			t.Fatalf("LiteLLM upstream contract missing marker %q", marker)
+		}
+	}
+}
+
+func TestLiteLLMPriceMapRevisionMatchesManifest(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "upstream-schemas.json"))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var manifest struct {
+		Sources []struct {
+			ID             string `json:"id"`
+			PinnedRevision string `json:"pinned_revision"`
+		} `json:"sources"`
+	}
+	if err := json.Unmarshal(body, &manifest); err != nil {
+		t.Fatalf("decode manifest: %v", err)
+	}
+	for _, source := range manifest.Sources {
+		if source.ID != "litellm-price-map" {
+			continue
+		}
+		if source.PinnedRevision != liteLLMPriceMapRevision {
+			t.Fatalf("manifest LiteLLM revision = %q, const = %q", source.PinnedRevision, liteLLMPriceMapRevision)
+		}
+		return
+	}
+	t.Fatal("litellm-price-map source missing from manifest")
+}
+
+func TestFetchLiteLLMPrices_UpstreamFixtureContract(t *testing.T) {
+	body := mustReadFixture(t, "testdata/fixtures/litellm-price-map.json")
+	res, err := fetchLiteLLMPricesFromBytes(body)
+	records := res.Records
+	if err != nil {
+		t.Fatalf("fetchLiteLLMPricesFromBytes(valid fixture) = %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("got %d records, want 1", len(records))
+	}
+
+	mutated := strings.Replace(string(body), `"max_input_tokens":8192`, `"max_input_tokens":"8192"`, 1)
+	if _, err := fetchLiteLLMPricesFromBytes([]byte(mutated)); err == nil {
+		t.Fatal("fetchLiteLLMPricesFromBytes(mutated retyped max_input_tokens) = nil error, want refusal")
+	}
+}
 
 func TestFetchLiteLLMPrices_Positive(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -64,22 +126,21 @@ func TestFetchLiteLLMPrices_Negative(t *testing.T) {
 	})
 }
 
-// TestFetchLiteLLMPrices_OneMalformedEntrySkipped confirms a single model
-// entry with a field the parser cannot decode is dropped on its own,
-// without discarding every other model in the same response -- the general
-// case behind the sample_spec fixture above.
-func TestFetchLiteLLMPrices_OneMalformedEntrySkipped(t *testing.T) {
+// TestFetchLiteLLMPrices_OneMalformedEntryRefused confirms a single model
+// entry with a field the parser cannot decode fails the price map instead of
+// silently dropping that model.
+// TestFetchLiteLLMPrices_AllMalformedRefused: one malformed entry is counted
+// and the rest kept (TestFetch_ReportsMalformedLiteLLMEntries), but a map in
+// which every model entry is malformed is an upstream schema change and is
+// refused rather than returned empty.
+func TestFetchLiteLLMPrices_AllMalformedRefused(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"broken-model": {"max_input_tokens": "not a number"}, "gpt-4": {"input_cost_per_token": 0.00003, "litellm_provider": "openai"}}`)) //nolint:errcheck // test httptest server response; a write failure here would fail the test's own HTTP round trip, not silently corrupt anything
+		_, _ = w.Write([]byte(`{"vendor-a/model-1": {"max_input_tokens": "not a number"}, "vendor-a/model-2": {"input_cost_per_token": "0.1"}}`)) //nolint:errcheck // test httptest server response
 	}))
 	defer server.Close()
 
-	records, err := fetchLiteLLMPrices(context.Background(), server.URL)
-	if err != nil {
-		t.Fatalf("fetchLiteLLMPrices() = %v", err)
-	}
-	if len(records) != 1 || records[0].ModelID != "gpt-4" {
-		t.Fatalf("records = %+v, want only gpt-4 (broken-model skipped)", records)
+	if _, err := fetchLiteLLMPrices(context.Background(), server.URL); err == nil {
+		t.Fatal("fetchLiteLLMPrices() = nil error, want refusal when every model entry is malformed")
 	}
 }
 

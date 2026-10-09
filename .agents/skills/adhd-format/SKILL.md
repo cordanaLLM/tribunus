@@ -10,6 +10,8 @@ metadata:
 
 # High-Focus Technical Formatting (`adhd-format`)
 
+Adapted from [i-have-adhd](https://github.com/ayghri/i-have-adhd) by Ayoub Ghriss and [contributors](https://github.com/ayghri/i-have-adhd/graphs/contributors); MIT licence.
+
 Transform dense engineering outputs, audit findings, and architecture documentation into high-bandwidth, ADHD-optimized visual deliverables.
 
 ## Core Formatting Principles

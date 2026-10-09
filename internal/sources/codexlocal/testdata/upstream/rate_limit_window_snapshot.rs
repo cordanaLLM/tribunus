@@ -1,6 +1,6 @@
 // Provenance:
-// Source URL: https://raw.githubusercontent.com/openai/codex/0ada5d8806cdad498230d5b1b2924091e04c8feb/codex-rs/codex-backend-openapi-models/src/models/rate_limit_window_snapshot.rs
-// Pinned revision: 0ada5d8806cdad498230d5b1b2924091e04c8feb
+// Source URL: https://raw.githubusercontent.com/openai/codex/2351d9e1b608e6f9d9a3699b71d7eb39ee41cfa4/codex-rs/codex-backend-openapi-models/src/models/rate_limit_window_snapshot.rs
+// Pinned revision: 2351d9e1b608e6f9d9a3699b71d7eb39ee41cfa4
 // Full document sha256: f667756c00e512c779cb0f593737094b1292990494624492f0c0bb48dcd6918b
 // Extraction date: 2026-10-09
 // SPDX licence: Apache-2.0

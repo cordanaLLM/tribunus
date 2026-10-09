@@ -22,9 +22,10 @@ func sampleSnapshot() catalog.Snapshot {
 	price := 30.0
 	ctx := int64(8192)
 	return catalog.Snapshot{
-		GeneratedAt: time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC),
+		SchemaVersion: catalog.SnapshotSchemaVersion,
+		GeneratedAt:   time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC),
 		Records: []catalog.Record{{
-			ModelID:       "openai/gpt-4",
+			ModelID:       "vendor-a/model-1",
 			AccessPath:    catalog.AccessAPI,
 			ContextWindow: &ctx,
 			PriceInPerM:   &price,
@@ -55,7 +56,7 @@ func TestReadSnapshotFile_Positive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readSnapshotFile() = %v", err)
 	}
-	if len(got.Records) != 1 || got.Records[0].ModelID != "openai/gpt-4" {
+	if len(got.Records) != 1 || got.Records[0].ModelID != "vendor-a/model-1" {
 		t.Fatalf("readSnapshotFile() = %+v", got)
 	}
 }
@@ -76,6 +77,28 @@ func TestReadSnapshotFile_Negative(t *testing.T) {
 			t.Fatal("readSnapshotFile() = nil error, want failure for malformed JSON")
 		}
 	})
+}
+
+func TestReadSnapshotFileRejectsUnsupportedSchemaVersion(t *testing.T) {
+	cases := map[string]string{
+		"missing":     `{"generated_at":"2026-09-18T12:00:00Z","records":[],"source_runs":[]}`,
+		"unsupported": `{"schema_version":99,"generated_at":"2026-09-18T12:00:00Z","records":[],"source_runs":[]}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "snap.json")
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatalf("setup: %v", err)
+			}
+			_, err := readSnapshotFile(path)
+			if err == nil {
+				t.Fatal("readSnapshotFile() = nil error, want schema version failure")
+			}
+			if msg := err.Error(); !strings.Contains(msg, "re-run tribunusctl sync") {
+				t.Fatalf("error = %q, want guidance to re-run tribunusctl sync", msg)
+			}
+		})
+	}
 }
 
 // TestReadSnapshotFile_Boundary confirms the byte bound is enforced: a file
@@ -103,7 +126,7 @@ func TestRenderTable_Positive(t *testing.T) {
 		t.Fatalf("renderTable() error = %v, want nil", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "openai/gpt-4") {
+	if !strings.Contains(out, "vendor-a/model-1") {
 		t.Fatalf("renderTable() output missing model id: %s", out)
 	}
 	if !strings.Contains(out, "public-catalog") {

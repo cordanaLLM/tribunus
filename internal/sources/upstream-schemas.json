@@ -17,8 +17,8 @@
     {
       "id": "litellm-price-map",
       "url_template": "https://raw.githubusercontent.com/BerriAI/litellm/{revision}/model_prices_and_context_window.json",
-      "pinned_revision": "a3236ba9479e32ee914d43f12082f4423403e3ca",
-      "full_document_sha256": "116410f2c0151cb748e3203b3b0f8fbc52a30482a820389bfc26b2d06f3e2753",
+      "pinned_revision": "18e87d30396ec5fad1d32a753760bec42ce7d9f8",
+      "full_document_sha256": "496a02d75d1d9e384798cbbe1b68c0b8900b5be0657b0149dc29e8864b214355",
       "spdx_license": "MIT",
       "copyright_holder": "Berri AI",
       "fragments": [
@@ -47,7 +47,7 @@
     {
       "id": "ollama-api",
       "url_template": "https://raw.githubusercontent.com/ollama/ollama/{revision}/docs/api.md",
-      "pinned_revision": "c2b7368d4156656ddb9a23b43f721a841b9c23e0",
+      "pinned_revision": "021cda52280d52dbb26cfa98e4ab4a97ab57bb6a",
       "full_document_sha256": "96db03080e385dbabf5d70e75f298d41b75983bc30975cae56f7119f848dd0f5",
       "spdx_license": "MIT",
       "copyright_holder": "Ollama",

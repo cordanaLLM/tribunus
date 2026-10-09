@@ -62,6 +62,9 @@ checksum:
 release:
   draft: true
   replace_existing_draft: true
+  # A tag with a prerelease suffix (v0.1.0-rc.1) publishes as a prerelease, which
+  # GitHub never marks as the latest release; the default (false) would.
+  prerelease: auto
   extra_files:
     - glob: catalog/snapshot.schema.json
       name_template: snapshot.schema.json

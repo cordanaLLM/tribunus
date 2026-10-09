@@ -1,23 +1,14 @@
 ---
 name: Security Scan
 
+# Pull requests run govulncheck and gosec in ci.yml's required go job; this
+# workflow repeats them nightly and on main, where a newly published advisory
+# can fail unchanged code.
 'on':
   schedule:
     - cron: '0 4 * * *'
   push:
     branches: [main]
-  # Path-filtered on pull requests: the verdict changes only with the code,
-  # the modules or the VEX statements; the nightly run catches new advisories.
-  pull_request:
-    branches: [main]
-    paths:
-      - '**.go'
-      - 'go.mod'
-      - 'go.sum'
-      - 'tools/go/**'
-      - 'security/vex/**'
-      - '.gosec.json'
-      - '.github/workflows/security.yml'
 
 permissions:
   contents: read

@@ -21,3 +21,9 @@ admission:
     timeout_seconds: 30
     interval_seconds: 5
     ready_threshold: 2
+event_log:
+  dir: .tribunus
+  signing_key_path: /run/secrets/tribunus-eventlog-seed
+  public_key: ""
+  lock_timeout_seconds: 5
+  max_replay_records: 100000

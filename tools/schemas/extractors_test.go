@@ -174,3 +174,30 @@ func TestOpenRouterFragmentDropsExamples(t *testing.T) {
 		t.Fatalf("fragment lost schema while dropping examples:\n%s", got)
 	}
 }
+
+// TestRecordDigest: refresh and check refuse a document whose digest differs
+// from the manifest; repin, run after a pin moved, records the new digest
+// and reports the change, so a Renovate pin bump can be refreshed.
+func TestRecordDigest(t *testing.T) {
+	doc := []byte("pinned upstream document")
+	current := shaHex(doc)
+
+	same := schemaSource{ID: "s", FullDocumentSHA256: current}
+	if changed, err := recordDigest(&same, doc, false); err != nil || changed {
+		t.Fatalf("matching digest: changed=%v err=%v, want unchanged and nil", changed, err)
+	}
+
+	stale := schemaSource{ID: "s", FullDocumentSHA256: "old"}
+	if _, err := recordDigest(&stale, doc, false); err == nil {
+		t.Fatal("refresh with a stale digest = nil error, want refusal")
+	}
+	if stale.FullDocumentSHA256 != "old" {
+		t.Fatalf("refresh rewrote the digest to %q", stale.FullDocumentSHA256)
+	}
+
+	moved := schemaSource{ID: "s", FullDocumentSHA256: "old"}
+	changed, err := recordDigest(&moved, doc, true)
+	if err != nil || !changed || moved.FullDocumentSHA256 != current {
+		t.Fatalf("repin: changed=%v err=%v digest=%q, want the new digest recorded", changed, err, moved.FullDocumentSHA256)
+	}
+}

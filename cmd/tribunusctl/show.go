@@ -34,7 +34,7 @@ func runShow(args []string) error {
 
 func readSnapshotFile(path string) (snap catalog.Snapshot, err error) {
 	// #nosec G304 -- path is the --in CLI flag the operator supplies directly,
-	// the same trust level as the repository's own config.go manifest-path convention.
+	// the same trust level as any other path the operator passes.
 	f, err := os.Open(path)
 	if err != nil {
 		return catalog.Snapshot{}, fmt.Errorf("open snapshot %s: %w", path, err)

@@ -1,8 +1,9 @@
 // Command tribunusctl syncs the model data the Tribunus graph router will
 // route on from a handful of local and remote sources, and can render the
 // resulting snapshot as a table. See tribunus/catalog for the record shape
-// and docs/tribunus/data-sync.md for what each source does and does not
-// know.
+// and the data-sync guide in cordanaLLM/praetor
+// (https://github.com/cordanaLLM/praetor/blob/main/docs/tribunus/data-sync.md)
+// for what each source does and does not know.
 package main
 
 import (

@@ -12,7 +12,7 @@ Planned stack:
 - Vector kernel: Rust (`crates/tribunus-graph`), SIMD skill matching.
 - Operator UI: Svelte 5 (`ui/`).
 
-Today only the model catalog exists (`catalog/`, `cmd/tribunusctl`, `internal/sources/`). The rest lands per milestone 0.2 to 0.5.
+Today only the model catalog exists (`catalog/`, `cmd/tribunusctl`, `internal/sources/`). The rest lands in milestones 0.2 to 0.6; see the [roadmap](roadmap.md).
 
 ## Rules for source code
 
@@ -37,7 +37,7 @@ The runtime has its own namespace, RT. These are never HISS rules.
 | RT-03 | control-plane isolation |
 | RT-04 | event-sourced state |
 
-Each RT rule gets fixtures replayed in both directions, like HISS-20.
+Each RT rule gets fixtures replayed in both directions, like [HISS-20](https://github.com/cordanaLLM/praetor/blob/main/docs/standards/hiss-spec.md#hiss-20-replayable-enforcement-evidence).
 
 ## Models
 
@@ -45,10 +45,10 @@ Call models only through router aliases such as `cordana/auto`, `cordana/light`,
 
 ## Files
 
-- `AGENTS.md`: canonical agent briefing (to be added; vendor files are compiled from it).
+- `AGENTS.md`: canonical agent briefing, rendered by Praetor; the vendor files are compiled from it.
 - `REUSE.toml`, `LICENSES/`: licensing (EUPL-1.2).
 - `docs/`: these documents.
 
 ## Workflow
 
-Run `go vet ./...` and `go test -race ./...` before every push. Do not add a relational database or a setup wizard; state flows through the event log.
+Run `make verify-all` before every push; the Praetor hooks run the audit before each commit and push. Do not add a relational database or a setup wizard; state flows through the event log.

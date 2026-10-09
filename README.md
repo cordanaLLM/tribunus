@@ -30,7 +30,7 @@ private scratch-link policy.
 
 Agent runtime and task-graph engine for the cordanaLLM ecosystem.
 
-Status: early. Today the repository holds the model catalog (`catalog/`, `cmd/tribunusctl`, `internal/sources/`), moved from `cordanaLLM/praetor` with its history. The runtime is planned in milestones 0.1 to 0.5.
+Status: early. Today the repository holds the model catalog (`catalog/`, `cmd/tribunusctl`, `internal/sources/`), moved from `cordanaLLM/praetor` with its history. The runtime is planned in milestones 0.1 to 0.6; see the [roadmap](docs/roadmap.md).
 
 ## Build and test
 
@@ -42,6 +42,7 @@ go test -race ./...
 ## Documents
 
 - [Agent onboarding](docs/agent-onboarding.md)
+- [Roadmap](docs/roadmap.md)
 - [Architecture](docs/architecture-v2.md)
 - [Repository layout](docs/repository-layout-v2.md)
 - [Description](docs/tribunus-description-v2.md)

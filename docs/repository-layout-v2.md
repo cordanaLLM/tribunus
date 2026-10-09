@@ -7,8 +7,8 @@ tribunus/
   .github/workflows/ci.yml   [now]     go vet, go test -race
   LICENSE, LICENSES/         [now]     EUPL-1.2
   REUSE.toml                 [now]
-  AGENTS.md                  [planned] canonical agent briefing
-  Makefile                   [planned] verify target
+  AGENTS.md                  [now]     canonical agent briefing (Praetor)
+  Makefile                   [now]     verify-all target (Praetor)
   catalog/                   [now]     model catalog records and snapshots
   cmd/tribunusctl/           [now]     operator CLI (show, sync)
   cmd/tribunus-server/       [planned] REST, SSE and MCP gateway

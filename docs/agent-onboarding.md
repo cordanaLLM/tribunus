@@ -12,7 +12,7 @@ Planned stack:
 - Vector kernel: Rust (`crates/tribunus-graph`), SIMD skill matching.
 - Operator UI: Svelte 5 (`ui/`).
 
-Today only the model catalog exists (`catalog/`, `cmd/tribunusctl`, `internal/sources/`). The rest lands in milestones 0.2 to 0.6; see the [roadmap](roadmap.md).
+Today only the model catalog exists (`catalog/`, `cmd/tribunusctl`, `internal/sources/`). The rest lands in milestones 0.2 to 0.6; see the [roadmap](roadmap.md). The catalog has no silent fallback. A value a source does not report is nil with an `Absent` reason, and a malformed upstream entry or invalid record is rejected and counted in the source line while the rest is kept. `tribunusctl sync` exits non-zero when every selected source fails. The rest lands per milestone 0.2 to 0.5.
 
 ## Rules for source code
 

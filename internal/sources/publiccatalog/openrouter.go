@@ -35,6 +35,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/cordanaLLM/tribunus/catalog"
@@ -48,9 +49,13 @@ const DefaultOpenRouterURL = "https://openrouter.ai/api/v1/models"
 const (
 	// maxResponseBytes bounds each catalog response read (HISS-02).
 	maxResponseBytes = 16 << 20
-	// maxEntries bounds how many entries one sub-fetch turns into records
-	// (HISS-02). Both catalogs run in the low thousands today.
-	maxEntries = 5000
+	// MaxOpenRouterRecords bounds how many entries this sub-fetch turns into
+	// records (HISS-02). Public catalog sub-sources intentionally stay below
+	// 5000 each so all source caps sum below catalog.MaxSnapshotRecords.
+	MaxOpenRouterRecords = 4999
+	// maxModalities bounds each modality list copied into capabilities
+	// (HISS-02).
+	maxModalities = 16
 	// requestTimeout bounds each HTTP round trip (HISS-02).
 	requestTimeout = 20 * time.Second
 )
@@ -76,32 +81,56 @@ type openRouterResponse struct {
 	Data []openRouterEntry `json:"data"`
 }
 
+type openRouterResult struct {
+	Records  []catalog.Record
+	Rejected int
+	// FirstReject is the reason the first entry with an ID was rejected, so
+	// the source detail names a cause, not only a count.
+	FirstReject string
+}
+
 // fetchOpenRouter fetches and parses the OpenRouter public models list.
 func fetchOpenRouter(ctx context.Context, url string) ([]catalog.Record, error) {
+	res, err := fetchOpenRouterWithReport(ctx, url)
+	return res.Records, err
+}
+
+func fetchOpenRouterWithReport(ctx context.Context, url string) (openRouterResult, error) {
 	body, err := httpfetch.Get(ctx, url, requestTimeout, maxResponseBytes)
 	if err != nil {
-		return nil, fmt.Errorf("openrouter: %w", err)
+		return openRouterResult{}, fmt.Errorf("openrouter: %w", err)
 	}
 	var parsed openRouterResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return nil, fmt.Errorf("openrouter: decode response: %w", err)
+		return openRouterResult{}, fmt.Errorf("openrouter: decode response: %w", err)
 	}
-	if len(parsed.Data) > maxEntries {
-		return nil, fmt.Errorf("openrouter: response lists more than %d models", maxEntries)
+	if len(parsed.Data) > MaxOpenRouterRecords {
+		return openRouterResult{}, fmt.Errorf("openrouter: response lists more than %d models", MaxOpenRouterRecords)
 	}
 
 	fetchedAt := time.Now().UTC()
-	records := make([]catalog.Record, 0, len(parsed.Data))
+	res := openRouterResult{Records: make([]catalog.Record, 0, len(parsed.Data))}
 	for _, e := range parsed.Data {
 		if e.ID == "" {
+			res.Rejected++
 			continue
 		}
-		records = append(records, openRouterRecord(e, fetchedAt))
+		rec, recErr := openRouterRecord(e, fetchedAt)
+		if recErr != nil {
+			// One malformed entry rejects only itself; it is counted and its
+			// reason reported, and the rest of the catalog is kept.
+			res.Rejected++
+			if res.FirstReject == "" {
+				res.FirstReject = recErr.Error()
+			}
+			continue
+		}
+		res.Records = append(res.Records, rec)
 	}
-	return records, nil
+	return res, nil
 }
 
-func openRouterRecord(e openRouterEntry, fetchedAt time.Time) catalog.Record {
+func openRouterRecord(e openRouterEntry, fetchedAt time.Time) (catalog.Record, error) {
 	rec := catalog.Record{
 		ModelID:    e.ID,
 		AccessPath: catalog.AccessAPI,
@@ -117,31 +146,56 @@ func openRouterRecord(e openRouterEntry, fetchedAt time.Time) catalog.Record {
 	if e.ContextLength > 0 {
 		cw := e.ContextLength
 		rec.ContextWindow = &cw
+	} else {
+		rec.Absent["context_window"] = "OpenRouter public models list does not report a positive context_length"
 	}
-	if p, ok := perTokenToPerM(e.Pricing.Prompt); ok {
+	if p, reason := perTokenToPerM(e.Pricing.Prompt); reason == "" {
 		rec.PriceInPerM = &p
+	} else {
+		rec.Absent["price_in_per_m"] = reason
 	}
-	if p, ok := perTokenToPerM(e.Pricing.Completion); ok {
+	if p, reason := perTokenToPerM(e.Pricing.Completion); reason == "" {
 		rec.PriceOutPerM = &p
+	} else {
+		rec.Absent["price_out_per_m"] = reason
 	}
-	for _, m := range e.Architecture.InputModalities {
-		rec.Capabilities = append(rec.Capabilities, "in:"+m)
+	var err error
+	rec.Capabilities, err = appendModalities(rec.Capabilities, "in:", e.Architecture.InputModalities)
+	if err != nil {
+		return catalog.Record{}, fmt.Errorf("openrouter: %s input_modalities: %w", e.ID, err)
 	}
-	for _, m := range e.Architecture.OutputModalities {
-		rec.Capabilities = append(rec.Capabilities, "out:"+m)
+	rec.Capabilities, err = appendModalities(rec.Capabilities, "out:", e.Architecture.OutputModalities)
+	if err != nil {
+		return catalog.Record{}, fmt.Errorf("openrouter: %s output_modalities: %w", e.ID, err)
 	}
-	return rec
+	return rec, nil
 }
 
 // perTokenToPerM converts a USD-per-token decimal string to USD-per-million-
 // tokens. An empty or unparsable value is reported absent, never guessed.
-func perTokenToPerM(raw string) (float64, bool) {
+func perTokenToPerM(raw string) (float64, string) {
 	if raw == "" {
-		return 0, false
+		return 0, "OpenRouter public models list does not report this price"
 	}
-	var perToken float64
-	if _, err := fmt.Sscanf(raw, "%g", &perToken); err != nil {
-		return 0, false
+	perToken, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, "OpenRouter public models list reports an unparsable price"
 	}
-	return perToken * 1_000_000, true
+	if raw == "-1" {
+		return 0, "variable price"
+	}
+	if perToken < 0 {
+		return 0, "OpenRouter public models list reports a negative price"
+	}
+	return perToken * 1_000_000, ""
+}
+
+func appendModalities(dst []string, prefix string, values []string) ([]string, error) {
+	if len(values) > maxModalities {
+		return nil, fmt.Errorf("lists more than %d entries", maxModalities)
+	}
+	for i := 0; i < len(values) && i < maxModalities; i++ {
+		dst = append(dst, prefix+values[i])
+	}
+	return dst, nil
 }

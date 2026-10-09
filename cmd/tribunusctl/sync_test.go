@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cordanaLLM/tribunus/catalog"
 )
@@ -34,6 +35,22 @@ func TestSelectSources_Boundary(t *testing.T) {
 	}
 	if _, err := selectSources(" , , "); err == nil {
 		t.Fatal("selectSources() = nil error, want failure when every field is blank")
+	}
+	if _, err := selectSources("codex-local,codex-local"); err == nil {
+		t.Fatal("selectSources() = nil error, want failure for duplicate source")
+	}
+	if _, err := selectSources("codex-local,litellm-gateway,ollama-local,public-catalog,codex-local"); err == nil {
+		t.Fatal("selectSources() = nil error, want failure beyond source bound")
+	}
+}
+
+func TestSelectedRecordCap_Boundary(t *testing.T) {
+	total, err := selectedRecordCap(allSourceNames)
+	if err != nil {
+		t.Fatalf("selectedRecordCap() = %v", err)
+	}
+	if total > catalog.MaxSnapshotRecords {
+		t.Fatalf("selected source cap = %d, want <= %d", total, catalog.MaxSnapshotRecords)
 	}
 }
 
@@ -210,5 +227,118 @@ func TestRunSync_GatewayUnsetBase_ZeroRequests(t *testing.T) {
 	}
 	if !strings.Contains(snap.SourceRuns[0].Detail, "--litellm-base") {
 		t.Fatalf("Detail = %q, want mention of --litellm-base", snap.SourceRuns[0].Detail)
+	}
+}
+
+func TestRunSync_RejectsInvalidRecordsAndWritesRest(t *testing.T) {
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"id":"","owned_by":"vendor-a"},{"id":"vendor-a/model-1","owned_by":"vendor-a"}]}`)) //nolint:errcheck // test server response
+	}))
+	defer gateway.Close()
+
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("tok"), 0o600); err != nil {
+		t.Fatalf("setup token: %v", err)
+	}
+
+	out := filepath.Join(t.TempDir(), "out.json")
+	err := runSync([]string{
+		"--sources=litellm-gateway",
+		"--litellm-base=" + gateway.URL,
+		"--litellm-token-file=" + tokenFile,
+		"--out=" + out,
+	})
+	if err != nil {
+		t.Fatalf("runSync() = %v, want ok with invalid record rejected", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+	snap, err := catalog.ParseSnapshot(data)
+	if err != nil {
+		t.Fatalf("ParseSnapshot() = %v", err)
+	}
+	if len(snap.Records) != 1 || snap.Records[0].ModelID != "vendor-a/model-1" {
+		t.Fatalf("Records = %+v, want only the valid record", snap.Records)
+	}
+	if len(snap.SourceRuns) != 1 || !strings.Contains(snap.SourceRuns[0].Detail, "rejected=1") {
+		t.Fatalf("SourceRuns = %+v, want rejected=1 detail", snap.SourceRuns)
+	}
+}
+
+func TestRunSync_ErrorsWhenEverySourceFails(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "out.json")
+	err := runSync([]string{
+		"--sources=public-catalog",
+		"--openrouter-url=http://127.0.0.1:1",
+		"--litellm-prices-url=http://127.0.0.1:1",
+		"--out=" + out,
+	})
+	if err == nil {
+		t.Fatal("runSync() = nil, want error when every source fails")
+	}
+	if !strings.Contains(err.Error(), "every selected source failed") {
+		t.Fatalf("error = %q, want every selected source failed", err)
+	}
+	if _, statErr := os.Stat(out); !os.IsNotExist(statErr) {
+		t.Fatalf("stat output = %v, want no snapshot written", statErr)
+	}
+}
+
+func TestRejectInvalidRecords_Boundary(t *testing.T) {
+	run := sourceOutcome{
+		Records: []catalog.Record{
+			{
+				ModelID:    "",
+				AccessPath: catalog.AccessGateway,
+				Provenance: catalog.Provenance{
+					Source:    "test-source",
+					FetchedAt: time.Unix(1, 0).UTC(),
+					Kind:      catalog.KindMeasured,
+				},
+			},
+			{
+				ModelID:    "vendor-a/model-1",
+				AccessPath: catalog.AccessGateway,
+				Provenance: catalog.Provenance{
+					Source:    "test-source",
+					FetchedAt: time.Unix(1, 0).UTC(),
+					Kind:      catalog.KindMeasured,
+				},
+			},
+		},
+		Status: catalog.StatusOK,
+		Count:  2,
+	}
+
+	got := rejectInvalidRecords(run)
+	if got.Status != catalog.StatusOK {
+		t.Fatalf("Status = %v, want ok with one valid record remaining", got.Status)
+	}
+	if got.Count != 1 || len(got.Records) != 1 || got.Records[0].ModelID != "vendor-a/model-1" {
+		t.Fatalf("outcome = %+v, want only the valid record", got)
+	}
+	if !strings.Contains(got.Detail, "rejected=1") {
+		t.Fatalf("Detail = %q, want rejected=1", got.Detail)
+	}
+}
+
+func TestRejectInvalidRecords_DetailIsBounded(t *testing.T) {
+	run := sourceOutcome{Status: catalog.StatusOK}
+	for i := 0; i < 10; i++ {
+		run.Records = append(run.Records, catalog.Record{
+			AccessPath: catalog.AccessGateway,
+			Provenance: catalog.Provenance{Source: "test-source", FetchedAt: time.Unix(1, 0).UTC(), Kind: catalog.KindMeasured},
+		})
+	}
+	run.Count = len(run.Records)
+
+	got := rejectInvalidRecords(run)
+	if n := strings.Count(got.Detail, "rejected record"); n > 3 {
+		t.Fatalf("Detail names %d rejected records, want at most 3: %q", n, got.Detail)
+	}
+	if !strings.Contains(got.Detail, "rejected=10") {
+		t.Fatalf("Detail = %q, want the full count rejected=10", got.Detail)
 	}
 }

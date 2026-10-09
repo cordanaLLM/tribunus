@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/cordanaLLM/tribunus/catalog"
 )
@@ -98,6 +99,14 @@ func TestFetch_Negative(t *testing.T) {
 		if res.Detail == "" {
 			t.Fatal("Detail = empty, want a note explaining the /api/ps failure")
 		}
+		for _, rec := range res.Records {
+			if rec.Absent["capabilities.loaded"] == "" {
+				t.Fatalf("Absent = %+v, want unknown loaded-state reason", rec.Absent)
+			}
+			if contains(rec.Capabilities, "loaded") {
+				t.Fatalf("Capabilities = %v, want no loaded flag when /api/ps failed", rec.Capabilities)
+			}
+		}
 	})
 }
 
@@ -109,5 +118,20 @@ func TestFetch_Boundary(t *testing.T) {
 	res := Fetch(context.Background(), server.URL)
 	if res.Status != catalog.StatusSkip {
 		t.Fatalf("Status = %v, want skip for zero installed models", res.Status)
+	}
+}
+
+func TestToRecord_UnknownLoadedState(t *testing.T) {
+	rec := toRecord(tagEntry{
+		Name: "vendor-a/model-1",
+		Details: modelDetails{
+			ContextLength: 1024,
+		},
+	}, false, false, time.Unix(1, 0).UTC())
+	if rec.Absent["capabilities.loaded"] == "" {
+		t.Fatalf("Absent = %+v, want loaded-state reason", rec.Absent)
+	}
+	if contains(rec.Capabilities, "loaded") {
+		t.Fatalf("Capabilities = %v, want no loaded flag", rec.Capabilities)
 	}
 }

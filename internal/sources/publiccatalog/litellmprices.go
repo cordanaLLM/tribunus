@@ -18,6 +18,10 @@ const DefaultLiteLLMPriceMapURL = "https://raw.githubusercontent.com/BerriAI/lit
 // schema rather than naming a model; it is skipped, not parsed as a record.
 const litellmSampleSpecKey = "sample_spec"
 
+// MaxLiteLLMPriceRecords is the maximum number of records the LiteLLM price
+// map sub-source can contribute to one snapshot.
+const MaxLiteLLMPriceRecords = 4999
+
 type litellmPriceEntry struct {
 	InputCostPerToken  *float64 `json:"input_cost_per_token"`
 	OutputCostPerToken *float64 `json:"output_cost_per_token"`
@@ -37,32 +41,48 @@ type litellmPriceEntry struct {
 // discards every real model with it. Decoding entry-by-entry keeps that one
 // documentation key (and any one malformed model entry) from taking down
 // every other model in the same response.
+type liteLLMPriceResult struct {
+	Records   []catalog.Record
+	Malformed int
+}
+
 func fetchLiteLLMPrices(ctx context.Context, url string) ([]catalog.Record, error) {
+	res, err := fetchLiteLLMPricesWithReport(ctx, url)
+	return res.Records, err
+}
+
+func fetchLiteLLMPricesWithReport(ctx context.Context, url string) (liteLLMPriceResult, error) {
 	body, err := httpfetch.Get(ctx, url, requestTimeout, maxResponseBytes)
 	if err != nil {
-		return nil, fmt.Errorf("litellm-prices: %w", err)
+		return liteLLMPriceResult{}, fmt.Errorf("litellm-prices: %w", err)
 	}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("litellm-prices: decode response: %w", err)
+		return liteLLMPriceResult{}, fmt.Errorf("litellm-prices: decode response: %w", err)
 	}
-	if len(raw) > maxEntries {
-		return nil, fmt.Errorf("litellm-prices: response lists more than %d models", maxEntries)
+	if len(raw) > MaxLiteLLMPriceRecords {
+		return liteLLMPriceResult{}, fmt.Errorf("litellm-prices: response lists more than %d models", MaxLiteLLMPriceRecords)
 	}
 
 	fetchedAt := time.Now().UTC()
 	records := make([]catalog.Record, 0, len(raw))
+	malformed := 0
 	for id, msg := range raw {
-		if id == "" || id == litellmSampleSpecKey {
+		if id == litellmSampleSpecKey {
+			continue
+		}
+		if id == "" {
+			malformed++
 			continue
 		}
 		var e litellmPriceEntry
 		if err := json.Unmarshal(msg, &e); err != nil {
+			malformed++
 			continue // one malformed entry does not cost every other model its record
 		}
 		records = append(records, litellmPriceRecord(id, e, fetchedAt))
 	}
-	return records, nil
+	return liteLLMPriceResult{Records: records, Malformed: malformed}, nil
 }
 
 func litellmPriceRecord(id string, e litellmPriceEntry, fetchedAt time.Time) catalog.Record {
@@ -82,14 +102,20 @@ func litellmPriceRecord(id string, e litellmPriceEntry, fetchedAt time.Time) cat
 	if e.InputCostPerToken != nil {
 		p := *e.InputCostPerToken * 1_000_000
 		rec.PriceInPerM = &p
+	} else {
+		rec.Absent["price_in_per_m"] = "LiteLLM price map entry does not report input_cost_per_token"
 	}
 	if e.OutputCostPerToken != nil {
 		p := *e.OutputCostPerToken * 1_000_000
 		rec.PriceOutPerM = &p
+	} else {
+		rec.Absent["price_out_per_m"] = "LiteLLM price map entry does not report output_cost_per_token"
 	}
 	cw := contextWindowFrom(e)
 	if cw != nil {
 		rec.ContextWindow = cw
+	} else {
+		rec.Absent["context_window"] = "LiteLLM price map entry does not report max_input_tokens or max_tokens"
 	}
 	if e.Mode != "" {
 		rec.Capabilities = []string{"mode:" + e.Mode}

@@ -60,3 +60,32 @@ func TestFetch_Boundary(t *testing.T) {
 		t.Fatalf("got %d records, want 0", res.Count)
 	}
 }
+
+func TestFetch_ReportsMalformedLiteLLMEntries(t *testing.T) {
+	or := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[]}`)) //nolint:errcheck // test server response
+	}))
+	defer or.Close()
+	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"vendor-a/model-1":{"input_cost_per_token":0.00001},"vendor-b/model-2":{"max_input_tokens":"broken"}}`)) //nolint:errcheck // test server response
+	}))
+	defer llm.Close()
+
+	res := Fetch(context.Background(), or.URL, llm.URL)
+	if res.Status != catalog.StatusOK {
+		t.Fatalf("Status = %v, detail = %q, want ok", res.Status, res.Detail)
+	}
+	if !strings.Contains(res.Detail, "malformed=1") {
+		t.Fatalf("Detail = %q, want malformed=1", res.Detail)
+	}
+}
+
+func TestLiteLLMDetailReportsMalformedEntries(t *testing.T) {
+	got := liteLLMDetail(liteLLMPriceResult{
+		Records:   make([]catalog.Record, 1),
+		Malformed: 1,
+	})
+	if !strings.Contains(got, "malformed=1") {
+		t.Fatalf("liteLLMDetail() = %q, want malformed=1", got)
+	}
+}

@@ -29,12 +29,15 @@ import (
 const SourceName = "litellm-gateway"
 
 const (
+	// MaxRecords is the maximum number of records this source can contribute
+	// to one snapshot.
+	MaxRecords = 5000
 	// maxTokenFileBytes bounds the token file read (HISS-02).
 	maxTokenFileBytes = 4096
 	// maxResponseBytes bounds the /v1/models response read (HISS-02).
 	maxResponseBytes = 8 << 20
-	// maxModels bounds how many entries Fetch will turn into records (HISS-02).
-	maxModels = 5000
+	// maxModels bounds how many entries Fetch will turn into records.
+	maxModels = MaxRecords
 	// requestTimeout bounds the HTTP round trip (HISS-02).
 	requestTimeout = 15 * time.Second
 )

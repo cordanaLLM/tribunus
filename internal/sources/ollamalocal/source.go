@@ -30,10 +30,13 @@ import (
 const SourceName = "ollama-local"
 
 const (
+	// MaxRecords is the maximum number of records this source can contribute
+	// to one snapshot.
+	MaxRecords = 5000
 	// maxResponseBytes bounds each endpoint's response read (HISS-02).
 	maxResponseBytes = 8 << 20
-	// maxModels bounds how many entries Fetch will turn into records (HISS-02).
-	maxModels = 5000
+	// maxModels bounds how many entries Fetch will turn into records.
+	maxModels = MaxRecords
 	// requestTimeout bounds each HTTP round trip (HISS-02).
 	requestTimeout = 5 * time.Second
 )
@@ -85,11 +88,12 @@ func Fetch(ctx context.Context, endpoint string) Result {
 	}
 
 	loaded, psErr := loadedModelNames(ctx, endpoint)
+	loadedKnown := psErr == nil
 
 	fetchedAt := time.Now().UTC()
 	records := make([]catalog.Record, 0, len(tags.Models))
 	for _, m := range tags.Models {
-		records = append(records, toRecord(m, loaded[m.Name], fetchedAt))
+		records = append(records, toRecord(m, loaded[m.Name], loadedKnown, fetchedAt))
 	}
 
 	detail := ""
@@ -136,7 +140,7 @@ func loadedModelNames(ctx context.Context, endpoint string) (map[string]bool, er
 	return loaded, nil
 }
 
-func toRecord(m tagEntry, loaded bool, fetchedAt time.Time) catalog.Record {
+func toRecord(m tagEntry, loaded, loadedKnown bool, fetchedAt time.Time) catalog.Record {
 	rec := catalog.Record{
 		ModelID:      m.Name,
 		Provider:     "ollama",
@@ -156,6 +160,8 @@ func toRecord(m tagEntry, loaded bool, fetchedAt time.Time) catalog.Record {
 	if m.Details.ContextLength > 0 {
 		cw := m.Details.ContextLength
 		rec.ContextWindow = &cw
+	} else {
+		rec.Absent["context_window"] = "local daemon did not report a positive context_length"
 	}
 	if m.Details.ParameterSize != "" {
 		rec.Capabilities = append(rec.Capabilities, "params:"+m.Details.ParameterSize)
@@ -165,6 +171,9 @@ func toRecord(m tagEntry, loaded bool, fetchedAt time.Time) catalog.Record {
 	}
 	if loaded {
 		rec.Capabilities = append(rec.Capabilities, "loaded")
+	}
+	if !loadedKnown {
+		rec.Absent["capabilities.loaded"] = "/api/ps unavailable, loaded state unknown"
 	}
 	return rec
 }

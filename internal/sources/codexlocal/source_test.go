@@ -127,3 +127,17 @@ func TestFetch_SessionEndsWithNullPrimary(t *testing.T) {
 		t.Fatalf("UsageWindow = %+v, want the earlier line's used_percent=92.0", res.Records[0].UsageWindow)
 	}
 }
+
+func TestFetch_EmptyLimitIDFails(t *testing.T) {
+	dir := t.TempDir()
+	line := `{"timestamp":"2026-09-13T12:56:47.753Z","ordinal":1,"type":"event_msg","payload":{"rate_limits":{"limit_id":"","primary":{"used_percent":10.0,"window_minutes":10080,"resets_at":1789858494},"plan_type":"pro"}}}`
+	writeSession(t, dir, "new.jsonl", line, time.Now())
+
+	res := Fetch(context.Background(), dir)
+	if res.Status != catalog.StatusFail {
+		t.Fatalf("Status = %v, detail = %q, want fail", res.Status, res.Detail)
+	}
+	if !strings.Contains(res.Detail, "limit_id") {
+		t.Fatalf("Detail = %q, want limit_id reason", res.Detail)
+	}
+}

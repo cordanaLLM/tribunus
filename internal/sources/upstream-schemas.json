@@ -17,7 +17,7 @@
     {
       "id": "litellm-price-map",
       "url_template": "https://raw.githubusercontent.com/BerriAI/litellm/{revision}/model_prices_and_context_window.json",
-      "pinned_revision": "f48d837cd21208771ee5b15770e4425a32907f1b",
+      "pinned_revision": "a3236ba9479e32ee914d43f12082f4423403e3ca",
       "full_document_sha256": "082626b56deffa32c5d873d30c0a7cf4c45490b200099f2202e2499fe8568af2",
       "spdx_license": "MIT",
       "copyright_holder": "Berri AI",

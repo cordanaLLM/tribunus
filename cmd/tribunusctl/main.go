@@ -10,6 +10,8 @@ import (
 	"os"
 )
 
+var version = ""
+
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
@@ -24,6 +26,8 @@ func main() {
 		err = runShow(os.Args[2:])
 	case "schema":
 		err = runSchema(os.Stdout)
+	case "version":
+		printVersion()
 	case "help", "-h", "--help":
 		printUsage()
 		return
@@ -45,4 +49,13 @@ func printUsage() {
 	fmt.Println("  tribunusctl sync [--sources=a,b] [--out=file] [--litellm-base=url] [--litellm-token-file=path] [--ollama=url]")
 	fmt.Println("  tribunusctl show [--in=file]")
 	fmt.Println("  tribunusctl schema")
+	fmt.Println("  tribunusctl version")
+}
+
+func printVersion() {
+	if version == "" {
+		fmt.Println("dev")
+		return
+	}
+	fmt.Println(version)
 }

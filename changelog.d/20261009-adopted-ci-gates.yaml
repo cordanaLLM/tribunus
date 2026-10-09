@@ -1,4 +1,0 @@
-type: added
-title: Run the adopted verification gates on every pull request and main branch push
-issue: "1"
-breaking: false

@@ -1,4 +1,0 @@
-type: added
-title: Check catalog sources against pinned upstream schemas before accepting snapshot changes
-issue: "28"
-breaking: false

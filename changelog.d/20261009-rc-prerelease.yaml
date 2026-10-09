@@ -1,4 +1,0 @@
-type: fixed
-title: Publish release-candidate tags as prereleases, never as the latest release
-issue: "29"
-breaking: false

@@ -1,0 +1,1 @@
+{"models":[{"name":"vendor-a/model-1","model":"vendor-a/model-1","modified_at":"2026-10-09T00:00:00Z","size":1,"details":{"parameter_size":"1B","quantization_level":"Q4","context_length":8192},"capabilities":["completion"]}]}

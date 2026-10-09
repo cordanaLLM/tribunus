@@ -1,6 +1,7 @@
 package litellmgateway
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -66,6 +67,44 @@ func TestFetch_Positive(t *testing.T) {
 	})
 }
 
+func TestUpstreamContractDocumentPinned(t *testing.T) {
+	body := mustReadFixture(t, "testdata/upstream/openai-models-openapi.yaml")
+	for _, marker := range [][]byte{
+		[]byte("/models:"),
+		[]byte("ListModelsResponse"),
+		[]byte("owned_by:"),
+		[]byte("id:"),
+	} {
+		if !bytes.Contains(body, marker) {
+			t.Fatalf("OpenAI upstream contract missing marker %q", marker)
+		}
+	}
+}
+
+func TestFetch_UpstreamFixtureContract(t *testing.T) {
+	body := string(mustReadFixture(t, "testdata/fixtures/models-response.json"))
+	tokenPath := writeTokenFile(t, "tok")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(body)) //nolint:errcheck // test server response
+	}))
+	defer server.Close()
+
+	res := Fetch(context.Background(), server.URL, tokenPath)
+	if res.Status != catalog.StatusOK {
+		t.Fatalf("Status = %v, detail = %q, want ok", res.Status, res.Detail)
+	}
+
+	mutated := strings.Replace(body, `"id":"vendor-a/model-1",`, "", 1)
+	mutatedServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(mutated)) //nolint:errcheck // test server response
+	}))
+	defer mutatedServer.Close()
+	res = Fetch(context.Background(), mutatedServer.URL, tokenPath)
+	if res.Status != catalog.StatusFail {
+		t.Fatalf("Status = %v, detail = %q, want fail for missing model id", res.Status, res.Detail)
+	}
+}
+
 // TestFetch_NeverLeaksToken asserts the token never appears verbatim in any
 // Result.Detail, across every failure path this source can hit.
 func TestFetch_NeverLeaksToken(t *testing.T) {
@@ -104,6 +143,15 @@ func TestFetch_NeverLeaksToken(t *testing.T) {
 			t.Fatalf("Detail leaked the token: %q", res.Detail)
 		}
 	})
+}
+
+func mustReadFixture(t *testing.T, path string) []byte {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return body
 }
 
 func TestFetch_Negative(t *testing.T) {
@@ -150,15 +198,18 @@ func TestFetch_Boundary(t *testing.T) {
 		}
 	})
 
-	t.Run("zero models is a skip not a fail", func(t *testing.T) {
+	t.Run("zero models fails as an empty response", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(`{"data":[]}`)) //nolint:errcheck // test httptest server response; a write failure here would fail the test's own HTTP round trip, not silently corrupt anything
 		}))
 		defer server.Close()
 		tokenPath := writeTokenFile(t, "tok")
 		res := Fetch(context.Background(), server.URL, tokenPath)
-		if res.Status != catalog.StatusSkip {
-			t.Fatalf("Status = %v, want skip for zero models", res.Status)
+		if res.Status != catalog.StatusFail {
+			t.Fatalf("Status = %v, want fail for zero models", res.Status)
+		}
+		if !strings.Contains(res.Detail, "empty response") {
+			t.Fatalf("Detail = %q, want empty response", res.Detail)
 		}
 	})
 }

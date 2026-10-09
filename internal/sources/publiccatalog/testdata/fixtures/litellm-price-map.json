@@ -1,0 +1,1 @@
+{"sample_spec":{"max_input_tokens":"max input tokens, if the provider specifies it. if not default to max_tokens"},"vendor-a/model-1":{"input_cost_per_token":0.000001,"output_cost_per_token":0.000002,"max_input_tokens":8192,"litellm_provider":"vendor-a","mode":"chat"}}

@@ -1,0 +1,104 @@
+{
+  "sources": [
+    {
+      "id": "openai-openapi",
+      "url_template": "https://raw.githubusercontent.com/openai/openai-openapi/{revision}/openapi.yaml",
+      "pinned_revision": "0ef225c4f701046f8fe88cae9d29d0df4d1a9fa9",
+      "full_document_sha256": "06d914881ac7e73185739ce80bc3ad84bfcd5df022e6bab5527b87d938f67506",
+      "spdx_license": "MIT",
+      "copyright_holder": "OpenAI",
+      "fragments": [
+        {
+          "path": "internal/sources/litellmgateway/testdata/upstream/openai-models-openapi.yaml",
+          "body_sha256": "ba70501543a642f166274cdc7882388eecec65d122d12b3139eba6cb2226428f"
+        }
+      ]
+    },
+    {
+      "id": "litellm-price-map",
+      "url_template": "https://raw.githubusercontent.com/BerriAI/litellm/{revision}/model_prices_and_context_window.json",
+      "pinned_revision": "f48d837cd21208771ee5b15770e4425a32907f1b",
+      "full_document_sha256": "082626b56deffa32c5d873d30c0a7cf4c45490b200099f2202e2499fe8568af2",
+      "spdx_license": "MIT",
+      "copyright_holder": "Berri AI",
+      "fragments": [
+        {
+          "path": "internal/sources/publiccatalog/testdata/upstream/litellm-sample-spec.json",
+          "provenance_path": "internal/sources/publiccatalog/testdata/upstream/litellm-sample-spec.provenance.json",
+          "body_sha256": "e81b98e01a1eb2ceb2a7fe70b4a6aa1c02af0cdf0ce92aa14ef79fcda6df7baa"
+        }
+      ]
+    },
+    {
+      "id": "openrouter-models",
+      "url_template": "https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties.md",
+      "pinned_revision": "OpenAPI info.version 1.0.0",
+      "pin_description": "OpenRouter does not publish a stable commit pin for this document; this fragment is pinned by the embedded OpenAPI info.version plus full-document sha256.",
+      "full_document_sha256": "e34bf4a4e01c917f7c1e39d2592b2b1f108982e34edfc5c18501d4e05c77180c",
+      "spdx_license": "MIT",
+      "copyright_holder": "OpenRouter",
+      "fragments": [
+        {
+          "path": "internal/sources/publiccatalog/testdata/upstream/openrouter-models-openapi.yaml",
+          "body_sha256": "7c70a382aa71af0f77094d5a38ef1d1d7ec09c22ce0dfa6d633a4c98bbe7065b"
+        }
+      ]
+    },
+    {
+      "id": "ollama-api",
+      "url_template": "https://raw.githubusercontent.com/ollama/ollama/{revision}/docs/api.md",
+      "pinned_revision": "c2b7368d4156656ddb9a23b43f721a841b9c23e0",
+      "full_document_sha256": "96db03080e385dbabf5d70e75f298d41b75983bc30975cae56f7119f848dd0f5",
+      "spdx_license": "MIT",
+      "copyright_holder": "Ollama",
+      "fragments": [
+        {
+          "path": "internal/sources/ollamalocal/testdata/upstream/ollama-api-fragment.md",
+          "body_sha256": "de0f8196cacefe29ddb552183899aec4b6dedfb06afa8c62344b844911bced10"
+        }
+      ]
+    },
+    {
+      "id": "codex-rate-limit-status-payload",
+      "url_template": "https://raw.githubusercontent.com/openai/codex/{revision}/codex-rs/codex-backend-openapi-models/src/models/rate_limit_status_payload.rs",
+      "pinned_revision": "0ada5d8806cdad498230d5b1b2924091e04c8feb",
+      "full_document_sha256": "4b44735986720667483a00e59c3cd63da6c3ad488fc0d99df33dd14fbbdd8849",
+      "spdx_license": "Apache-2.0",
+      "copyright_holder": "OpenAI",
+      "fragments": [
+        {
+          "path": "internal/sources/codexlocal/testdata/upstream/rate_limit_status_payload.rs",
+          "body_sha256": "4b44735986720667483a00e59c3cd63da6c3ad488fc0d99df33dd14fbbdd8849"
+        }
+      ]
+    },
+    {
+      "id": "codex-rate-limit-status-details",
+      "url_template": "https://raw.githubusercontent.com/openai/codex/{revision}/codex-rs/codex-backend-openapi-models/src/models/rate_limit_status_details.rs",
+      "pinned_revision": "0ada5d8806cdad498230d5b1b2924091e04c8feb",
+      "full_document_sha256": "38935bb0f24cbb60bb9def3426fdd44bdec75dee92d8c0396698e851f122c00a",
+      "spdx_license": "Apache-2.0",
+      "copyright_holder": "OpenAI",
+      "fragments": [
+        {
+          "path": "internal/sources/codexlocal/testdata/upstream/rate_limit_status_details.rs",
+          "body_sha256": "38935bb0f24cbb60bb9def3426fdd44bdec75dee92d8c0396698e851f122c00a"
+        }
+      ]
+    },
+    {
+      "id": "codex-rate-limit-window-snapshot",
+      "url_template": "https://raw.githubusercontent.com/openai/codex/{revision}/codex-rs/codex-backend-openapi-models/src/models/rate_limit_window_snapshot.rs",
+      "pinned_revision": "0ada5d8806cdad498230d5b1b2924091e04c8feb",
+      "full_document_sha256": "f667756c00e512c779cb0f593737094b1292990494624492f0c0bb48dcd6918b",
+      "spdx_license": "Apache-2.0",
+      "copyright_holder": "OpenAI",
+      "fragments": [
+        {
+          "path": "internal/sources/codexlocal/testdata/upstream/rate_limit_window_snapshot.rs",
+          "body_sha256": "f667756c00e512c779cb0f593737094b1292990494624492f0c0bb48dcd6918b"
+        }
+      ]
+    }
+  ]
+}

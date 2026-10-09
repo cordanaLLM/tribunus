@@ -34,3 +34,10 @@ docs-figures:
 	@node tools/figures/build.mjs check
 	@node tools/figures/build.mjs sources
 # END praetor documentation gate
+
+.PHONY: schemas-refresh schemas-check
+schemas-refresh:
+	@go run -tags schemasrefresh ./tools/schemas -mode=refresh -root=. -out=.
+
+schemas-check:
+	@go run -tags schemasrefresh ./tools/schemas -mode=check -root=.

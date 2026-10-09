@@ -265,6 +265,9 @@ func TestRunSync_RejectsInvalidRecordsAndWritesRest(t *testing.T) {
 	if len(snap.SourceRuns) != 1 || !strings.Contains(snap.SourceRuns[0].Detail, "rejected=1") {
 		t.Fatalf("SourceRuns = %+v, want rejected=1 detail", snap.SourceRuns)
 	}
+	if snap.SourceRuns[0].Status != catalog.StatusDegraded {
+		t.Fatalf("Status = %v, want degraded after rejecting one invalid record", snap.SourceRuns[0].Status)
+	}
 }
 
 func TestRunSync_ErrorsWhenEverySourceFails(t *testing.T) {
@@ -313,8 +316,8 @@ func TestRejectInvalidRecords_Boundary(t *testing.T) {
 	}
 
 	got := rejectInvalidRecords(run)
-	if got.Status != catalog.StatusOK {
-		t.Fatalf("Status = %v, want ok with one valid record remaining", got.Status)
+	if got.Status != catalog.StatusDegraded {
+		t.Fatalf("Status = %v, want degraded with one valid record remaining", got.Status)
 	}
 	if got.Count != 1 || len(got.Records) != 1 || got.Records[0].ModelID != "vendor-a/model-1" {
 		t.Fatalf("outcome = %+v, want only the valid record", got)

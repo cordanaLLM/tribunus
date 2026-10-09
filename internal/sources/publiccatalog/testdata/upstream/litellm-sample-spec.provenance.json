@@ -1,0 +1,10 @@
+{
+  "changes": "provenance header added by Tribunus; extracted the sample_spec entry",
+  "copyright_holder": "Berri AI",
+  "extraction_date": "2026-10-09",
+  "full_document_sha256": "082626b56deffa32c5d873d30c0a7cf4c45490b200099f2202e2499fe8568af2",
+  "pinned_revision": "f48d837cd21208771ee5b15770e4425a32907f1b",
+  "source_pin_description": "",
+  "source_url": "https://raw.githubusercontent.com/BerriAI/litellm/f48d837cd21208771ee5b15770e4425a32907f1b/model_prices_and_context_window.json",
+  "spdx_license": "MIT"
+}

@@ -1,0 +1,646 @@
+# Provenance:
+# Source URL: https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties.md
+# Pinned revision: OpenAPI info.version 1.0.0
+# Full document sha256: e34bf4a4e01c917f7c1e39d2592b2b1f108982e34edfc5c18501d4e05c77180c
+# Extraction date: 2026-10-09
+# SPDX licence: MIT
+# Copyright holder: OpenRouter
+# Changes: provenance header added by Tribunus; extracted getModels path and model schema blocks
+
+openapi: 3.1.0
+paths:
+  /models:
+    get:
+      tags:
+        - Models
+      summary: List all models and their properties
+      operationId: getModels
+      parameters:
+        - description: >-
+            Number of records to skip for pagination. When both offset and limit
+            are omitted, the full list is returned
+          in: query
+          name: offset
+          required: false
+          schema:
+            default: 0
+            description: >-
+              Number of records to skip for pagination. When both offset and
+              limit are omitted, the full list is returned
+            minimum: 0
+            type:
+              - integer
+              - 'null'
+        - description: >-
+            Maximum number of records to return (max 1000). When both offset and
+            limit are omitted, the full list is returned
+          in: query
+          name: limit
+          required: false
+          schema:
+            default: 500
+            description: >-
+              Maximum number of records to return (max 1000). When both offset
+              and limit are omitted, the full list is returned
+            maximum: 1000
+            minimum: 1
+            type: integer
+        - description: Filter models by use case category
+          in: query
+          name: category
+          required: false
+          schema:
+            description: Filter models by use case category
+            enum:
+              - programming
+              - roleplay
+              - marketing
+              - marketing/seo
+              - technology
+              - science
+              - translation
+              - legal
+              - finance
+              - health
+              - trivia
+              - academia
+            type: string
+        - description: Filter models by supported parameter (comma-separated)
+          in: query
+          name: supported_parameters
+          required: false
+          schema:
+            description: Filter models by supported parameter (comma-separated)
+            type: string
+        - description: >-
+            Filter models by output modality. Accepts a comma-separated list of
+            modalities (text, image, embeddings, audio, video, rerank,
+            decisions, speech, transcription) or "all" to include all models.
+            Defaults to "text".
+          in: query
+          name: output_modalities
+          required: false
+          schema:
+            description: >-
+              Filter models by output modality. Accepts a comma-separated list
+              of modalities (text, image, embeddings, audio, video, rerank,
+              decisions, speech, transcription) or "all" to include all models.
+              Defaults to "text".
+            type: string
+        - description: >-
+            Sort the returned models server-side. Prefer this over fetching the
+            full list and sorting client-side. Options: pricing-low-to-high,
+            pricing-high-to-low (average prompt/completion price),
+            context-high-to-low (context length), throughput-high-to-low,
+            latency-low-to-high (recent median performance), most-popular,
+            top-weekly (tokens processed in the last week), newest (creation
+            date), intelligence-high-to-low, coding-high-to-low,
+            agentic-high-to-low (Artificial Analysis indices),
+            design-arena-elo-high-to-low (best Design Arena ELO across arenas).
+            Models without a score for the chosen benchmark are placed last.
+            When omitted, the existing default ordering is preserved.
+          in: query
+          name: sort
+          required: false
+          schema:
+            description: >-
+              Sort the returned models server-side. Prefer this over fetching
+              the full list and sorting client-side. Options:
+              pricing-low-to-high, pricing-high-to-low (average
+              prompt/completion price), context-high-to-low (context length),
+              throughput-high-to-low, latency-low-to-high (recent median
+              performance), most-popular, top-weekly (tokens processed in the
+              last week), newest (creation date), intelligence-high-to-low,
+              coding-high-to-low, agentic-high-to-low (Artificial Analysis
+              indices), design-arena-elo-high-to-low (best Design Arena ELO
+              across arenas). Models without a score for the chosen benchmark
+              are placed last. When omitted, the existing default ordering is
+              preserved.
+            enum:
+              - most-popular
+              - newest
+              - top-weekly
+              - pricing-low-to-high
+              - pricing-high-to-low
+              - context-high-to-low
+              - throughput-high-to-low
+              - latency-low-to-high
+              - intelligence-high-to-low
+              - coding-high-to-low
+              - agentic-high-to-low
+              - design-arena-elo-high-to-low
+            type: string
+        - description: Return results as RSS feed
+          in: query
+          name: use_rss
+          required: false
+          schema:
+            description: Return results as RSS feed
+            type: string
+        - description: Use chat links in RSS feed items
+          in: query
+          name: use_rss_chat_links
+          required: false
+          schema:
+            description: Use chat links in RSS feed items
+            type: string
+        - description: Free-text search by model name or slug.
+          in: query
+          name: q
+          required: false
+          schema:
+            description: Free-text search by model name or slug.
+            type: string
+        - description: >-
+            Filter models by input modality. Comma-separated list of: text,
+            image, audio, file.
+          in: query
+          name: input_modalities
+          required: false
+          schema:
+            description: >-
+              Filter models by input modality. Comma-separated list of: text,
+              image, audio, file.
+            type: string
+        - description: >-
+            Minimum context length (tokens). Models with smaller context are
+            excluded.
+          in: query
+          name: context
+          required: false
+          schema:
+            description: >-
+              Minimum context length (tokens). Models with smaller context are
+              excluded.
+            minimum: 1
+            type: integer
+        - description: Minimum prompt price in $/M tokens.
+          in: query
+          name: min_price
+          required: false
+          schema:
+            description: Minimum prompt price in $/M tokens.
+            minimum: 0
+            type:
+              - number
+              - 'null'
+        - description: Maximum prompt price in $/M tokens.
+          in: query
+          name: max_price
+          required: false
+          schema:
+            description: Maximum prompt price in $/M tokens.
+            minimum: 0
+            type:
+              - number
+              - 'null'
+        - description: >-
+            Filter models by architecture/model family (e.g. GPT, Claude,
+            Gemini, Llama).
+          in: query
+          name: arch
+          required: false
+          schema:
+            description: >-
+              Filter models by architecture/model family (e.g. GPT, Claude,
+              Gemini, Llama).
+            type: string
+        - description: >-
+            Filter models by the organization that created the model.
+            Comma-separated list of author slugs.
+          in: query
+          name: model_authors
+          required: false
+          schema:
+            description: >-
+              Filter models by the organization that created the model.
+              Comma-separated list of author slugs.
+            type: string
+        - description: >-
+            Filter models by hosting provider. Comma-separated list of provider
+            names.
+          in: query
+          name: providers
+          required: false
+          schema:
+            description: >-
+              Filter models by hosting provider. Comma-separated list of
+              provider names.
+            type: string
+        - description: >-
+            Filter by distillation capability. "true" returns only distillable
+            models, "false" excludes them.
+          in: query
+          name: distillable
+          required: false
+          schema:
+            description: >-
+              Filter by distillation capability. "true" returns only distillable
+              models, "false" excludes them.
+            enum:
+              - 'true'
+              - 'false'
+            type: string
+        - description: >-
+            When set to "true", return only models with zero data retention
+            endpoints.
+          in: query
+          name: zdr
+          required: false
+          schema:
+            description: >-
+              When set to "true", return only models with zero data retention
+              endpoints.
+            enum:
+              - 'true'
+            type: string
+        - description: >-
+            Filter to models with endpoints in the given data region ("eu" or
+            "us").
+          in: query
+          name: region
+          required: false
+          schema:
+            description: >-
+              Filter to models with endpoints in the given data region ("eu" or
+              "us").
+            enum:
+              - eu
+              - us
+            type: string
+        - description: Minimum completion (output) price in $/M tokens.
+          in: query
+          name: min_output_price
+          required: false
+          schema:
+            description: Minimum completion (output) price in $/M tokens.
+            minimum: 0
+            type:
+              - number
+              - 'null'
+        - description: Maximum completion (output) price in $/M tokens.
+          in: query
+          name: max_output_price
+          required: false
+          schema:
+            description: Maximum completion (output) price in $/M tokens.
+            minimum: 0
+            type:
+              - number
+              - 'null'
+        - description: Minimum model age in days since its creation date.
+          in: query
+          name: min_age_days
+          required: false
+          schema:
+            description: Minimum model age in days since its creation date.
+            minimum: 0
+            type:
+              - integer
+              - 'null'
+        - description: Maximum model age in days since its creation date.
+          in: query
+          name: max_age_days
+          required: false
+          schema:
+            description: Maximum model age in days since its creation date.
+            minimum: 0
+            type:
+              - integer
+              - 'null'
+        - description: Minimum Artificial Analysis intelligence index.
+          in: query
+          name: min_intelligence_index
+          required: false
+          schema:
+            description: Minimum Artificial Analysis intelligence index.
+            minimum: 0
+            type:
+              - number
+              - 'null'
+        - description: Maximum Artificial Analysis intelligence index.
+          in: query
+          name: max_intelligence_index
+          required: false
+          schema:
+            description: Maximum Artificial Analysis intelligence index.
+            minimum: 0
+            type:
+              - number
+              - 'null'
+        - description: Minimum Artificial Analysis coding index.
+          in: query
+          name: min_coding_index
+          required: false
+          schema:
+            description: Minimum Artificial Analysis coding index.
+            minimum: 0
+            type:
+              - number
+              - 'null'
+        - description: Maximum Artificial Analysis coding index.
+          in: query
+          name: max_coding_index
+          required: false
+          schema:
+            description: Maximum Artificial Analysis coding index.
+            minimum: 0
+            type:
+              - number
+              - 'null'
+        - description: Minimum Artificial Analysis agentic index.
+          in: query
+          name: min_agentic_index
+          required: false
+          schema:
+            description: Minimum Artificial Analysis agentic index.
+            minimum: 0
+            type:
+              - number
+              - 'null'
+        - description: Maximum Artificial Analysis agentic index.
+          in: query
+          name: max_agentic_index
+          required: false
+          schema:
+            description: Maximum Artificial Analysis agentic index.
+            minimum: 0
+            type:
+              - number
+              - 'null'
+        - description: >-
+            Minimum tool-calling success rate, as a fraction in [0, 1] (e.g. 0.9
+            = 90% of requests finishing with a tool_calls finish reason).
+          in: query
+          name: min_tool_success_rate
+          required: false
+          schema:
+            description: >-
+              Minimum tool-calling success rate, as a fraction in [0, 1] (e.g.
+              0.9 = 90% of requests finishing with a tool_calls finish reason).
+            maximum: 1
+            minimum: 0
+            type:
+              - number
+              - 'null'
+        - description: Maximum tool-calling success rate, as a fraction in [0, 1].
+          in: query
+          name: max_tool_success_rate
+          required: false
+          schema:
+            description: Maximum tool-calling success rate, as a fraction in [0, 1].
+            maximum: 1
+            minimum: 0
+            type:
+              - number
+              - 'null'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelsListResponse'
+            application/rss+xml:
+              schema:
+                type: string
+          description: Returns a list of models or RSS feed
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BadRequestResponse'
+          description: Bad Request - Invalid request parameters or malformed input
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForbiddenResponse'
+          description: Forbidden - Authentication successful but insufficient permissions
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalServerResponse'
+          description: Internal Server Error - Unexpected server error
+components:
+  schemas:
+    ModelsListResponse:
+      description: List of available models
+      properties:
+        data:
+          $ref: '#/components/schemas/ModelsListResponseData'
+        links:
+          description: Pagination links
+          properties:
+            next:
+              description: >-
+                URL for the next page of results, or null if this is the last
+                page
+              type:
+                - string
+                - 'null'
+          required:
+            - next
+          type: object
+        total_count:
+          description: Total number of models matching the query
+          type: integer
+      required:
+        - data
+        - total_count
+        - links
+      type: object
+    ModelsListResponseData:
+      description: List of available models
+      items:
+        $ref: '#/components/schemas/Model'
+      type: array
+    Model:
+      description: Information about an AI model available on OpenRouter
+      properties:
+        alias_target:
+          $ref: '#/components/schemas/ModelAliasTarget'
+        architecture:
+          $ref: '#/components/schemas/ModelArchitecture'
+        benchmarks:
+          $ref: '#/components/schemas/ModelBenchmarks'
+        canonical_slug:
+          description: Canonical slug for the model
+          type: string
+        context_length:
+          description: Maximum context length in tokens
+          type:
+            - integer
+            - 'null'
+        created:
+          description: Unix timestamp of when the model was created
+          type: integer
+        default_parameters:
+          $ref: '#/components/schemas/DefaultParameters'
+        description:
+          description: Description of the model
+          type: string
+        expiration_date:
+          description: >-
+            The date after which the model may be removed. ISO 8601 date string
+            (YYYY-MM-DD) or null if no expiration.
+          type:
+            - string
+            - 'null'
+        hugging_face_id:
+          description: Hugging Face model identifier, if applicable
+          type:
+            - string
+            - 'null'
+        id:
+          description: Unique identifier for the model
+          type: string
+        knowledge_cutoff:
+          description: >-
+            The date up to which the model was trained on data. ISO 8601 date
+            string (YYYY-MM-DD) or null if unknown.
+          type:
+            - string
+            - 'null'
+        links:
+          $ref: '#/components/schemas/ModelLinks'
+        name:
+          description: Display name of the model
+          type: string
+        per_request_limits:
+          $ref: '#/components/schemas/PerRequestLimits'
+        pricing:
+          $ref: '#/components/schemas/PublicPricing'
+        reasoning:
+          $ref: '#/components/schemas/ModelReasoning'
+        supported_parameters:
+          description: List of supported parameters for this model
+          items:
+            $ref: '#/components/schemas/Parameter'
+          type: array
+        supported_voices:
+          description: >-
+            List of supported voice identifiers for TTS models. Null for non-TTS
+            models.
+          items:
+            type: string
+          type:
+            - array
+            - 'null'
+        top_provider:
+          $ref: '#/components/schemas/TopProviderInfo'
+      required:
+        - id
+        - canonical_slug
+        - name
+        - created
+        - pricing
+        - context_length
+        - architecture
+        - top_provider
+        - per_request_limits
+        - supported_parameters
+        - default_parameters
+        - supported_voices
+        - links
+      type: object
+    ModelArchitecture:
+      description: Model architecture information
+      properties:
+        input_modalities:
+          description: Supported input modalities
+          items:
+            $ref: '#/components/schemas/InputModality'
+          type: array
+        instruct_type:
+          $ref: '#/components/schemas/InstructType'
+        modality:
+          description: Primary modality of the model
+          type:
+            - string
+            - 'null'
+        output_modalities:
+          description: Supported output modalities
+          items:
+            $ref: '#/components/schemas/OutputModality'
+          type: array
+        tokenizer:
+          $ref: '#/components/schemas/ModelGroup'
+      required:
+        - modality
+        - input_modalities
+        - output_modalities
+      type: object
+    PublicPricing:
+      description: Pricing information for the model
+      properties:
+        audio:
+          description: Price in USD per audio input token
+          type: string
+        audio_output:
+          description: Price in USD per audio output token
+          type: string
+        completion:
+          description: Price in USD per token for completion (output) generation
+          type: string
+        discount:
+          description: >-
+            Fractional discount applied to this endpoint's pricing; the price is
+            multiplied by (1 - discount) (0 = no discount, 1 = free)
+          format: double
+          type: number
+        image:
+          description: Price in USD per input image
+          type: string
+        image_output:
+          description: Price in USD per output image
+          type: string
+        image_token:
+          description: Price in USD per image token
+          type: string
+        input_audio_cache:
+          description: Price in USD per cached audio input token
+          type: string
+        input_cache_read:
+          description: Price in USD per cached input token (read)
+          type: string
+        input_cache_write:
+          description: >-
+            Price per cache-write token, in USD per token. For providers with
+            multiple cache TTLs (e.g. Anthropic), this is the default (5-minute)
+            cache-write rate.
+          type: string
+        input_cache_write_1h:
+          description: >-
+            Price per 1-hour cache-write token, in USD per token. Only present
+            for providers that price an extended (1-hour) cache TTL separately,
+            such as Anthropic.
+          type: string
+        internal_reasoning:
+          description: Price in USD per internal reasoning token
+          type: string
+        overrides:
+          description: >-
+            Conditional overrides of the base pricing (e.g. long-context or
+            time-based pricing). An entry applies when all of its condition
+            fields (e.g. min_prompt_tokens, or the utc_start/utc_end time
+            window) match the request; among applicable entries, later entries
+            win per key; price keys absent from an entry inherit the base price.
+            The top-level pricing keys always reflect the price that applies
+            under default conditions.
+          items:
+            $ref: '#/components/schemas/PricingOverride'
+          type: array
+        prompt:
+          description: Price in USD per token for prompt (input) processing
+          type: string
+        request:
+          description: Price in USD per request
+          type: string
+        web_search:
+          description: Price in USD per web search
+          type: string
+      required:
+        - prompt
+        - completion
+      type: object

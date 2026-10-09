@@ -26,6 +26,10 @@ Owns task graphs, the event bus and budgets.
 - Traversal is bounded. The proposed depth limit is 12; it is a design parameter, not a standard.
 - State changes are staged and roll back when a trajectory breaks a guardrail.
 
+#### Upstream schemas
+
+Catalog parsers are checked against small pinned upstream schema fragments under `internal/sources/*/testdata/upstream/`, with the source revisions and full-document digests recorded in `internal/sources/upstream-schemas.json`. Run `make schemas-refresh` to regenerate those fragments from the pinned upstream documents, and `make schemas-check` to verify the committed bytes still match.
+
 ### Rust vector kernel
 
 Matches tasks to agent skill embeddings with SIMD distance (cosine, Euclidean). Integer-indexed arena trees keep hierarchical task decomposition cache-friendly. A topological check (Kahn) verifies acyclicity in O(V + E).

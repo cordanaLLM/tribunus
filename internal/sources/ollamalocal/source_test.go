@@ -1,9 +1,12 @@
 package ollamalocal
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +34,42 @@ func newServer(t *testing.T, tags, ps string, psStatus int) *httptest.Server {
 const sampleTags = `{"models":[{"name":"hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_M","model":"hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_M","modified_at":"2026-08-22T20:09:26Z","size":17395587762,"details":{"parameter_size":"27.3B","quantization_level":"Q4_K_M","context_length":262144},"capabilities":["tools","thinking"]},{"name":"gpt-oss:20b","details":{"parameter_size":"20.9B","quantization_level":"MXFP4","context_length":32768},"capabilities":["completion"]}]}`
 
 const samplePS = `{"models":[{"name":"gpt-oss:20b","size":13000056503,"expires_at":"2026-09-18T19:44:37Z","size_vram":13000056503,"context_length":32768}]}`
+
+func TestUpstreamContractDocumentPinned(t *testing.T) {
+	body := mustReadFixture(t, "testdata/upstream/ollama-api-fragment.md")
+	for _, marker := range [][]byte{
+		[]byte("GET /api/tags"),
+		[]byte("GET /api/ps"),
+		[]byte(`"models"`),
+		[]byte(`"details"`),
+		[]byte(`"parameter_size"`),
+		[]byte(`"quantization_level"`),
+	} {
+		if !bytes.Contains(body, marker) {
+			t.Fatalf("Ollama upstream contract missing marker %q", marker)
+		}
+	}
+}
+
+func TestFetch_UpstreamFixtureContract(t *testing.T) {
+	tags := string(mustReadFixture(t, "testdata/fixtures/tags.json"))
+	ps := string(mustReadFixture(t, "testdata/fixtures/ps.json"))
+	server := newServer(t, tags, ps, http.StatusOK)
+	defer server.Close()
+
+	res := Fetch(context.Background(), server.URL)
+	if res.Status != catalog.StatusOK {
+		t.Fatalf("Status = %v, detail = %q, want ok", res.Status, res.Detail)
+	}
+
+	mutatedTags := strings.Replace(tags, `"name":"vendor-a/model-1",`, "", 1)
+	mutatedServer := newServer(t, mutatedTags, ps, http.StatusOK)
+	defer mutatedServer.Close()
+	res = Fetch(context.Background(), mutatedServer.URL)
+	if res.Status != catalog.StatusFail {
+		t.Fatalf("Status = %v, detail = %q, want fail for missing model name", res.Status, res.Detail)
+	}
+}
 
 func TestFetch_Positive(t *testing.T) {
 	server := newServer(t, sampleTags, samplePS, http.StatusOK)
@@ -72,6 +111,15 @@ func contains(list []string, want string) bool {
 	return false
 }
 
+func mustReadFixture(t *testing.T, path string) []byte {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return body
+}
+
 func TestFetch_Negative(t *testing.T) {
 	t.Run("tags endpoint unreachable", func(t *testing.T) {
 		res := Fetch(context.Background(), "http://127.0.0.1:1")
@@ -93,8 +141,8 @@ func TestFetch_Negative(t *testing.T) {
 		server := newServer(t, sampleTags, "", http.StatusInternalServerError)
 		defer server.Close()
 		res := Fetch(context.Background(), server.URL)
-		if res.Status != catalog.StatusOK {
-			t.Fatalf("Status = %v, detail = %q, want ok with a note when only /api/ps fails", res.Status, res.Detail)
+		if res.Status != catalog.StatusDegraded {
+			t.Fatalf("Status = %v, detail = %q, want degraded with a note when only /api/ps fails", res.Status, res.Detail)
 		}
 		if res.Detail == "" {
 			t.Fatal("Detail = empty, want a note explaining the /api/ps failure")

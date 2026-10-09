@@ -68,7 +68,7 @@ func Fetch(ctx context.Context, baseURL, tokenFile string) Result {
 		return Result{Status: catalog.StatusFail, Detail: err.Error()}
 	}
 	if len(models) == 0 {
-		return Result{Status: catalog.StatusSkip, Detail: fmt.Sprintf("%s/v1/models returned no models", baseURL)}
+		return Result{Status: catalog.StatusFail, Detail: fmt.Sprintf("empty response: %s/v1/models returned no models", baseURL)}
 	}
 
 	fetchedAt := time.Now().UTC()
@@ -124,7 +124,15 @@ func listModels(ctx context.Context, baseURL, token string) (entries []modelEntr
 	reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/v1/models", nil)
+	body, err := fetchModelsBody(reqCtx, baseURL, token)
+	if err != nil {
+		return nil, err
+	}
+	return decodeModelsBody(body)
+}
+
+func fetchModelsBody(ctx context.Context, baseURL, token string) (body []byte, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/v1/models", nil)
 	if err != nil {
 		return nil, fmt.Errorf("litellm-gateway: build request: %w", err)
 	}
@@ -141,20 +149,34 @@ func listModels(ctx context.Context, baseURL, token string) (entries []modelEntr
 		return nil, fmt.Errorf("litellm-gateway: %s/v1/models returned HTTP %d", baseURL, resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	body, err = io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("litellm-gateway: read response body: %w", err)
 	}
 	if len(body) > maxResponseBytes {
 		return nil, fmt.Errorf("litellm-gateway: response exceeds %d bytes", maxResponseBytes)
 	}
+	return body, nil
+}
 
+func decodeModelsBody(body []byte) ([]modelEntry, error) {
 	var parsed modelsResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return nil, fmt.Errorf("litellm-gateway: decode response: %w", err)
 	}
 	if len(parsed.Data) > maxModels {
 		return nil, fmt.Errorf("litellm-gateway: response lists more than %d models", maxModels)
+	}
+	// One entry without an id becomes a record sync rejects with a reason;
+	// a list in which no entry carries an id is an upstream schema change.
+	missing := 0
+	for _, m := range parsed.Data {
+		if m.ID == "" {
+			missing++
+		}
+	}
+	if missing > 0 && missing == len(parsed.Data) {
+		return nil, fmt.Errorf("litellm-gateway: none of the %d data entries carries an id; the upstream schema changed", missing)
 	}
 	return parsed.Data, nil
 }

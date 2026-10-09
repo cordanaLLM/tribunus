@@ -1,15 +1,16 @@
-// Command tribunusctl syncs the model data the Tribunus graph router will
-// route on from a handful of local and remote sources, and can render the
-// resulting snapshot as a table. See tribunus/catalog for the record shape
-// and the data-sync guide in cordanaLLM/praetor
-// (https://github.com/cordanaLLM/praetor/blob/main/docs/tribunus/data-sync.md)
-// for what each source does and does not know.
+// Command tribunusctl syncs the model data Tribunus routes on from a handful
+// of local and remote sources into one snapshot file, and can render that
+// snapshot as a table. See the catalog package for the record shape and
+// docs/data-sync.md for installing tribunusctl and for what each source does
+// and does not know.
 package main
 
 import (
 	"fmt"
 	"os"
 )
+
+var version = ""
 
 func main() {
 	if len(os.Args) < 2 {
@@ -23,6 +24,10 @@ func main() {
 		err = runSync(os.Args[2:])
 	case "show":
 		err = runShow(os.Args[2:])
+	case "schema":
+		err = runSchema(os.Stdout)
+	case "version":
+		printVersion()
 	case "help", "-h", "--help":
 		printUsage()
 		return
@@ -43,4 +48,14 @@ func printUsage() {
 	fmt.Println("Usage:")
 	fmt.Println("  tribunusctl sync [--sources=a,b] [--out=file] [--litellm-base=url] [--litellm-token-file=path] [--ollama=url]")
 	fmt.Println("  tribunusctl show [--in=file]")
+	fmt.Println("  tribunusctl schema")
+	fmt.Println("  tribunusctl version")
+}
+
+func printVersion() {
+	if version == "" {
+		fmt.Println("dev")
+		return
+	}
+	fmt.Println(version)
 }

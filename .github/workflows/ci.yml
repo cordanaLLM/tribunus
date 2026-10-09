@@ -10,13 +10,57 @@ permissions:
   contents: read
 
 jobs:
+  # The required check. Every gate here runs offline; the tools come from
+  # tools/go/go.mod at pinned versions that Renovate moves.
   go:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # The documentation drift check compares the base and head commits.
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: 'go.mod'
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt would reformat these files:"
+            echo "$unformatted"
+            exit 1
+          fi
       - run: go vet ./...
       - run: go test -race ./...
+      - name: golangci-lint
+        run: go tool -modfile=tools/go/go.mod golangci-lint run ./...
+      - name: HISS scan (praetorctl audit)
+        run: go tool -modfile=tools/go/go.mod standardsctl audit --offline
+      # govulncheck runs through praetorctl so security/vex/go.openvex.json is
+      # honoured, the same verdict the pre-push gate reaches.
+      - name: govulncheck (VEX-aware)
+        run: >-
+          go tool -modfile=tools/go/go.mod standardsctl security govuln --path=.
+          -- go tool -modfile=tools/go/go.mod govulncheck
+      - name: gosec
+        run: go tool -modfile=tools/go/go.mod gosec -conf .gosec.json ./...
+      - name: Documentation drift
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_HEAD: ${{ github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            printf '%s\n' "$PR_BODY" > "$RUNNER_TEMP/pr-body.txt"
+            go tool -modfile=tools/go/go.mod standardsctl docs references --path=. \
+              --base="$PR_BASE" --head="$PR_HEAD" --pr-body-file="$RUNNER_TEMP/pr-body.txt"
+          else
+            go tool -modfile=tools/go/go.mod standardsctl docs references --path=. \
+              --base="$PUSH_BEFORE" --head="$PUSH_HEAD"
+          fi
+

@@ -164,7 +164,7 @@ func (o sourceOutcome) SourceRun(name string) catalog.SourceRun {
 }
 
 func collectSourceRuns(ctx context.Context, selected []string, f syncFlags) (catalog.Snapshot, error) {
-	snap := catalog.Snapshot{GeneratedAt: time.Now().UTC()}
+	snap := catalog.Snapshot{SchemaVersion: catalog.SnapshotSchemaVersion, GeneratedAt: time.Now().UTC()}
 	allFailed := true
 	for _, name := range selected {
 		run := rejectInvalidRecords(runOneSource(ctx, name, f))

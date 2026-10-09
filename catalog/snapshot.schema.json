@@ -1,0 +1,231 @@
+{
+  "$id": "https://github.com/cordanaLLM/tribunus/catalog/snapshot.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Snapshot",
+  "type": "object",
+  "version": 1,
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Record"
+      }
+    },
+    "source_runs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SourceRun"
+      }
+    }
+  },
+  "required": [
+    "generated_at",
+    "records",
+    "schema_version",
+    "source_runs"
+  ],
+  "$defs": {
+    "AccessPath": {
+      "type": "string",
+      "enum": [
+        "api",
+        "gateway",
+        "local",
+        "subscription_cli"
+      ]
+    },
+    "Kind": {
+      "type": "string",
+      "enum": [
+        "declared",
+        "measured"
+      ]
+    },
+    "Limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "daily": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "rpm": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tpm": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": []
+    },
+    "Provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fetched_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "kind": {
+          "$ref": "#/$defs/Kind"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fetched_at",
+        "kind",
+        "source"
+      ]
+    },
+    "Record": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "absent": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "access_path": {
+          "$ref": "#/$defs/AccessPath"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "context_window": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "limits": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Limits"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model_id": {
+          "type": "string"
+        },
+        "price_in_per_m": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "price_out_per_m": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "usage_window": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/UsageWindow"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "access_path",
+        "model_id",
+        "provenance"
+      ]
+    },
+    "SourceRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "type": "integer"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/Status"
+        }
+      },
+      "required": [
+        "count",
+        "source",
+        "status"
+      ]
+    },
+    "Status": {
+      "type": "string",
+      "enum": [
+        "degraded",
+        "fail",
+        "ok",
+        "skip"
+      ]
+    },
+    "UsageWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resets_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "used_percent": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "window_minutes": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": []
+    }
+  }
+}

@@ -6,6 +6,9 @@ import (
 	"time"
 )
 
+// SnapshotSchemaVersion is the current JSON snapshot contract version.
+const SnapshotSchemaVersion = 1
+
 // MaxSnapshotRecords bounds how many records one snapshot may hold (HISS-02:
 // every loop over Snapshot.Records carries this as its scalar upper bound).
 const MaxSnapshotRecords = 20000
@@ -34,14 +37,18 @@ const (
 // Snapshot is the file-based catalog sync writes: every record gathered in
 // one run, plus a per-source outcome line for each source attempted.
 type Snapshot struct {
-	GeneratedAt time.Time   `json:"generated_at"`
-	Records     []Record    `json:"records"`
-	SourceRuns  []SourceRun `json:"source_runs"`
+	SchemaVersion int         `json:"schema_version"`
+	GeneratedAt   time.Time   `json:"generated_at"`
+	Records       []Record    `json:"records"`
+	SourceRuns    []SourceRun `json:"source_runs"`
 }
 
 // Validate reports the first structural problem with the snapshot: too many
 // records, or any record that fails its own Validate.
 func (s Snapshot) Validate() error {
+	if s.SchemaVersion != SnapshotSchemaVersion {
+		return fmt.Errorf("catalog: unsupported snapshot schema_version: found %d, supported %d", s.SchemaVersion, SnapshotSchemaVersion)
+	}
 	if len(s.Records) > MaxSnapshotRecords {
 		return fmt.Errorf("catalog: snapshot has %d records, exceeds %d", len(s.Records), MaxSnapshotRecords)
 	}

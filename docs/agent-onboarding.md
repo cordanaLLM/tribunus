@@ -36,7 +36,7 @@ The runtime has its own namespace, RT. These are never HISS rules.
 | --- | --- |
 | RT-01 | deterministic edges: temperature 0 plus schema-validated output |
 | RT-02 | side-effect idempotency keys: `(task_id, action_type)` |
-| RT-03 | control-plane isolation |
+| RT-03 | control-plane isolation ([definition](architecture-v2.md#rt-03-control-plane-isolation)) |
 | RT-04 | event-sourced state |
 
 Each RT rule gets fixtures replayed in both directions, like [HISS-20](https://github.com/cordanaLLM/praetor/blob/main/docs/standards/hiss-spec.md#hiss-20-replayable-enforcement-evidence).

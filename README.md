@@ -49,6 +49,7 @@ The contract is described by `catalog/snapshot.schema.json`, and
 
 - [Agent onboarding](docs/agent-onboarding.md)
 - [Roadmap](docs/roadmap.md)
+- [Catalog data sync](docs/data-sync.md): installing `tribunusctl`, the sources and their limits
 - [Architecture](docs/architecture-v2.md)
 - [Repository layout](docs/repository-layout-v2.md)
 - [Description](docs/tribunus-description-v2.md)

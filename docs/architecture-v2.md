@@ -68,6 +68,30 @@ Every model call goes through a router alias. No concrete model name appears in 
 - Decision: build the UI with runes and export reusable component bundles.
 - Consequence: small bundles, usable on web and desktop.
 
+### ADR-004: golusoris as the pinned base of the control plane
+
+- Context: the control plane needs config, logging, telemetry, an HTTP, SSE and MCP server, health, idempotency and signed records. golusoris ships all of them as opt-in modules, pre-1.0.
+- Decision: build on golusoris and golusoris/core, pinned to exact versions and moved by Renovate. Tribunus writes only the task-graph store, the Git-backed event log and the in-process broker, which golusoris does not ship without Postgres or NATS.
+- Consequence: one implementation per capability across the ecosystem ([HISS-19](https://github.com/cordanaLLM/praetor/blob/main/docs/standards/hiss-spec.md#hiss-19-reuse-before-writing)). Breaking golusoris releases arrive as planned migration units (#30).
+
+### ADR-005: Praetor governs, Tribunus runs
+
+- Context: runtime work (job supervision, event watches, resume, sandboxing, quota collection) had been filed in Praetor next to governance work, and three copies of the model catalog existed.
+- Decision:
+  - Praetor owns gates, the planning graph and its vocabulary, the efficiency ledger, the invocation and agent-loop budget layers, the dispatch hook, issue claims and the plan notebook.
+  - Tribunus owns the runtime, the orchestration and platform budget layers, and the model catalog.
+  - The runtime issues moved here with their history (#21 to #25).
+- Consequence: Praetor reads the Tribunus catalog snapshot (#29), and the interfaces between the two are versioned contracts (cordanaLLM/praetor#1045).
+
+### ADR-006: cutover order
+
+- Context: operator scripts run the watchers, the landing queue and the wave runner today, and a session restart can kill them without notice.
+- Decision: replace them in three cutovers, smallest and most shared first:
+  1. Watchers and supervision (#36).
+  2. The landing queue (#38).
+  3. The wave runner (#39).
+- Consequence: each cutover runs beside the script it replaces until the events match. The first cutover already removes the restart losses.
+
 ## Milestones
 
-See the repository milestones 0.1 to 0.5.
+Milestones 0.1 to 0.6 and the interfaces with Praetor are in the [roadmap](roadmap.md).

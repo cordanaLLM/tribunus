@@ -46,3 +46,24 @@ exceptions:
     path: .github/workflows/release.yml
     reason: adoption found the release workflows short of the declared supply chain (SLSA Build Level 3 declared, Level 0 measured; enforce_cosign without a cosign signing step; require_sbom without an SBOM step); raise them as docs/guides/releasing.md in Praetor describes, then remove this entry
     expires: "2027-01-07"
+# Documentation drift (praetorctl docs references): a change to a surface must carry a change to
+# one of its documents, or a Docs-Waiver with a reason.
+docs_surfaces:
+  - name: "tribunusctl CLI"
+    paths:
+      - "cmd/tribunusctl/*.go"
+    exclude:
+      - "cmd/tribunusctl/*_test.go"
+    docs:
+      - "README.md"
+      - "docs/agent-onboarding.md"
+  - name: "model catalog and sources"
+    paths:
+      - "catalog/*.go"
+      - "internal/sources/**/*.go"
+    exclude:
+      - "catalog/*_test.go"
+      - "internal/sources/**/*_test.go"
+    docs:
+      - "docs/agent-onboarding.md"
+      - "docs/architecture-v2.md"

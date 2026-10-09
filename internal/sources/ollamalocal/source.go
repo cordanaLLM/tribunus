@@ -9,11 +9,10 @@
 // "context_length":...},"capabilities":[...]}]}. /api/ps carries the same
 // per-model shape for loaded models plus "expires_at" and "size_vram".
 //
-// This intentionally does not import praetor's internal/router, which
-// already talks to these same two endpoints for routing decisions -- that
-// package moves to build on tribunus/catalog later (design doc, sources
-// table); duplicating the two GETs here is the stated, temporary cost of
-// keeping tribunus free of a praetor-internal import today.
+// This intentionally does not import the internal/router package of
+// cordanaLLM/praetor, which talks to the same two endpoints for routing
+// decisions. That package is planned to read the Tribunus catalog instead
+// (one model catalog, #29); until then the two GETs exist in both places.
 package ollamalocal
 
 import (

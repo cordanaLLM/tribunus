@@ -2,9 +2,9 @@
   "changes": "provenance header added by Tribunus; extracted the sample_spec entry",
   "copyright_holder": "Berri AI",
   "extraction_date": "2026-10-09",
-  "full_document_sha256": "496a02d75d1d9e384798cbbe1b68c0b8900b5be0657b0149dc29e8864b214355",
-  "pinned_revision": "18e87d30396ec5fad1d32a753760bec42ce7d9f8",
+  "full_document_sha256": "9b9730f20c7b93348e591a38babae478fc6671353cd67eae3c6457b78e8cf48d",
+  "pinned_revision": "fff86d637686c674d85cdcc42e2c728cde1cb1cf",
   "source_pin_description": "",
-  "source_url": "https://raw.githubusercontent.com/BerriAI/litellm/18e87d30396ec5fad1d32a753760bec42ce7d9f8/model_prices_and_context_window.json",
+  "source_url": "https://raw.githubusercontent.com/BerriAI/litellm/fff86d637686c674d85cdcc42e2c728cde1cb1cf/model_prices_and_context_window.json",
   "spdx_license": "MIT"
 }

@@ -3,14 +3,14 @@
 #
 # SPDX-License-Identifier: EUPL-1.2
 name: caveman
-description: Caveman form for internal agent traffic (briefs, agent returns, research fan-outs, workflow returns, tool-call notes). Fragments, one fact per line, code/paths/errors verbatim, nothing a reader pays for twice. The `internal` text register; forge text uses social-text, docs and human replies use full prose.
+description: Caveman form for internal agent traffic (briefs, agent returns, research fan-outs, workflow returns, tool-call notes). Fragments, one fact per line, code, paths, errors verbatim, nothing a reader pays for twice. The `internal` text register; forge text uses social-text, docs and human replies use full prose.
 metadata:
   derived_from: "https://github.com/JuliusBrussee/caveman (MIT)"
 ---
 
 # Caveman: internal register (`caveman`)
 
-Adapted from [Caveman](https://github.com/JuliusBrussee/caveman) by Julius Brussee and [contributors](https://github.com/JuliusBrussee/caveman/graphs/contributors); MIT terms at adaptation. Credit: `docs/credits.md`.
+Adapted from [Caveman](https://github.com/JuliusBrussee/caveman) by Julius Brussee and [contributors](https://github.com/JuliusBrussee/caveman/graphs/contributors); MIT terms at adaptation (2026-09-18).
 
 Caveman = `internal` register of text-register policy (`register:` in `.standards.yaml`;
 "Text Register" section of AGENTS.md). Config value stays `internal`; this skill = its
@@ -27,7 +27,7 @@ Caveman covers text another agent reads:
 - tool-call notes, progress lines between agents.
 
 Human-facing text keeps its own register: forge text (issues, PR bodies, review comments,
-commit bodies, changelog titles) -> `social-text`; `docs/`, READMEs, ADR bodies -> docs
+commit bodies, changelog titles) -> `social-text`; documentation tree (`docs`), READMEs, ADR bodies -> docs
 register; reply to human operator -> full prose.
 
 ## Rules
@@ -64,7 +64,7 @@ register; reply to human operator -> full prose.
 7. **Return shape** follows register block: verdict, changed paths, commands run, evidence
    pointers, open questions.
 8. **Evidence** follows register block, same wording: evidence above 58 lines or 1500
-   tokens -> file under `.workingdir/evidence/`; return
+   tokens -> file in the evidence directory the block names; return
    `evidence: <path> sha256:<12 hex> lines:<n>`, fetch only when decision needs it.
    Manifest may tighten both numbers; block in AGENTS.md prints values in force.
 
@@ -103,16 +103,16 @@ Real return from a praetor lane:
 Test return:
 
 <!-- caveman:off -->
-- Before: "I ran the tests for the internal/compiler package with the race detector and all
+- Before: "I ran the tests for the repository with the race detector and all
   of them passed. go vet did not report any issues. The only file I changed was
-  internal/compiler/register.go, where I added an error for a missing end marker."
+  .agents/skills/caveman/SKILL.md, where I added an error for a missing end marker."
 <!-- caveman:on -->
 - After:
 
   ```text
   verdict: pass
-  changed: internal/compiler/register.go (missing end marker -> error)
-  ran: go test -race -count=1 ./internal/compiler/ = pass; go vet = clean
+  changed: .agents/skills/caveman/SKILL.md (missing end marker -> error)
+  ran: go test -race -count=1 ./... = pass; go vet = clean
   evidence: none
   open: none
   ```
@@ -121,7 +121,7 @@ Clarity floor in action:
 
 <!-- caveman:off -->
 - Before: "The dedupe scan reported two clones. Only one of them comes from this change; the
-  other one is in internal/milestone and was already present on main, so I left it alone."
+  other one is in .agents/skills/social-text/SKILL.md and was already present on main, so I left it alone."
 <!-- caveman:on -->
 - Too far: `dedupe: 2 clones.` Reader cannot tell whether change is blocked.
-- After: `dedupe scan: 2 clones. 1 new (this change), 1 pre-existing on main (internal/milestone), left as is.`
+- After: `dedupe scan: 2 clones. 1 new (this change), 1 pre-existing on main (.agents/skills/social-text/SKILL.md), left as is.`

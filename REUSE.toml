@@ -5,3 +5,25 @@ path = ["**"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 cordanaLLM contributors"
 SPDX-License-Identifier = "EUPL-1.2"
+
+# The vendored interfig engine keeps its upstream MIT terms. REUSE applies only the last
+# matching annotation table, so this override must stay after the "**" table above.
+# VENDOR.md and vendor.json sit outside upstream/ and stay EUPL-1.2.
+[[annotations]]
+path = ["tools/figures/third_party/interfig/upstream/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "2025 Vectorize AI, Inc."
+SPDX-License-Identifier = "MIT"
+
+# The figure player bundles Praetor's loader and player code (EUPL-1.2) with interfig, React,
+# react-dom and scheduler (MIT); dist/THIRD-PARTY-LICENSES.txt carries the MIT texts. Like the
+# table above, this one must stay after the "**" table.
+[[annotations]]
+path = ["tools/figures/dist/**"]
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "2026 Lusoris <lusoris@proton.me>",
+  "2025 Vectorize AI, Inc.",
+  "Meta Platforms, Inc. and affiliates",
+]
+SPDX-License-Identifier = "EUPL-1.2 AND MIT"

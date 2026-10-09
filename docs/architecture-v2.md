@@ -28,6 +28,20 @@ Owns task graphs, the event bus and budgets.
 
 Control-plane process configuration is loaded by `internal/config.Load` from a YAML or JSON file validated against the published schema at `docs/config.schema.json`; the embedded copy at `internal/config/config.schema.json` is the package authority and a test keeps the two byte-identical. The loader uses `golusoris/core/config` with file watching off and environment overrides disabled, because schema validation runs before weak typed decoding and string-valued environment overrides would otherwise bypass or break numeric validation. A bad key, type or bound fails load with the JSON pointer named before unmarshal.
 
+#### Event log
+
+The event log is the source of truth ADR-001 names, and RT-04 rests on it: the task graph and every task state are rebuilt from it alone. It is a directory of plain files in a Git working tree, written only by the control plane (RT-03).
+
+- **One file per record.** Record `n` is `events/<n, 20 digits>.json`, so file order is log order and a Git diff shows each append as one new file. A record is written to a temporary file in the same directory, fsynced, then renamed into place, so a crash leaves either the whole record or none of it. A record is at most 64 KiB, and one replay reads at most the configured number of records.
+- **Canonical bytes.** A record is JSON canonicalised by RFC 8785 (`core/codec/jcs`) with the fields `seq` (1, 2, 3, …), `prev` (the SHA-256 of the previous record's bytes; zeros for the first), `time`, `type`, `task_id`, `payload` and `receipt`. Replay re-canonicalises each file and refuses one whose bytes differ.
+- **Signed.** `receipt` is an Ed25519 receipt (`core/crypto/receipt`) whose output hash is the SHA-256 of the record without its `receipt` field. Replay checks it with `receipt.VerifyOutput` against the public key in config, so an edited record fails even when its JSON stays valid.
+- **Single writer.** An append takes an exclusive lock on `events/` (a lock file held with `flock`) for a bounded time. It allocates the next `seq`, writes the record and replaces `HEAD.json` while holding it, and fails closed when the lock is not granted in time. Two concurrent appenders can neither reuse a `seq` nor lose a record.
+- **Signing key.** The private key path comes from the config (#31). The writer refuses a key file inside the repository tree and one readable by group or others, as ssh does. Replay needs only the public key; with the wrong one it fails at the first record and names it.
+- **Head.** `events/HEAD.json` names the last `seq` and its hash, signed the same way and replaced atomically after each append. A deleted tail, which the hash chain alone cannot see, then fails replay.
+- **Replay.** Records are read in order. Each is checked for contiguous `seq`, the `prev` chain, canonical form, receipt and size, then applied to a pure reducer. Any failure stops replay with the record's position (`seq` and file), never skipping it. The rebuilt state serialises through JCS, so two replays of the same log produce the same bytes, which the tests compare.
+
+Committing `events/` to Git, segment rotation and compaction follow separately (#58).
+
 #### Upstream schemas
 
 Catalog parsers are checked against small pinned upstream schema fragments under `internal/sources/*/testdata/upstream/`, with the source revisions and full-document digests recorded in `internal/sources/upstream-schemas.json`. Run `make schemas-refresh` to regenerate those fragments from the pinned upstream documents, and `make schemas-check` to verify the committed bytes still match.

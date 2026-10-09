@@ -47,7 +47,7 @@
     {
       "id": "ollama-api",
       "url_template": "https://raw.githubusercontent.com/ollama/ollama/{revision}/docs/api.md",
-      "pinned_revision": "021cda52280d52dbb26cfa98e4ab4a97ab57bb6a",
+      "pinned_revision": "eab97e9f92b9a25c2d52d2cc6c1b1c99bd9fae21",
       "full_document_sha256": "96db03080e385dbabf5d70e75f298d41b75983bc30975cae56f7119f848dd0f5",
       "spdx_license": "MIT",
       "copyright_holder": "Ollama",

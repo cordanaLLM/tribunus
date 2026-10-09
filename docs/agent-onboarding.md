@@ -53,4 +53,4 @@ Call models only through router aliases such as `cordana/auto`, `cordana/light`,
 
 ## Workflow
 
-Run `make verify-all` before every push; the Praetor hooks run the audit before each commit and push. Do not add a relational database or a setup wizard; state flows through the event log.
+Run `make verify-all` before every push; the Praetor hooks run the audit before each commit and push. CI runs gofmt, go vet, go test -race, golangci-lint, the HISS audit and the docs-drift check on every pull request, using the tools pinned in `tools/go/go.mod` (`go tool -modfile=tools/go/go.mod <tool>`). Renovate moves those pins. Do not add a relational database or a setup wizard; state flows through the event log.

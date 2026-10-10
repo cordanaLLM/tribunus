@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # The Praetor engine this repository runs: the Git hooks install exactly this commit, and
+  # tools/go/go.mod pins the same commit for the gates below. Move both together, with a
+  # re-adopt (praetorctl adopt).
+  PRAETOR_REF: 9615f1b907cc7e677a3ae71f6e864deb4450b9de
+
 jobs:
   # The required check. Every gate here runs offline; the tools come from
   # tools/go/go.mod at pinned versions that Renovate moves.

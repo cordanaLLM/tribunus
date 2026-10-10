@@ -63,6 +63,9 @@ func checkJobBounds(job config.JobConfig) error {
 	if job.Stop.GraceSeconds < 0 || job.Stop.GraceSeconds > config.MaxStopGraceSeconds {
 		return fmt.Errorf("stop.grace_seconds must be 0..%d", config.MaxStopGraceSeconds)
 	}
+	if job.MaxRuntimeSeconds < 0 || job.MaxRuntimeSeconds > config.MaxJobRuntimeSeconds {
+		return fmt.Errorf("max_runtime_seconds must be 0..%d", config.MaxJobRuntimeSeconds)
+	}
 	return nil
 }
 

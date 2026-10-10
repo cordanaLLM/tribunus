@@ -94,14 +94,70 @@ func killProcess(target jobSignalTarget) error {
 }
 
 func killStartedProcessGroup(pid int) error {
+	return signalStartedGroup(pid, unix.SIGKILL, "KILL")
+}
+
+// childExitProbe asks the kernel whether pid, a child of this process, has exited as a whole
+// and waits to be collected, without collecting it. child is false for a process that is not
+// a child of this one, or was collected already.
+var childExitProbe = waitChildExited
+
+func waitChildExited(pid int) (exited bool, child bool, err error) {
+	var info unix.Siginfo
+	for i := 0; i < maxWaitRetries; i++ {
+		err = unix.Waitid(unix.P_PID, pid, &info, unix.WEXITED|unix.WNOHANG|unix.WNOWAIT, nil)
+		if !errors.Is(err, unix.EINTR) {
+			break
+		}
+	}
+	if errors.Is(err, unix.ECHILD) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, fmt.Errorf("supervisor: wait state of pid %d: %w", pid, err)
+	}
+	// With nothing to report the kernel leaves the signal number 0.
+	return info.Signo == int32(unix.SIGCHLD), true, nil
+}
+
+// awaitExitUncollected blocks until pid, a child of this process, has exited, and leaves it
+// uncollected. Until it is collected its process id and its process group stay what they
+// were, so the group can still be checked and signalled.
+func awaitExitUncollected(pid int) error {
+	for i := 0; i < maxWaitRetries; i++ {
+		err := unix.Waitid(unix.P_PID, pid, nil, unix.WEXITED|unix.WNOWAIT, nil)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, unix.EINTR) {
+			return fmt.Errorf("supervisor: wait for pid %d: %w", pid, err)
+		}
+	}
+	return fmt.Errorf("supervisor: wait for pid %d: interrupted %d times", pid, maxWaitRetries)
+}
+
+// maxWaitRetries bounds how often a wait interrupted by a signal is taken up again.
+const maxWaitRetries = 1 << 20
+
+// signalStartedProcessGroup sends the named stop signal to the process group of a job the
+// shim started itself. A group that is gone is no error.
+func signalStartedProcessGroup(pid int, name string) error {
+	sig, err := signalFromName(name)
+	if err != nil {
+		return err
+	}
+	return signalStartedGroup(pid, sig, name)
+}
+
+func signalStartedGroup(pid int, sig unix.Signal, name string) error {
 	if err := validateStartedProcessGroup(pid); err != nil {
 		if errors.Is(err, errProcessGone) {
 			return nil
 		}
 		return err
 	}
-	if err := processSignaller(-pid, unix.SIGKILL); err != nil && !errors.Is(err, unix.ESRCH) {
-		return fmt.Errorf("supervisor: SIGKILL pid %d: %w", pid, err)
+	if err := processSignaller(-pid, sig); err != nil && !errors.Is(err, unix.ESRCH) {
+		return fmt.Errorf("supervisor: SIG%s pid %d: %w", name, pid, err)
 	}
 	return nil
 }

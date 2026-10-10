@@ -210,6 +210,7 @@ func TestRefusedJobThatHadStartedIsKilled(t *testing.T) {
 		t.Fatalf("WriteFile(state-file) = %v, want nil", err)
 	}
 	cfg.RecordPath = filepath.Join(blocker, "norecord.json")
+	before := zombieChildren(t)
 	err := errorWithoutPanic(t, "runShim", func() error { return runShim(cfg) })
 	if err == nil || !strings.Contains(err.Error(), "norecord refused: ") || !strings.Contains(err.Error(), "mkdir state dir") {
 		t.Fatalf("runShim(record unwritable) = %v, want the refusal naming the record error", err)
@@ -228,6 +229,31 @@ func TestRefusedJobThatHadStartedIsKilled(t *testing.T) {
 		}
 		t.Fatalf("job processes %v still run after the shim refused the job, want them killed", alive)
 	}
+	// The shim also collects the job. Left uncollected, the watcher of the job's context would
+	// outlive the shim's work on it and stop the job a second time when the context ends.
+	after := zombieChildren(t)
+	for pid := range after {
+		if !before[pid] {
+			t.Fatalf("pid %d is a new zombie child after the refusal, want the refused job collected", pid)
+		}
+	}
+}
+
+// zombieChildren returns the uncollected children of the test process.
+func zombieChildren(t *testing.T) map[int]bool {
+	t.Helper()
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		t.Fatalf("ReadDir(/proc) = %v, want nil", err)
+	}
+	zombies := map[int]bool{}
+	for i := 0; i < len(entries); i++ {
+		pid, convErr := strconv.Atoi(entries[i].Name())
+		if convErr == nil && zombieChildOfThisProcess(pid) {
+			zombies[pid] = true
+		}
+	}
+	return zombies
 }
 
 // liveProcessesWithArg returns the processes, zombies excepted, whose command line holds arg.

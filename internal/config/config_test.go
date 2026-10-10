@@ -23,6 +23,7 @@ func TestLoadPositiveFullFile(t *testing.T) {
     "log_path": "/var/log/tribunus/daily-catalog-sync.log",
     "schedule": "0 2 * * *",
     "router_alias": "cordana/auto",
+    "max_runtime_seconds": 1800,
     "restart": {"policy": "on-failure", "max_restarts": 3, "backoff_seconds": 2},
     "stop": {"signal": "TERM", "grace_seconds": 5},
     "sandbox": {"mode": "enforce", "workspace": "/var/tmp", "network": "none", "memory_max": "2G", "cpu_weight": 100, "tasks_max": 512}
@@ -49,6 +50,9 @@ func TestLoadPositiveFullFile(t *testing.T) {
 	}
 	if cfg.Jobs[0].Command[1] != "catalog" || cfg.Jobs[0].Restart.Policy != "on-failure" {
 		t.Fatalf("Load() jobs = %+v, want command and restart policy", cfg.Jobs)
+	}
+	if cfg.Jobs[0].MaxRuntimeSeconds != 1800 {
+		t.Fatalf("Load() jobs[0].max_runtime_seconds = %d, want 1800", cfg.Jobs[0].MaxRuntimeSeconds)
 	}
 	if cfg.EventLog.LockTimeoutSeconds != 7 || cfg.EventLog.MaxReplayRecords != 1234 {
 		t.Fatalf("Load() event_log = %+v, want full event log values", cfg.EventLog)
@@ -84,6 +88,12 @@ func TestLoadNegativeValidation(t *testing.T) {
 		{"bad job stop signal", `{"jobs": [
   {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "schedule": "always", "stop": {"signal": "KILL"}}
 ]}`, []string{"/jobs/0/stop/signal", "valid"}},
+		{"job runtime above a year", `{"jobs": [
+  {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "max_runtime_seconds": 31536001, "sandbox": {"mode": "off", "reason": "test"}}
+]}`, []string{"/jobs/0/max_runtime_seconds", "maximum"}},
+		{"negative job runtime", `{"jobs": [
+  {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "max_runtime_seconds": -1, "sandbox": {"mode": "off", "reason": "test"}}
+]}`, []string{"/jobs/0/max_runtime_seconds", "minimum"}},
 		{"bad job sandbox mode", `{"jobs": [
   {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "sandbox": {"mode": "maybe"}}
 ]}`, []string{"/jobs/0/sandbox/mode", "valid"}},
@@ -193,6 +203,22 @@ func TestLoadJobDefaults(t *testing.T) {
 	}
 	if job.Sandbox.Mode != "enforce" || job.Sandbox.Network != "none" || job.Sandbox.MemoryMax != "2G" {
 		t.Fatalf("sandbox defaults = %+v, want enforce none 2G", job.Sandbox)
+	}
+	if job.MaxRuntimeSeconds != 0 {
+		t.Fatalf("max_runtime_seconds default = %d, want 0: no deadline of its own", job.MaxRuntimeSeconds)
+	}
+}
+
+// TestJobRuntimeBoundIsTheSchemaBound: the Go constant and the schema's maximum are one bound.
+func TestJobRuntimeBoundIsTheSchemaBound(t *testing.T) {
+	at := fmt.Sprintf(`{"jobs": [{"name": "edge", "command": ["/bin/true"], "log_path": "/tmp/edge.log", "max_runtime_seconds": %d, "sandbox": {"mode": "off", "reason": "test"}}]}`, MaxJobRuntimeSeconds)
+	cfg, err := Load(testContext(t), writeConfig(t, at))
+	if err != nil || cfg.Jobs[0].MaxRuntimeSeconds != MaxJobRuntimeSeconds {
+		t.Fatalf("Load(runtime at the bound %d) = %v, want it accepted", MaxJobRuntimeSeconds, err)
+	}
+	above := fmt.Sprintf(`{"jobs": [{"name": "edge", "command": ["/bin/true"], "log_path": "/tmp/edge.log", "max_runtime_seconds": %d, "sandbox": {"mode": "off", "reason": "test"}}]}`, MaxJobRuntimeSeconds+1)
+	if _, err = Load(testContext(t), writeConfig(t, above)); err == nil {
+		t.Fatalf("Load(runtime above the bound) = nil, want the schema to refuse it")
 	}
 }
 

@@ -36,6 +36,22 @@ func killStartedProcessGroup(pid int) error {
 	return fmt.Errorf("%w: missing process-group SIGKILL for pid %d", ErrNotSupported, pid)
 }
 
+func childExitProbe(pid int) (bool, bool, error) {
+	return false, false, fmt.Errorf("%w: missing wait state for pid %d", ErrNotSupported, pid)
+}
+
+func awaitExitUncollected(pid int) error {
+	return nil
+}
+
+func signalStartedProcessGroup(pid int, name string) error {
+	return fmt.Errorf("%w: missing process-group signal %s for pid %d", ErrNotSupported, name, pid)
+}
+
+func signalFromName(name string) (int, error) {
+	return 0, fmt.Errorf("%w: missing signal %s", ErrNotSupported, name)
+}
+
 func confirmJobScope(pid int, scope string, runner string) error {
 	if scope == "" {
 		return nil

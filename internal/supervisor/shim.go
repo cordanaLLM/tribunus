@@ -28,6 +28,11 @@ type shimConfig struct {
 	LogPath     string
 	Command     []string
 	Sandbox     config.SandboxConfig
+	// MaxRuntimeSeconds is the job's deadline, 0 for the longest any job may run. At the
+	// deadline the job gets StopSignal, then StopGraceSeconds to exit, then the kill.
+	MaxRuntimeSeconds int
+	StopSignal        string
+	StopGraceSeconds  int
 }
 
 func RunShim(args []string) int {
@@ -56,6 +61,9 @@ func parseShimArgs(args []string) (shimConfig, error) {
 	fs.StringVar(&cfg.LockPath, "lock", "", "")
 	fs.StringVar(&cfg.RecordPath, "record", "", "")
 	fs.StringVar(&cfg.LogPath, "log", "", "")
+	fs.IntVar(&cfg.MaxRuntimeSeconds, "max-runtime-seconds", 0, "")
+	fs.StringVar(&cfg.StopSignal, "stop-signal", "TERM", "")
+	fs.IntVar(&cfg.StopGraceSeconds, "stop-grace-seconds", 0, "")
 	fs.StringVar(&cfg.Sandbox.Mode, "sandbox-mode", "", "")
 	fs.StringVar(&cfg.Sandbox.Reason, "sandbox-reason", "", "")
 	fs.StringVar(&cfg.Sandbox.Workspace, "sandbox-workspace", "", "")
@@ -88,6 +96,15 @@ func checkShimConfig(cfg shimConfig) error {
 	if len(cfg.Command) == 0 || len(cfg.Command) > config.MaxJobArgs {
 		return fmt.Errorf("job-shim: command must have 1..%d args", config.MaxJobArgs)
 	}
+	if cfg.MaxRuntimeSeconds < 0 || cfg.MaxRuntimeSeconds > config.MaxJobRuntimeSeconds {
+		return fmt.Errorf("job-shim: max runtime must be 0..%d seconds", config.MaxJobRuntimeSeconds)
+	}
+	if cfg.StopGraceSeconds < 0 || cfg.StopGraceSeconds > config.MaxStopGraceSeconds {
+		return fmt.Errorf("job-shim: stop grace must be 0..%d seconds", config.MaxStopGraceSeconds)
+	}
+	if _, err := signalFromName(cfg.StopSignal); cfg.StopSignal != "" && err != nil {
+		return fmt.Errorf("job-shim: stop signal: %w", err)
+	}
 	cfg.Sandbox = config.NormalizeSandbox(cfg.Sandbox)
 	if err := config.ValidateSandbox(cfg.Sandbox); err != nil {
 		return fmt.Errorf("job-shim: sandbox.%w", err)
@@ -110,7 +127,7 @@ func runShim(cfg shimConfig) error {
 	// alive until the child exits or is killed on a shim error path.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	runCtx, cancel := context.WithTimeout(context.Background(), maxJobRuntime)
+	runCtx, cancel := context.WithTimeout(context.Background(), jobDeadline(cfg))
 	defer cancel()
 	cmd, started, err := startConfirmedJob(runCtx, cfg, logFile)
 	if err != nil {
@@ -118,12 +135,30 @@ func runShim(cfg shimConfig) error {
 	}
 	writer, err := shimWriter(cfg)
 	if err != nil {
-		return killAfterShimError(cmd.Process.Pid, err)
+		return killAndCollect(cmd, err)
 	}
 	if err = appendStarted(writer, cfg, cmd.Process.Pid, started); err != nil {
-		return killAfterShimError(cmd.Process.Pid, err)
+		return killAndCollect(cmd, err)
 	}
-	return waitAndRecordExit(writer, cfg, cmd)
+	return waitAndRecordExit(runCtx, writer, cfg, cmd)
+}
+
+// jobDeadline is how long the job may run: its own deadline, or the longest any job may.
+func jobDeadline(cfg shimConfig) time.Duration {
+	if cfg.MaxRuntimeSeconds > 0 {
+		return time.Duration(cfg.MaxRuntimeSeconds) * time.Second
+	}
+	return maxJobRuntime
+}
+
+// stopAtDeadline is what the job's context does when it ends: the job's whole process group
+// gets the stop signal, and with no grace period the kill at once. With a grace period the
+// command's wait delay follows, and waitAndRecordExit kills what is left of the group.
+func stopAtDeadline(cfg shimConfig, pid int) error {
+	if cfg.StopGraceSeconds == 0 {
+		return killStartedProcessGroup(pid)
+	}
+	return signalStartedProcessGroup(pid, cfg.StopSignal)
 }
 
 // startConfirmedJob builds the job's command, starts it, writes its record and confirms its
@@ -142,18 +177,20 @@ func startConfirmedJob(ctx context.Context, cfg shimConfig, logFile *os.File) (*
 	cmd := exec.CommandContext(ctx, command.Argv[0], command.Argv[1:]...)
 	cmd.Env = command.Env
 	cmd.Stdout, cmd.Stderr = logFile, logFile
+	cmd.Cancel = func() error { return stopAtDeadline(cfg, cmd.Process.Pid) }
+	cmd.WaitDelay = time.Duration(cfg.StopGraceSeconds) * time.Second
 	prepareProcess(cmd)
 	if err = cmd.Start(); err != nil {
 		return nil, "", fmt.Errorf("job-shim: start %s: %w", cfg.Command[0], err)
 	}
 	started := time.Now().UTC().Format(time.RFC3339Nano)
 	if err = writeRecord(cfg, cmd.Process.Pid, started); err != nil {
-		return nil, "", killAfterShimError(cmd.Process.Pid, err)
+		return nil, "", killAndCollect(cmd, err)
 	}
 	// The record comes first so that a stop during the wait can reach the job; job.started
 	// is appended only for a job confirmed inside its scope.
 	if err = confirmJobScope(cmd.Process.Pid, command.Scope, command.Argv[0]); err != nil {
-		return nil, "", killAfterShimError(cmd.Process.Pid, err)
+		return nil, "", killAndCollect(cmd, err)
 	}
 	return cmd, started, nil
 }
@@ -217,20 +254,42 @@ func (flag *stringListFlag) Set(value string) error {
 	return nil
 }
 
-func waitAndRecordExit(writer *eventlog.Writer, cfg shimConfig, cmd *exec.Cmd) error {
-	err := cmd.Wait()
-	code := exitCode(err)
-	payload := map[string]any{"state": string(StateDead), "code": code}
+// waitAndRecordExit waits for the job and records how it ended. A job that was still
+// running at its deadline is recorded with reason "deadline", and whatever is left of its
+// process group is killed: the stop signal may have ended only the first process, and the
+// wait delay kills only that one. The kill comes before the first process is collected.
+// Once collected, its process id no longer names the group for certain, and the shim signals
+// no group it cannot check.
+func waitAndRecordExit(ctx context.Context, writer *eventlog.Writer, cfg shimConfig, cmd *exec.Cmd) error {
+	waitErr := awaitExitUncollected(cmd.Process.Pid)
+	payload := map[string]any{"state": string(StateDead)}
+	var killErr error
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		payload["reason"] = "deadline"
+		killErr = killStartedProcessGroup(cmd.Process.Pid)
+	}
+	payload["code"] = collectedExitCode(cmd)
 	body, marshalErr := json.Marshal(payload)
 	if marshalErr != nil {
-		return fmt.Errorf("job-shim: marshal exited: %w", marshalErr)
+		return errors.Join(fmt.Errorf("job-shim: marshal exited: %w", marshalErr), waitErr, killErr)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	appendCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if _, appendErr := writer.Append(ctx, eventlog.Event{Type: "job.exited", TaskID: cfg.Name, Payload: body}); appendErr != nil {
-		return appendErr
+	if _, appendErr := writer.Append(appendCtx, eventlog.Event{Type: "job.exited", TaskID: cfg.Name, Payload: body}); appendErr != nil {
+		return errors.Join(appendErr, waitErr, killErr)
 	}
-	return nil
+	return errors.Join(waitErr, killErr)
+}
+
+// collectedExitCode collects the job and returns its own exit code: the code it exited
+// with, or -1 when a signal ended it. The error of Wait is not the source: for a job that
+// exits by itself after its deadline, Wait returns the context's error, not the job's.
+func collectedExitCode(cmd *exec.Cmd) int {
+	err := cmd.Wait()
+	if cmd.ProcessState != nil {
+		return cmd.ProcessState.ExitCode()
+	}
+	return exitCode(err)
 }
 
 func exitCode(err error) int {
@@ -281,9 +340,18 @@ func appendRefused(cfg shimConfig, cause error) error {
 	return err
 }
 
-func killAfterShimError(pid int, cause error) error {
-	if err := killStartedProcessGroup(pid); err != nil {
+// killAndCollect ends a job the shim started and will not run: the job's process group is
+// killed and the job is collected. Collecting also ends the watcher of the job's context,
+// which would otherwise outlive this call and stop the job once more when the context ends.
+// A job that could not be killed is not waited for.
+func killAndCollect(cmd *exec.Cmd, cause error) error {
+	if err := killStartedProcessGroup(cmd.Process.Pid); err != nil {
 		return errors.Join(cause, err)
+	}
+	// The exit status of a job that was just killed says nothing; Wait is called to collect.
+	var exit *exec.ExitError
+	if err := cmd.Wait(); err != nil && !errors.As(err, &exit) {
+		return errors.Join(cause, fmt.Errorf("job-shim: collect the killed job: %w", err))
 	}
 	return cause
 }

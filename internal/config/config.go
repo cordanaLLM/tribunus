@@ -26,6 +26,7 @@ const (
 	MaxJobRestarts          = 32
 	MaxRestartBackoff       = 3600
 	MaxStopGraceSeconds     = 300
+	MaxJobRuntimeSeconds    = 365 * 24 * 3600
 	MaxSandboxInputs        = 32
 	MaxSandboxEnvAllow      = 64
 	MaxReleaseWatchRoutes   = 32
@@ -146,14 +147,18 @@ type TaskBudget struct {
 }
 
 type JobConfig struct {
-	Name        string           `koanf:"name" json:"name"`
-	Command     []string         `koanf:"command" json:"command"`
-	LogPath     string           `koanf:"log_path" json:"log_path"`
-	Schedule    string           `koanf:"schedule" json:"schedule"`
-	RouterAlias string           `koanf:"router_alias" json:"router_alias"`
-	Restart     JobRestartConfig `koanf:"restart" json:"restart"`
-	Stop        JobStopConfig    `koanf:"stop" json:"stop"`
-	Sandbox     SandboxConfig    `koanf:"sandbox" json:"sandbox"`
+	Name        string   `koanf:"name" json:"name"`
+	Command     []string `koanf:"command" json:"command"`
+	LogPath     string   `koanf:"log_path" json:"log_path"`
+	Schedule    string   `koanf:"schedule" json:"schedule"`
+	RouterAlias string   `koanf:"router_alias" json:"router_alias"`
+	// MaxRuntimeSeconds is the job's deadline: when it has run this long it is stopped like
+	// `jobs stop` stops it and its exit is recorded with reason "deadline". 0 means the
+	// longest runtime any job may have (MaxJobRuntimeSeconds).
+	MaxRuntimeSeconds int              `koanf:"max_runtime_seconds" json:"max_runtime_seconds"`
+	Restart           JobRestartConfig `koanf:"restart" json:"restart"`
+	Stop              JobStopConfig    `koanf:"stop" json:"stop"`
+	Sandbox           SandboxConfig    `koanf:"sandbox" json:"sandbox"`
 }
 
 type JobRestartConfig struct {

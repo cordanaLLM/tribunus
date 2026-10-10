@@ -11,6 +11,18 @@
 # reuse lint at the release line fsfe/reuse-action@v6 runs in CI.
 # It skips where reuse is not installed and fails on another reuse major.
 ---
+agent-checkpoint-tool:
+  commands:
+    checkpoint:
+      run: >-
+        sh .config/lefthook/python.sh -B .config/lefthook/scripts/checkpoint.py
+        --event tool --json --marker
+agent-checkpoint-stop:
+  commands:
+    checkpoint:
+      run: >-
+        sh .config/lefthook/python.sh -B .config/lefthook/scripts/checkpoint.py
+        --event stop --json --marker
 pre-commit:
   parallel: true
   commands:

@@ -1640,7 +1640,20 @@ func waitForProcessGone(t *testing.T, pid int) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("pid %d still exists", pid)
+	status, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "status"))
+	if err != nil {
+		status = []byte(err.Error())
+	}
+	exe, exeErr := os.Readlink(filepath.Join("/proc", strconv.Itoa(pid), "exe"))
+	t.Fatalf("pid %d still exists: exe=%q (%v) status=%q", pid, exe, exeErr, firstLines(string(status), 8))
+}
+
+func firstLines(text string, n int) string {
+	lines := strings.SplitN(text, "\n", n+1)
+	if len(lines) > n {
+		lines = lines[:n]
+	}
+	return strings.Join(lines, "; ")
 }
 
 func waitForChildPIDInLog(t *testing.T, path string) int {
@@ -1726,9 +1739,15 @@ func processHasOpenPath(pid int, want string) (bool, error) {
 	return false, nil
 }
 
+// processExists reads the process state itself, past the seams the tests plant. A zombie
+// has exited; signal 0 would still reach it for as long as its parent leaves it uncollected.
 func processExists(pid int) bool {
-	err := syscall.Kill(pid, syscall.Signal(0))
-	return err == nil
+	body, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "status"))
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
+		return false
+	}
+	status := string(body)
+	return !strings.Contains(status, "\nState:\tZ") && !strings.Contains(status, "\nState:\tX")
 }
 
 func processParent(pid int) (int, error) {

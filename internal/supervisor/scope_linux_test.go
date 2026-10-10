@@ -425,25 +425,61 @@ func TestWaitStartedEndsWhenTheShimHasExited(t *testing.T) {
 
 // TestWaitStartedKeepsTheReplayErrorWhenTheContextEnds: while the shim is alive the wait goes
 // on, whatever the replay returns. When the caller's context ends it, the error names both
-// the deadline and the replay that was still failing.
+// the context and the replay that was still failing. The context is ended from inside the
+// wait, after its second replay, so the test does not depend on how fast the machine is.
 func TestWaitStartedKeepsTheReplayErrorWhenTheContextEnds(t *testing.T) {
 	sup := testSupervisor(t, testJob("probe", []string{"/bin/true"}))
 	if err := sup.appendJobEvent(testContext(t), "job.stopped", "probe", map[string]any{"state": "stopped"}); err != nil {
 		t.Fatalf("append seed = %v, want nil", err)
 	}
 	corruptEventLog(t, sup.cfg.EventLog.Dir)
-	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	ctx, cancel := context.WithCancel(testContext(t))
 	defer cancel()
-	err := sup.waitStarted(ctx, "probe", eventlog.Job{}, os.Getpid())
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("waitStarted(corrupt log, live shim) = %v, want the deadline: a live shim is waited for", err)
+	old := procStatusReadFile
+	t.Cleanup(func() { procStatusReadFile = old })
+	checks := 0
+	procStatusReadFile = func(string) ([]byte, error) {
+		checks++
+		if checks == 2 {
+			cancel()
+		}
+		return []byte("Name:\tshim\nState:\tS (sleeping)\n"), nil
+	}
+	err := sup.waitStarted(ctx, "probe", eventlog.Job{}, 4244)
+	if !errors.Is(err, context.Canceled) || checks != 2 {
+		t.Fatalf("waitStarted(corrupt log, live shim) = %v after %d checks, want the ended context after 2", err, checks)
 	}
 	if !strings.Contains(err.Error(), "probe did not start: ") || !strings.Contains(err.Error(), "last replay: ") || !strings.Contains(err.Error(), "eventlog: seq 1 file ") {
 		t.Fatalf("waitStarted(corrupt log, live shim) = %v, want did-not-start with the last replay error", err)
 	}
 	var both interface{ Unwrap() []error }
 	if !errors.As(err, &both) || len(both.Unwrap()) != 2 {
-		t.Fatalf("waitStarted(corrupt log, live shim) = %v, want it to wrap the deadline and the replay error", err)
+		t.Fatalf("waitStarted(corrupt log, live shim) = %v, want it to wrap the context's end and the replay error", err)
+	}
+}
+
+// TestLastReplayError: the deadline can fall inside a replay as well as between two. A replay
+// it cut short must not replace what the last complete replay said about the log.
+func TestLastReplayError(t *testing.T) {
+	broken := errors.New("log is broken")
+	cut := fmt.Errorf("replay: %w", context.DeadlineExceeded)
+	cases := []struct {
+		name      string
+		previous  error
+		replayErr error
+		ctxErr    error
+		want      error
+	}{
+		{"a complete failing replay is kept", nil, broken, nil, broken},
+		{"a complete clean replay clears the last failure", broken, nil, nil, nil},
+		{"a replay cut short keeps the last failure", broken, cut, context.DeadlineExceeded, broken},
+		{"a replay cut short keeps a clean result", nil, cut, context.DeadlineExceeded, nil},
+		{"a result that arrives with the context's end is not trusted", broken, nil, context.Canceled, broken},
+	}
+	for i := 0; i < len(cases); i++ {
+		if got := lastReplayError(cases[i].previous, cases[i].replayErr, cases[i].ctxErr); !errors.Is(got, cases[i].want) || (got == nil) != (cases[i].want == nil) {
+			t.Errorf("lastReplayError(%s) = %v, want %v", cases[i].name, got, cases[i].want)
+		}
 	}
 }
 

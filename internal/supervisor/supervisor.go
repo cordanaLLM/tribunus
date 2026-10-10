@@ -258,7 +258,7 @@ func (s *Supervisor) waitStarted(ctx context.Context, name string, before eventl
 		if err == nil && startedBy(state.Jobs[name], before, shimPID) {
 			return nil
 		}
-		lastErr = err
+		lastErr = lastReplayError(lastErr, err, ctx.Err())
 		if shimGone {
 			break
 		}
@@ -276,10 +276,19 @@ func (s *Supervisor) waitStarted(ctx context.Context, name string, before eventl
 	return fmt.Errorf("supervisor: %s did not start", name)
 }
 
+// lastReplayError keeps the result of the last replay that ran to its end. A replay the
+// caller's context cut short says nothing about the log, so it leaves the previous result.
+func lastReplayError(previous error, replayErr error, ctxErr error) error {
+	if ctxErr != nil {
+		return previous
+	}
+	return replayErr
+}
+
 // startWaitEnded is the error of a wait the caller's context ended. A replay that was still
 // failing then is part of the answer: without it the caller sees only a deadline.
 func startWaitEnded(name string, ctxErr error, lastErr error) error {
-	if lastErr == nil || errors.Is(lastErr, ctxErr) {
+	if lastErr == nil {
 		return fmt.Errorf("supervisor: %s did not start: %w", name, ctxErr)
 	}
 	return fmt.Errorf("supervisor: %s did not start: %w; last replay: %w", name, ctxErr, lastErr)

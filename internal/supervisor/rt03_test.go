@@ -5,6 +5,7 @@ package supervisor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -406,7 +407,9 @@ func fileHas(t *testing.T, path string, want string) bool {
 
 func rt03RuntimeUnavailable(out string, err error) bool {
 	text := fmt.Sprintf("%v %s", err, out)
-	if strings.Contains(text, "Operation not permitted") || strings.Contains(text, "creating new namespace failed") {
+	// bwrap 0.11 and later report a missing user namespace as "No permissions to create a
+	// new namespace"; earlier releases as "creating new namespace failed".
+	if strings.Contains(text, "Operation not permitted") || strings.Contains(text, "creating new namespace failed") || strings.Contains(text, "No permissions to create a new namespace") {
 		return true
 	}
 	return strings.Contains(text, "/dev/net/tun")
@@ -555,8 +558,14 @@ func TestSandboxArgvCarriesNoEnvValues(t *testing.T) {
 	if !strings.Contains(env, "FORGE_TOKEN="+secret) || !strings.Contains(env, "XDG_RUNTIME_DIR=/run/user/1000") || strings.Contains(env, "UNLISTED=") {
 		t.Fatalf("env = %q, want the allowlisted and bus variables only", built.Env)
 	}
+	// The builder binds and runs the command at its resolved path; some distributions make
+	// /usr/bin/true a symlink.
+	truePath, err := filepath.EvalSymlinks("/usr/bin/true")
+	if err != nil {
+		t.Fatalf("EvalSymlinks(/usr/bin/true) = %v, want nil", err)
+	}
 	argv := strings.Join(built.Argv, " ")
-	for _, want := range []string{"-- /usr/bin/env --ignore-signal=TERM /usr/bin/pasta", "--address 192.0.2.2", "--map-host-loopback none", "-T none -U none", "--unsetenv XDG_RUNTIME_DIR", "--unsetenv DBUS_SESSION_BUS_ADDRESS", "--unsetenv INVOCATION_ID", "-- /usr/bin/env --default-signal=TERM /usr/bin/true"} {
+	for _, want := range []string{"-- /usr/bin/env --ignore-signal=TERM /usr/bin/pasta", "--address 192.0.2.2", "--map-host-loopback none", "-T none -U none", "--unsetenv XDG_RUNTIME_DIR", "--unsetenv DBUS_SESSION_BUS_ADDRESS", "--unsetenv INVOCATION_ID", "-- /usr/bin/env --default-signal=TERM " + truePath} {
 		if !strings.Contains(argv, want) {
 			t.Fatalf("argv = %q, want %q", argv, want)
 		}
@@ -579,6 +588,10 @@ func TestSandboxJobSeesExactlyItsEnvironment(t *testing.T) {
 	cmd.Env = append(append([]string(nil), built.Env...), "INVOCATION_ID=systemd-would-add-this")
 	out, err := cmd.Output()
 	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && os.Getenv("CI") != "true" && rt03RuntimeUnavailable(string(exit.Stderr), err) {
+			t.Skipf("sandbox environment test skipped: runtime unavailable: %v: %s", err, exit.Stderr)
+		}
 		t.Fatalf("sandboxed env = %v, want nil", err)
 	}
 	var names []string
@@ -763,5 +776,20 @@ func TestSandboxRuntimeRefusesInputChangedSinceLoad(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "input "+input+" now resolves to "+target) {
 		t.Fatalf("buildSandboxCommand(input now a symlink) = %v, want refusal", err)
+	}
+}
+
+func TestRT03RuntimeUnavailableRecognisesBwrapMessages(t *testing.T) {
+	exit := errors.New("exit status 1")
+	for _, out := range []string{
+		"bwrap: No permissions to create a new namespace, likely because the kernel does not allow non-privileged user namespaces.",
+		"bwrap: Creating new namespace failed: Operation not permitted",
+	} {
+		if !rt03RuntimeUnavailable(out, exit) {
+			t.Fatalf("rt03RuntimeUnavailable(%q) = false, want true", out)
+		}
+	}
+	if rt03RuntimeUnavailable("bash: line 1: /workspace/x: Read-only file system", exit) {
+		t.Fatal("rt03RuntimeUnavailable(job failure) = true, want false: a job failure must not skip")
 	}
 }

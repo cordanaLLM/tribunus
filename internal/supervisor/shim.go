@@ -132,6 +132,11 @@ func runShim(cfg shimConfig) error {
 	if err = writeRecord(cfg, cmd.Process.Pid, started); err != nil {
 		return killAfterShimError(cmd.Process.Pid, err)
 	}
+	// The record comes first so that a stop during the wait can reach the job; job.started
+	// is appended only for a job confirmed inside its scope.
+	if err = confirmJobScope(cmd.Process.Pid, command.Scope, command.Argv[0]); err != nil {
+		return killAfterShimError(cmd.Process.Pid, reportRefusal(logFile, cfg.Name, err))
+	}
 	writer, err := shimWriter(cfg)
 	if err != nil {
 		return killAfterShimError(cmd.Process.Pid, err)
@@ -226,6 +231,16 @@ func exitCode(err error) int {
 		return exit.ExitCode()
 	}
 	return -1
+}
+
+// reportRefusal writes why a started job was killed into the job's log, where its own
+// output is read; the shim's stderr is not kept.
+func reportRefusal(logFile io.Writer, name string, cause error) error {
+	err := fmt.Errorf("job-shim: %s refused: %w", name, cause)
+	if _, writeErr := fmt.Fprintf(logFile, "tribunus: %v\n", err); writeErr != nil {
+		return errors.Join(err, fmt.Errorf("job-shim: write refusal to the job log: %w", writeErr))
+	}
+	return err
 }
 
 func killAfterShimError(pid int, cause error) error {

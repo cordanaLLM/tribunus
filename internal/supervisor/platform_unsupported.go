@@ -36,6 +36,17 @@ func killStartedProcessGroup(pid int) error {
 	return fmt.Errorf("%w: missing process-group SIGKILL for pid %d", ErrNotSupported, pid)
 }
 
+func confirmJobScope(pid int, scope string, runner string) error {
+	if scope == "" {
+		return nil
+	}
+	return fmt.Errorf("%w: missing systemd scope %s for pid %d", ErrNotSupported, scope, pid)
+}
+
+func processGone(pid int) (bool, error) {
+	return false, fmt.Errorf("%w: missing process state for pid %d", ErrNotSupported, pid)
+}
+
 func (l *heldLock) Close() error {
 	return nil
 }

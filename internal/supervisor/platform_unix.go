@@ -179,13 +179,11 @@ func linuxProcessParent(pid int) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	lines := strings.Split(string(body), "\n")
-	for i := 0; i < len(lines); i++ {
-		if strings.HasPrefix(lines[i], "PPid:") {
-			return strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(lines[i], "PPid:")))
-		}
+	parent := procStatusField(string(body), "PPid:")
+	if parent == "" {
+		return 0, fmt.Errorf("PPid missing for %d", pid)
 	}
-	return 0, fmt.Errorf("PPid missing for %d", pid)
+	return strconv.Atoi(parent)
 }
 
 // shimCmdlineMismatch reads the shim's command line once and returns why it is not this

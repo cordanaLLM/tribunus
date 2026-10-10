@@ -16,7 +16,7 @@ The first target is the Linux workstation that runs the supervisor as a per-host
 2. **One argv, built by the shim.** For `mode: enforce`, the shim execs (argv only, no shell):
 
    ```text
-   systemd-run --user --scope --quiet --collect
+   systemd-run --user --scope --quiet --collect --unit=tribunus-job-<id>.scope
        -p MemoryMax=<memory_max> -p CPUWeight=<cpu_weight> -p TasksMax=<tasks_max> --
    env --ignore-signal=TERM
    [egress only] pasta --config-net --address 192.0.2.2 --netmask 24 --gateway 192.0.2.1
@@ -38,7 +38,7 @@ The first target is the Linux workstation that runs the supervisor as a per-host
 
    | Part | Why |
    | --- | --- |
-   | `systemd-run --user --scope` | a cgroup per job with memory, CPU and task limits, so a runaway job cannot starve the desktop. With `--scope` it execs the command in place, so the shim's process group and parent-death signal carry into the job. |
+   | `systemd-run --user --scope` | a cgroup per job with memory, CPU and task limits, so a runaway job cannot starve the desktop. With `--scope` it execs the command in place, so the shim's process group and parent-death signal carry into the job. The shim names the scope itself, one unit per start, and confirms the job's cgroup is that unit before it records the start (item 4). |
    | `--die-with-parent` | the sandboxed command dies when bwrap or the shim dies, which keeps the supervisor's no-orphan guarantee. |
    | no `--new-session` | the job stays in the process group the shim created, so a graceful SIGTERM from stop reaches it. TIOCSTI injection, which `--new-session` guards against, must be disabled in the kernel (`/proc/sys/dev/tty/legacy_tiocsti` = 0); the shim refuses to start otherwise. |
    | `--unshare-all` | new user, pid, ipc, uts, cgroup and network namespaces: the job cannot see or signal the shim or the supervisor. |
@@ -50,6 +50,8 @@ The first target is the Linux workstation that runs the supervisor as a per-host
 
 3. **Paths are checked at config load and again at start.** `workspace` and each `input` resolve through symlinks. A path that equals, contains or lies inside the event log directory, the signing key, the config file or the running Tribunus executable is refused, as is `/`, `$HOME` or any directory containing `$HOME` (also reached through a symlink). The executable is protected because the supervisor re-executes it as each job's shim: a job that could write it would run its own code outside the sandbox at the next start. Config load fails closed when `$HOME` cannot be found. At job start the shim checks the workspace and inputs against the event log and the signing key again, and refuses a path whose symlink resolution changed since load.
 4. **Fail closed.** A missing `bwrap` or `systemd-run`, an `env` outside `/usr` or without `--ignore-signal` and `--default-signal` (GNU coreutils 8.31 or later), a missing `pasta` or resolver file for egress, or TIOCSTI not disabled stops the job start with an error that names the missing piece. There is no fallback to an unsandboxed run. Other platforms report `not-supported` for `mode: enforce`.
+
+   The same holds after the start. `systemd-run` exiting 0 does not show where the job runs, so the shim reads the job's cgroup from `/proc/<pid>/cgroup` and appends `job.started` only when it ends in the job's own scope unit. A unit name of its own is what makes the check exact: the cgroup the shim itself runs in may be a scope too. `systemd-run` execs the job only after the user manager placed it, so a process that is no longer `systemd-run`, or has exited, outside its scope is refused at once; while it is still `systemd-run` the shim waits up to 10 s. A refused job's whole process group is killed, the reason is written to the job's log, and `jobs start` reports that the job did not start. `TestSandboxedJobOutsideItsScopeIsRefused` plants a scope command that reports success and starts the job without creating a scope; `TestSandboxedJobCgroupMemoryMax` is the allowed case, against the real user manager.
 5. **RT-03 fixtures prove it in both directions.** Each case under `internal/supervisor/testdata/rt03/` uses the fixture format of the architecture document. Every boundary has a refused and an allowed case:
 
    | Boundary | Refused (violation) | Allowed (compliant) |
@@ -64,4 +66,4 @@ The first target is the Linux workstation that runs the supervisor as a per-host
 ## Consequences
 
 - **Positive**: Jobs, including the release watch (#23), run without the control plane's credentials, paths or loopback. The flags and fixtures are written so other repositories, such as Praetor's agent sandbox, can reuse them. The loopback finding becomes a test anyone can run.
-- **Negative**: Linux only. Egress is all-or-nothing: there is no per-destination allowlist yet. Short-lived minted credentials and `rt03.violation` events need the broker and follow later. CI runners need `bubblewrap` and `passt` installed and unprivileged user namespaces allowed; anything the CI runner cannot prove (the systemd user scope) is proven on the workstation and said so in the test.
+- **Negative**: Linux only. Egress is all-or-nothing: there is no per-destination allowlist yet. Short-lived minted credentials and `rt03.violation` events need the broker and follow later. CI runners need `bubblewrap` and `passt` installed and unprivileged user namespaces allowed; anything the CI runner cannot prove (the systemd user scope) is proven on the workstation and said so in the test: the tests that need a scope first start a process the way the shim does and skip, with the reason, unless it ends up in its scope. CI runs the supervisor tests verbosely so that such a skip shows in the log.

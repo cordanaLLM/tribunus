@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
+	"sync/atomic"
 	"time"
 
 	"github.com/cordanaLLM/tribunus/internal/config"
@@ -24,7 +27,10 @@ const (
 	maxStatusPolls      = 100
 	// A start is awaited for 15 s (10 ms apart), longer than the shim may wait for the
 	// job's scope, so a slow start is never reported as failed while it can still succeed.
-	maxStartPolls     = 1500
+	maxStartPolls = 1500
+	// Shims this supervisor started and has not collected yet. A job's lock allows one live
+	// shim per job, so twice the number of jobs a config may hold is never reached in order.
+	maxShimWaiters    = 2 * config.MaxJobs
 	maxSuperviseTicks = 1 << 30
 )
 
@@ -65,7 +71,11 @@ type Supervisor struct {
 	clk          clock.Clock
 	shimCommand  []string
 	pollInterval time.Duration
+	shimWaiters  atomic.Int32
 }
+
+// shimErrorOutput is where a shim that could not be collected is reported.
+var shimErrorOutput io.Writer = os.Stderr
 
 func New(cfg config.Config, opts Options) (*Supervisor, error) {
 	if err := platformSupported(); err != nil {
@@ -128,15 +138,32 @@ func (s *Supervisor) startOne(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
+	if s.shimWaiters.Add(1) > maxShimWaiters {
+		s.shimWaiters.Add(-1)
+		return fmt.Errorf("supervisor: start shim for %s: %d shims are still uncollected", job.Name, maxShimWaiters)
+	}
 	cmd := s.shimCmd(ctx, job)
 	if err = cmd.Start(); err != nil {
+		s.shimWaiters.Add(-1)
 		return fmt.Errorf("supervisor: start shim for %s: %w", job.Name, err)
 	}
 	shimPID := cmd.Process.Pid
-	if err = cmd.Process.Release(); err != nil {
-		return fmt.Errorf("supervisor: release shim for %s: %w", job.Name, err)
-	}
+	go s.collectShim(cmd, job.Name)
 	return s.waitStarted(ctx, job.Name, before.Jobs[job.Name], shimPID)
+}
+
+// collectShim waits for a started shim and takes its exit status. Without this the shim
+// stays in the process table as a zombie for as long as the supervisor runs, one per job
+// start. The wait is not tied to the caller's context: the shim outlives it on purpose. An
+// exit status other than 0 is no error here, the shim reports its own failures through the
+// event log and the job's log.
+func (s *Supervisor) collectShim(cmd *exec.Cmd, name string) {
+	defer s.shimWaiters.Add(-1)
+	err := cmd.Wait()
+	var exit *exec.ExitError
+	if err != nil && !errors.As(err, &exit) {
+		fmt.Fprintf(shimErrorOutput, "Error: collect shim of %s: %v\n", name, err)
+	}
 }
 
 func (s *Supervisor) Status(ctx context.Context, name string) ([]JobStatus, error) {

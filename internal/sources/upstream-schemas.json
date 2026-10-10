@@ -3,8 +3,8 @@
     {
       "id": "openai-openapi",
       "url_template": "https://raw.githubusercontent.com/openai/openai-openapi/{revision}/openapi.yaml",
-      "pinned_revision": "0ef225c4f701046f8fe88cae9d29d0df4d1a9fa9",
-      "full_document_sha256": "06d914881ac7e73185739ce80bc3ad84bfcd5df022e6bab5527b87d938f67506",
+      "pinned_revision": "e95c0fe615f45a19e8878af923a729948445a6bd",
+      "full_document_sha256": "8f037f570565278e84c57ef1f1777c1c8ede954da7b428d70ec93dc294781ba7",
       "spdx_license": "MIT",
       "copyright_holder": "OpenAI",
       "fragments": [
@@ -17,8 +17,8 @@
     {
       "id": "litellm-price-map",
       "url_template": "https://raw.githubusercontent.com/BerriAI/litellm/{revision}/model_prices_and_context_window.json",
-      "pinned_revision": "fff86d637686c674d85cdcc42e2c728cde1cb1cf",
-      "full_document_sha256": "9b9730f20c7b93348e591a38babae478fc6671353cd67eae3c6457b78e8cf48d",
+      "pinned_revision": "7ff5010674348be45b96e9c7e0c8da3b657f08af",
+      "full_document_sha256": "9b88d7873307df1a207d21189a4ffcebd4259363e1bdb53c72f519ad786ab670",
       "spdx_license": "MIT",
       "copyright_holder": "Berri AI",
       "fragments": [
@@ -61,7 +61,7 @@
     {
       "id": "codex-rate-limit-status-payload",
       "url_template": "https://raw.githubusercontent.com/openai/codex/{revision}/codex-rs/codex-backend-openapi-models/src/models/rate_limit_status_payload.rs",
-      "pinned_revision": "52950c592404f11cc245a83a27fb02f2c23bc0c1",
+      "pinned_revision": "806d9732c974bc8a51b8317c1bd8985544fe627c",
       "full_document_sha256": "4b44735986720667483a00e59c3cd63da6c3ad488fc0d99df33dd14fbbdd8849",
       "spdx_license": "Apache-2.0",
       "copyright_holder": "OpenAI",
@@ -75,7 +75,7 @@
     {
       "id": "codex-rate-limit-status-details",
       "url_template": "https://raw.githubusercontent.com/openai/codex/{revision}/codex-rs/codex-backend-openapi-models/src/models/rate_limit_status_details.rs",
-      "pinned_revision": "52950c592404f11cc245a83a27fb02f2c23bc0c1",
+      "pinned_revision": "806d9732c974bc8a51b8317c1bd8985544fe627c",
       "full_document_sha256": "38935bb0f24cbb60bb9def3426fdd44bdec75dee92d8c0396698e851f122c00a",
       "spdx_license": "Apache-2.0",
       "copyright_holder": "OpenAI",
@@ -89,7 +89,7 @@
     {
       "id": "codex-rate-limit-window-snapshot",
       "url_template": "https://raw.githubusercontent.com/openai/codex/{revision}/codex-rs/codex-backend-openapi-models/src/models/rate_limit_window_snapshot.rs",
-      "pinned_revision": "52950c592404f11cc245a83a27fb02f2c23bc0c1",
+      "pinned_revision": "806d9732c974bc8a51b8317c1bd8985544fe627c",
       "full_document_sha256": "f667756c00e512c779cb0f593737094b1292990494624492f0c0bb48dcd6918b",
       "spdx_license": "Apache-2.0",
       "copyright_holder": "OpenAI",

@@ -101,6 +101,15 @@ type Unit struct {
 	UpdatedAt     string          `json:"updated_at,omitempty"`
 	Notes         []UnitNote      `json:"notes,omitempty"`
 	ReadUpto      uint64          `json:"read_upto,omitempty"`
+	Evidence      *UnitEvidence   `json:"evidence,omitempty"`
+}
+
+// UnitEvidence points at what proves a unit's result: a file, the digest of its content and
+// its length in lines. The record keeps the pointer, never the file.
+type UnitEvidence struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+	Lines  int    `json:"lines"`
 }
 
 type Reducer func(State, Record) (State, error)

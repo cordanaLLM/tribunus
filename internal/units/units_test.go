@@ -180,6 +180,91 @@ func TestStickyFieldsKeepTheirValue(t *testing.T) {
 	}
 }
 
+// TestEvidencePointerIsStickyAndReplaced: a unit keeps its evidence pointer across records
+// that carry none, and a new pointer replaces it as a whole.
+func TestEvidencePointerIsStickyAndReplaced(t *testing.T) {
+	svc := testService(t)
+	first := &eventlog.UnitEvidence{Path: ".workingdir/evidence/unit a.md", SHA256: "0123456789ab", Lines: 42}
+	unit := mustRecord(t, svc, unitA, RecordPayload{Status: "implementing", Evidence: first})
+	if unit.Evidence == nil || *unit.Evidence != *first {
+		t.Fatalf("evidence after the first record = %+v, want %+v", unit.Evidence, first)
+	}
+	first.Lines = 7
+	if unit.Evidence.Lines != 42 {
+		t.Fatalf("the unit shares the caller's pointer: lines = %d after the caller changed its copy, want 42", unit.Evidence.Lines)
+	}
+	mustRecord(t, svc, unitA, RecordPayload{Status: "review", Lane: strPtr("orchestrator")})
+	kept, err := testService2(t, svc).Show(testContext(t), unitA)
+	if err != nil || kept.Evidence == nil || kept.Evidence.Path != ".workingdir/evidence/unit a.md" || kept.Evidence.SHA256 != "0123456789ab" || kept.Evidence.Lines != 42 {
+		t.Fatalf("evidence after a record without one = %+v, %v, want the first pointer kept across replay", kept.Evidence, err)
+	}
+	second := &eventlog.UnitEvidence{Path: "out/result.json", SHA256: strings.Repeat("a", 64), Lines: 0}
+	replaced := mustRecord(t, svc, unitA, RecordPayload{Status: "review", Evidence: second})
+	if replaced.Evidence == nil || *replaced.Evidence != *second {
+		t.Fatalf("evidence after a new pointer = %+v, want %+v", replaced.Evidence, second)
+	}
+	if other := mustRecord(t, svc, unitB, RecordPayload{Status: "ready"}); other.Evidence != nil {
+		t.Fatalf("a unit that never got evidence has %+v, want none", other.Evidence)
+	}
+}
+
+func TestEvidenceRefusalsAppendNothing(t *testing.T) {
+	svc := testService(t)
+	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing"})
+	before := logLength(t, svc)
+	cases := []struct {
+		name     string
+		evidence eventlog.UnitEvidence
+		want     string
+	}{
+		{"no path", eventlog.UnitEvidence{SHA256: "0123456789ab", Lines: 1}, "evidence needs a path"},
+		{"path with a line break", eventlog.UnitEvidence{Path: "a\nb", SHA256: "0123456789ab", Lines: 1}, "evidence path holds a control character"},
+		{"path too long", eventlog.UnitEvidence{Path: strings.Repeat("p", MaxFieldBytes+1), SHA256: "0123456789ab", Lines: 1}, "evidence path exceeds"},
+		{"digest too short", eventlog.UnitEvidence{Path: "e.md", SHA256: "0123456789a", Lines: 1}, "evidence sha256 must be"},
+		{"digest too long", eventlog.UnitEvidence{Path: "e.md", SHA256: strings.Repeat("a", 65), Lines: 1}, "evidence sha256 must be"},
+		{"digest in upper case", eventlog.UnitEvidence{Path: "e.md", SHA256: "0123456789AB", Lines: 1}, "evidence sha256 must be"},
+		{"digest with its prefix", eventlog.UnitEvidence{Path: "e.md", SHA256: "sha256:0123456789ab", Lines: 1}, "evidence sha256 must be"},
+		{"negative lines", eventlog.UnitEvidence{Path: "e.md", SHA256: "0123456789ab", Lines: -1}, "evidence lines must be"},
+		{"too many lines", eventlog.UnitEvidence{Path: "e.md", SHA256: "0123456789ab", Lines: MaxEvidenceLines + 1}, "evidence lines must be"},
+	}
+	for i := 0; i < len(cases); i++ {
+		evidence := cases[i].evidence
+		_, err := svc.Record(testContext(t), unitA, RecordPayload{Status: "implementing", Evidence: &evidence})
+		if err == nil || !strings.Contains(err.Error(), cases[i].want) {
+			t.Errorf("Record(evidence: %s) = %v, want %q", cases[i].name, err, cases[i].want)
+		}
+	}
+	if after := logLength(t, svc); after != before {
+		t.Fatalf("log grew from %d to %d records across refused evidence, want nothing appended", before, after)
+	}
+	edge := eventlog.UnitEvidence{Path: strings.Repeat("p", MaxFieldBytes), SHA256: "0123456789ab", Lines: MaxEvidenceLines}
+	if _, err := svc.Record(testContext(t), unitA, RecordPayload{Status: "implementing", Evidence: &edge}); err != nil {
+		t.Fatalf("Record(evidence at every bound) = %v, want nil", err)
+	}
+}
+
+func TestParseEvidence(t *testing.T) {
+	got, err := ParseEvidence("  .workingdir/evidence/unit a.md   sha256:0123456789ab lines:42 ")
+	if err != nil || got.Path != ".workingdir/evidence/unit a.md" || got.SHA256 != "0123456789ab" || got.Lines != 42 {
+		t.Fatalf("ParseEvidence(path with a space) = %+v, %v, want path, digest and 42 lines", got, err)
+	}
+	refused := []struct{ text, want string }{
+		{"", "evidence must be"},
+		{"e.md sha256:0123456789ab", "evidence must be"},
+		{"e.md lines:3 sha256:0123456789ab", "evidence must end in"},
+		{"e.md sha256:0123456789ab count:3", "evidence must end in"},
+		{"e.md md5:0123456789ab lines:3", "evidence must end in"},
+		{"e.md sha256:0123456789ab lines:many", "evidence lines"},
+		{"e.md sha256:xyz lines:3", "evidence sha256 must be"},
+		{"sha256:0123456789ab lines:3", "evidence must be"},
+	}
+	for i := 0; i < len(refused); i++ {
+		if got, err = ParseEvidence(refused[i].text); err == nil || got != nil || !strings.Contains(err.Error(), refused[i].want) {
+			t.Errorf("ParseEvidence(%q) = %+v, %v, want %q", refused[i].text, got, err, refused[i].want)
+		}
+	}
+}
+
 // testService2 opens a second service on the same log: a fresh process after a restart.
 func testService2(t *testing.T, first *Service) *Service {
 	t.Helper()

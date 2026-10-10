@@ -83,6 +83,10 @@ func applyStickyFields(unit *eventlog.Unit, payload RecordPayload) {
 	if payload.PR != nil {
 		unit.PR = *payload.PR
 	}
+	if payload.Evidence != nil {
+		// The payload was decoded from this record alone, so its pointer is the unit's own.
+		unit.Evidence = payload.Evidence
+	}
 	if len(payload.Identity) > 0 {
 		unit.Identity = payload.Identity
 		if payload.IdentityKey == nil {

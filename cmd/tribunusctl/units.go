@@ -82,9 +82,9 @@ func unitsCall(fs *flag.FlagSet, args []string, need ...string) (*units.Service,
 }
 
 type unitsSetFlags struct {
-	status, worktree, branch, lane, by, target, resolvedModel, identity, identityKey *string
-	pr                                                                               *int
-	reopen                                                                           *bool
+	status, worktree, branch, lane, by, target, resolvedModel, identity, identityKey, evidence *string
+	pr                                                                                         *int
+	reopen                                                                                     *bool
 }
 
 func runUnitsSet(args []string) error {
@@ -100,7 +100,8 @@ func runUnitsSet(args []string) error {
 		resolvedModel: fs.String("resolved-model", "", "model the alias resolved to"),
 		identity:      fs.String("identity", "", "file holding the run identity object, or - for stdin"),
 		identityKey:   fs.String("identity-key", "", "identity key of that identity"),
-		reopen:        fs.Bool("reopen", false, "move a landed or abandoned unit again"),
+		reopen:        fs.Bool("reopen", false, "move a landed or dropped unit again"),
+		evidence:      fs.String("evidence", "", "evidence pointer: \"<path> sha256:<hex> lines:<n>\""),
 	}
 	svc, pos, ctx, cancel, err := unitsCall(fs, args, "id")
 	if err != nil {
@@ -143,6 +144,13 @@ func buildRecordPayload(fs *flag.FlagSet, f unitsSetFlags) (units.RecordPayload,
 	}
 	if given["pr"] {
 		payload.PR = f.pr
+	}
+	if given["evidence"] {
+		evidence, err := units.ParseEvidence(*f.evidence)
+		if err != nil {
+			return units.RecordPayload{}, err
+		}
+		payload.Evidence = evidence
 	}
 	if !given["identity"] {
 		return payload, nil

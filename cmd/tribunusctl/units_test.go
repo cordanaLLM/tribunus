@@ -197,6 +197,45 @@ const testIdentity = `{"physical_model":"model-x","harness":"harness-a","harness
 
 // TestRunUnitsIdentityFromFileAndStdin: the run identity is taken as an object from a file
 // or stdin, stored with its key, and shown again by `units show`.
+// TestRunUnitsSetRecordsAnEvidencePointer: --evidence takes the pointer form used in reports,
+// units show prints it back, and a malformed pointer is refused before anything is recorded.
+func TestRunUnitsSetRecordsAnEvidencePointer(t *testing.T) {
+	cfgPath, _ := writeUnitsConfig(t)
+	id := "cordanaLLM/tribunus#22"
+	if err := runUnits([]string{"set", "--config=" + cfgPath, id, "--status=implementing"}); err != nil {
+		t.Fatalf("runUnits set: %v", err)
+	}
+	err := runUnits([]string{"set", "--config=" + cfgPath, id, "--status=review", "--evidence=out/result.json sha256:nothex lines:3"})
+	if err == nil || !strings.Contains(err.Error(), "evidence sha256 must be") {
+		t.Fatalf("runUnits set (malformed evidence) = %v, want the digest refusal", err)
+	}
+	before := captureStdoutUnits(t, func() {
+		if showErr := runUnits([]string{"show", "--config=" + cfgPath, id}); showErr != nil {
+			t.Fatalf("runUnits show: %v", showErr)
+		}
+	})
+	if strings.Contains(before, `"evidence"`) || !strings.Contains(before, `"status": "implementing"`) && !strings.Contains(before, `"status":"implementing"`) {
+		t.Fatalf("show after a refused set = %s, want the unit unchanged and without evidence", before)
+	}
+	pointer := "--evidence=.workingdir/evidence/unit 22.md sha256:0123456789ab lines:57"
+	if err = runUnits([]string{"set", "--config=" + cfgPath, id, "--status=review", pointer}); err != nil {
+		t.Fatalf("runUnits set (evidence): %v", err)
+	}
+	if err = runUnits([]string{"set", "--config=" + cfgPath, id, "--status=review", "--lane=orchestrator"}); err != nil {
+		t.Fatalf("runUnits set (no evidence): %v", err)
+	}
+	after := captureStdoutUnits(t, func() {
+		if showErr := runUnits([]string{"show", "--config=" + cfgPath, id}); showErr != nil {
+			t.Fatalf("runUnits show: %v", showErr)
+		}
+	})
+	for _, want := range []string{`.workingdir/evidence/unit 22.md`, `0123456789ab`, `57`, `orchestrator`} {
+		if !strings.Contains(after, want) {
+			t.Fatalf("show = %s, want %q: the pointer is kept across a record without one", after, want)
+		}
+	}
+}
+
 func TestRunUnitsIdentityFromFileAndStdin(t *testing.T) {
 	cfgPath, _ := writeUnitsConfig(t)
 	identityFile := filepath.Join(t.TempDir(), "identity.json")

@@ -180,8 +180,11 @@ type SandboxConfig struct {
 	EnvAllow  []string `koanf:"env_allow" json:"env_allow"`
 	Network   string   `koanf:"network" json:"network"`
 	MemoryMax string   `koanf:"memory_max" json:"memory_max"`
-	CPUWeight int      `koanf:"cpu_weight" json:"cpu_weight"`
-	TasksMax  int      `koanf:"tasks_max" json:"tasks_max"`
+	// MemoryHigh is the soft limit: above it the kernel throttles the job and reclaims its
+	// memory before the hard limit kills it. Empty means none. It never exceeds MemoryMax.
+	MemoryHigh string `koanf:"memory_high" json:"memory_high"`
+	CPUWeight  int    `koanf:"cpu_weight" json:"cpu_weight"`
+	TasksMax   int    `koanf:"tasks_max" json:"tasks_max"`
 }
 
 type WatchConfig struct {
@@ -499,11 +502,30 @@ func validateSandboxLimits(sandbox SandboxConfig) error {
 	if bytes < minMemoryMaxBytes || bytes > maxMemoryMaxBytes {
 		return fmt.Errorf("memory_max: must be 64M..64G")
 	}
+	if err = validateMemoryHigh(sandbox.MemoryHigh, bytes); err != nil {
+		return err
+	}
 	if sandbox.CPUWeight < minCPUWeight || sandbox.CPUWeight > maxCPUWeight {
 		return fmt.Errorf("cpu_weight: must be 1..10000")
 	}
 	if sandbox.TasksMax < minTasksMax || sandbox.TasksMax > maxTasksMax {
 		return fmt.Errorf("tasks_max: must be 16..32768")
+	}
+	return nil
+}
+
+// validateMemoryHigh checks the soft limit against the hard one. A soft limit above the hard
+// limit would never act; one below the floor of the hard limit would throttle every job.
+func validateMemoryHigh(value string, maxBytes int64) error {
+	if value == "" {
+		return nil
+	}
+	high, err := parseMemoryMax(value)
+	if err != nil {
+		return fmt.Errorf("memory_high: %w", err)
+	}
+	if high < minMemoryMaxBytes || high > maxBytes {
+		return fmt.Errorf("memory_high: must be 64M..memory_max")
 	}
 	return nil
 }

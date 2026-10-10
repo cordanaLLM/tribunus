@@ -42,6 +42,7 @@ func sandboxFlagArgs(sandbox config.SandboxConfig) []string {
 		"--sandbox-workspace", sandbox.Workspace,
 		"--sandbox-network", sandbox.Network,
 		"--sandbox-memory-max", sandbox.MemoryMax,
+		"--sandbox-memory-high", sandbox.MemoryHigh,
 		"--sandbox-cpu-weight", strconv.Itoa(sandbox.CPUWeight),
 		"--sandbox-tasks-max", strconv.Itoa(sandbox.TasksMax),
 	}

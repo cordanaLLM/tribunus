@@ -503,6 +503,61 @@ func TestSandboxedJobCgroupMemoryMax(t *testing.T) {
 	if memoryMax != "268435456" {
 		t.Fatalf("memory.max = %q, want 268435456", memoryMax)
 	}
+	if high := cgroupValue(t, cgroup, "memory.high"); high != "max" {
+		t.Fatalf("memory.high = %q without a soft limit, want max", high)
+	}
+}
+
+// TestSandboxedJobCgroupMemoryHigh: the soft limit of the job's config is the memory.high of
+// the job's own scope.
+func TestSandboxedJobCgroupMemoryHigh(t *testing.T) {
+	requireSystemdUserScope(t)
+	job := sandboxedSupervisorJob(t, "sandbox-soft", `while true; do sleep 1; done`)
+	job.Sandbox.MemoryHigh = "128M"
+	sup := testSupervisor(t, job)
+	if err := sup.Start(testContext(t), job.Name); err != nil {
+		t.Fatalf("Start() = %v, want nil", err)
+	}
+	cgroup, memoryMax, err := jobCgroupMemoryMax(statusOne(t, sup, job.Name).PID)
+	if err != nil {
+		t.Skipf("cgroup memory.max unavailable: %v", err)
+	}
+	if high := cgroupValue(t, cgroup, "memory.high"); high != "134217728" || memoryMax != "268435456" {
+		t.Fatalf("memory.high = %q, memory.max = %q, want 134217728 and 268435456", high, memoryMax)
+	}
+}
+
+func cgroupValue(t *testing.T, cgroup string, file string) string {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join("/sys/fs/cgroup", cgroup, file)) // #nosec G304 -- cgroup path comes from /proc for the child under test.
+	if err != nil {
+		t.Fatalf("ReadFile(%s of %s) = %v, want nil", file, cgroup, err)
+	}
+	return strings.TrimSpace(string(body))
+}
+
+// TestScopeArgumentsCarryTheSoftLimitOnlyWhenSet pins the argv: MemoryHigh appears between
+// MemoryMax and CPUWeight when the job has a soft limit, and not at all otherwise.
+func TestScopeArgumentsCarryTheSoftLimitOnlyWhenSet(t *testing.T) {
+	sandbox := config.SandboxConfig{MemoryMax: "2G", CPUWeight: 100, TasksMax: 512}
+	without := strings.Join(systemdRunArgs("/usr/bin/systemd-run", "x.scope", sandbox), " ")
+	if strings.Contains(without, "MemoryHigh") || !strings.HasSuffix(without, "-p MemoryMax=2G -p CPUWeight=100 -p TasksMax=512 --") {
+		t.Fatalf("systemd-run args without a soft limit = %q, want no MemoryHigh", without)
+	}
+	sandbox.MemoryHigh = "1536M"
+	with := strings.Join(systemdRunArgs("/usr/bin/systemd-run", "x.scope", sandbox), " ")
+	if !strings.HasSuffix(with, "-p MemoryMax=2G -p MemoryHigh=1536M -p CPUWeight=100 -p TasksMax=512 --") {
+		t.Fatalf("systemd-run args with a soft limit = %q, want MemoryHigh=1536M after MemoryMax", with)
+	}
+	// The shim reads back what the supervisor hands it.
+	job := testJob("handover", []string{"/bin/true"})
+	job.Sandbox = config.SandboxConfig{Mode: "enforce", Workspace: t.TempDir(), Network: "none", MemoryMax: "2G", MemoryHigh: "1536M", CPUWeight: 100, TasksMax: 512}
+	sup := testSupervisor(t, job)
+	cmd := sup.shimCmd(testContext(t), job)
+	cfg, err := parseShimArgs(cmd.Args[lastArgIndex(cmd.Args, "__job-shim"):])
+	if err != nil || cfg.Sandbox.MemoryHigh != "1536M" || cfg.Sandbox.MemoryMax != "2G" {
+		t.Fatalf("shim config = %+v, %v, want memory_high 1536M and memory_max 2G", cfg.Sandbox, err)
+	}
 }
 
 // requireSystemdUserScope stops a test that needs a systemd user scope where there is none.

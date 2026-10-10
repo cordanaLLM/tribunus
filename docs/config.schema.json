@@ -173,6 +173,7 @@
               "env_allow": [],
               "network": "none",
               "memory_max": "2G",
+              "memory_high": "",
               "cpu_weight": 100,
               "tasks_max": 512
             },
@@ -228,6 +229,11 @@
                 "type": "string",
                 "default": "2G",
                 "pattern": "^[1-9][0-9]*[KMGT]?$"
+              },
+              "memory_high": {
+                "type": "string",
+                "default": "",
+                "pattern": "^([1-9][0-9]*[KMGT]?)?$"
               },
               "cpu_weight": {
                 "type": "integer",

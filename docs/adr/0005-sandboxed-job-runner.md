@@ -17,7 +17,8 @@ The first target is the Linux workstation that runs the supervisor as a per-host
 
    ```text
    systemd-run --user --scope --quiet --collect --unit=tribunus-job-<id>.scope
-       -p MemoryMax=<memory_max> -p CPUWeight=<cpu_weight> -p TasksMax=<tasks_max> --
+       -p MemoryMax=<memory_max> [-p MemoryHigh=<memory_high>]
+       -p CPUWeight=<cpu_weight> -p TasksMax=<tasks_max> --
    env --ignore-signal=TERM
    [egress only] pasta --config-net --address 192.0.2.2 --netmask 24 --gateway 192.0.2.1
        --map-host-loopback none -t none -u none -T none -U none --quiet --
@@ -38,7 +39,7 @@ The first target is the Linux workstation that runs the supervisor as a per-host
 
    | Part | Why |
    | --- | --- |
-   | `systemd-run --user --scope` | a cgroup per job with memory, CPU and task limits, so a runaway job cannot starve the desktop. With `--scope` it execs the command in place, so the shim's process group and parent-death signal carry into the job. The shim names the scope itself, one unit per start, and confirms the job's cgroup is that unit before it records the start (item 4). |
+   | `systemd-run --user --scope` | a cgroup per job with memory, CPU and task limits, so a runaway job cannot starve the desktop. `memory_max` is the hard limit, at which the kernel kills; the optional `memory_high` is a soft limit below it, above which the kernel throttles the job and reclaims its memory first. With `--scope` it execs the command in place, so the shim's process group and parent-death signal carry into the job. The shim names the scope itself, one unit per start, and confirms the job's cgroup is that unit before it records the start (item 4). |
    | `--die-with-parent` | the sandboxed command dies when bwrap or the shim dies, which keeps the supervisor's no-orphan guarantee. |
    | no `--new-session` | the job stays in the process group the shim created, so a graceful SIGTERM from stop reaches it. TIOCSTI injection, which `--new-session` guards against, must be disabled in the kernel (`/proc/sys/dev/tty/legacy_tiocsti` = 0); the shim refuses to start otherwise. |
    | `--unshare-all` | new user, pid, ipc, uts, cgroup and network namespaces: the job cannot see or signal the shim or the supervisor. |

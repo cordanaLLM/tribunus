@@ -71,6 +71,7 @@ func parseShimArgs(args []string) (shimConfig, error) {
 	fs.Var((*stringListFlag)(&cfg.Sandbox.EnvAllow), "sandbox-env-allow", "")
 	fs.StringVar(&cfg.Sandbox.Network, "sandbox-network", "", "")
 	fs.StringVar(&cfg.Sandbox.MemoryMax, "sandbox-memory-max", "", "")
+	fs.StringVar(&cfg.Sandbox.MemoryHigh, "sandbox-memory-high", "", "")
 	fs.IntVar(&cfg.Sandbox.CPUWeight, "sandbox-cpu-weight", 0, "")
 	fs.IntVar(&cfg.Sandbox.TasksMax, "sandbox-tasks-max", 0, "")
 	if err := fs.Parse(args); err != nil {

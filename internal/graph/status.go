@@ -167,3 +167,21 @@ func fixRoundNumber(name StatusName) (int, bool) {
 func fixRoundPrefix() string {
 	return "fix-round-"
 }
+
+// KnownStatus reports whether name is in the status vocabulary. A fix round must carry its
+// number ("fix-round-2"); the class name "fix-round-N" itself is not a status.
+func KnownStatus(name StatusName) bool {
+	return knownStatus(name)
+}
+
+// TerminalStatus reports whether name is a known status that nothing follows.
+func TerminalStatus(name StatusName) bool {
+	rule, ok := findStatusRule(name)
+	return ok && len(rule.transitions) == 0
+}
+
+// AllowTransition is the one transition table of the vocabulary, for every package that
+// records a status: nil when a move from one status to another is allowed.
+func AllowTransition(from, to StatusName) error {
+	return allowTransition(Status{Name: from}, Status{Name: to})
+}

@@ -451,7 +451,7 @@ func TestTaskReducerSharedLogReplay(t *testing.T) {
 	dir, signer, limits := testLog(t)
 	appendEvent(t, dir, signer, limits, Event{Type: "task.created", TaskID: "task-1", Payload: raw(`{"state":"open"}`)})
 	appendEvent(t, dir, signer, limits, Event{Type: "job.started", TaskID: "job-1", Payload: raw(`{"state":"running"}`)})
-	appendEvent(t, dir, signer, limits, Event{Type: "unit.recorded", TaskID: "cordanaLLM/tribunus#22", Payload: raw(`{"stage":"implementing"}`)})
+	appendEvent(t, dir, signer, limits, Event{Type: "unit.recorded", TaskID: "cordanaLLM/tribunus#22", Payload: raw(`{"status":"implementing"}`)})
 	appendEvent(t, dir, signer, limits, Event{Type: "task.state_changed", TaskID: "task-1", Payload: raw(`{"state":"done"}`)})
 
 	st := replayTasks(t, dir, signer.PublicKey(), limits)

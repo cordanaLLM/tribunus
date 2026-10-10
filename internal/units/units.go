@@ -1,5 +1,5 @@
-// Package units keeps the run record: one entry per work unit with its stage, written to
-// the signed event log at each stage boundary, so that after a crash the open units and
+// Package units keeps the run record: one entry per work unit with its status, written to
+// the signed event log at each status change, so that after a crash the open units and
 // what is safe to relaunch can be read back instead of reconstructed from transcripts.
 package units
 
@@ -11,20 +11,10 @@ import (
 	"unicode"
 
 	"github.com/cordanaLLM/tribunus/internal/eventlog"
+	"github.com/cordanaLLM/tribunus/internal/graph"
 )
 
-type Stage string
-
 const (
-	StagePlanned      Stage = "planned"
-	StageImplementing Stage = "implementing"
-	StageVerifying    Stage = "verifying"
-	StageReview       Stage = "review"
-	StageLanding      Stage = "landing"
-	StageLanded       Stage = "landed"
-	StageAbandoned    Stage = "abandoned"
-	StageBlocked      Stage = "blocked"
-
 	MaxUnreadNotes   = 256
 	MaxUnits         = 10000
 	MaxNoteBytes     = 4096
@@ -37,22 +27,12 @@ var (
 	unitIDRegex      = regexp.MustCompile(`^[A-Za-z0-9._/-]{1,100}(#[0-9]{1,9}|:[a-z0-9-]{1,40})$`)
 	senderRegex      = regexp.MustCompile(`^[A-Za-z0-9._@/:-]{1,64}$`)
 	identityKeyRegex = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
-	validStages      = map[string]bool{
-		string(StagePlanned):      true,
-		string(StageImplementing): true,
-		string(StageVerifying):    true,
-		string(StageReview):       true,
-		string(StageLanding):      true,
-		string(StageLanded):       true,
-		string(StageAbandoned):    true,
-		string(StageBlocked):      true,
-	}
 )
 
 // RecordPayload is the payload of unit.recorded. A nil field keeps the unit's previous
 // value: worktree, branch, pull request, lane and the identity fields are sticky.
 type RecordPayload struct {
-	Stage         string          `json:"stage"`
+	Status        string          `json:"status"`
 	Worktree      *string         `json:"worktree,omitempty"`
 	Branch        *string         `json:"branch,omitempty"`
 	PR            *int            `json:"pr,omitempty"`
@@ -76,7 +56,7 @@ type NoteReadPayload struct {
 
 type ResumeRow struct {
 	ID        string
-	Stage     string
+	Status    string
 	UpdatedAt string
 	Worktree  string
 	Branch    string
@@ -85,41 +65,65 @@ type ResumeRow struct {
 	Relaunch  string
 }
 
-func IsValidStage(s string) bool {
-	return validStages[s]
+// IsValidStatus reports whether s is a status of the task graph's vocabulary, the one
+// vocabulary for work status in this repository (internal/graph).
+func IsValidStatus(s string) bool {
+	return graph.KnownStatus(graph.StatusName(s))
 }
 
-func IsTerminalStage(s string) bool {
-	return s == string(StageLanded) || s == string(StageAbandoned)
+// IsTerminalStatus reports whether nothing follows s: landed or dropped.
+func IsTerminalStatus(s string) bool {
+	return graph.TerminalStatus(graph.StatusName(s))
 }
 
 func IsValidID(id string) bool {
 	return unitIDRegex.MatchString(id)
 }
 
+// transitionRefusal says why a unit may not go from one status to another, or nil. A record
+// that keeps the status only updates fields. Every other move follows the task graph's
+// transition table. reopen is the explicit override for a landed or dropped unit, which the
+// table never moves.
+func transitionRefusal(from string, to string, reopen bool) error {
+	if from == to {
+		return nil
+	}
+	if reopen && IsTerminalStatus(from) {
+		return nil
+	}
+	return graph.AllowTransition(graph.StatusName(from), graph.StatusName(to))
+}
+
+// moveAllowed is transitionRefusal as a yes or no, for the reducer, which does not report
+// why it left a record unapplied.
+func moveAllowed(from string, to string, reopen bool) bool {
+	return transitionRefusal(from, to, reopen) == nil
+}
+
 // RelaunchRule says whether a crashed unit may simply be started again. Only work that
 // has not reached a pull request is safe: anything later may already be under review or
 // landed, and starting it again would redo or duplicate it.
 func RelaunchRule(u eventlog.Unit) (bool, string) {
-	if u.Stage == string(StageBlocked) {
+	status := graph.StatusName(u.Status)
+	if status == graph.StatusBlocked {
 		return false, "blocked"
 	}
 	if u.PR != 0 {
 		return false, fmt.Sprintf("has PR #%d; check its state before relaunching", u.PR)
 	}
-	if u.Stage == string(StageReview) || u.Stage == string(StageLanding) {
-		return false, "in review/landing"
-	}
-	if u.Stage == string(StagePlanned) || u.Stage == string(StageImplementing) || u.Stage == string(StageVerifying) {
+	switch status {
+	case graph.StatusReady, graph.StatusClaimed, graph.StatusImplementing:
 		return true, ""
+	case graph.StatusProposed:
+		return false, "proposed; not ready to start"
 	}
-	return false, u.Stage
+	return false, "in " + u.Status
 }
 
 // validateRecordPayload checks everything about a record that does not depend on the log.
 func validateRecordPayload(payload RecordPayload) error {
-	if !IsValidStage(payload.Stage) {
-		return fmt.Errorf("units: unknown stage %q", payload.Stage)
+	if !IsValidStatus(payload.Status) {
+		return fmt.Errorf("units: unknown status %q", payload.Status)
 	}
 	fields := []struct {
 		name  string

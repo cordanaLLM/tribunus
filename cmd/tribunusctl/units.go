@@ -82,15 +82,15 @@ func unitsCall(fs *flag.FlagSet, args []string, need ...string) (*units.Service,
 }
 
 type unitsSetFlags struct {
-	stage, worktree, branch, lane, by, target, resolvedModel, identity, identityKey *string
-	pr                                                                              *int
-	reopen                                                                          *bool
+	status, worktree, branch, lane, by, target, resolvedModel, identity, identityKey *string
+	pr                                                                               *int
+	reopen                                                                           *bool
 }
 
 func runUnitsSet(args []string) error {
 	fs := flag.NewFlagSet("units set", flag.ContinueOnError)
 	f := unitsSetFlags{
-		stage:         fs.String("stage", "", "stage"),
+		status:        fs.String("status", "", "status from the task graph vocabulary"),
 		worktree:      fs.String("worktree", "", "worktree directory"),
 		branch:        fs.String("branch", "", "branch name"),
 		pr:            fs.Int("pr", 0, "pull request number"),
@@ -107,8 +107,8 @@ func runUnitsSet(args []string) error {
 		return err
 	}
 	defer cancel()
-	if *f.stage == "" {
-		return fmt.Errorf("units set: --stage is required")
+	if *f.status == "" {
+		return fmt.Errorf("units set: --status is required")
 	}
 	payload, err := buildRecordPayload(fs, f)
 	if err != nil {
@@ -124,7 +124,7 @@ func runUnitsSet(args []string) error {
 
 // buildRecordPayload sets only the fields whose flag was given, so the others stay sticky.
 func buildRecordPayload(fs *flag.FlagSet, f unitsSetFlags) (units.RecordPayload, error) {
-	payload := units.RecordPayload{Stage: *f.stage, Reopen: *f.reopen}
+	payload := units.RecordPayload{Status: *f.status, Reopen: *f.reopen}
 	given := map[string]bool{}
 	fs.Visit(func(fl *flag.Flag) { given[fl.Name] = true })
 	text := []struct {
@@ -191,10 +191,10 @@ func runUnitsResume(args []string) error {
 	if ignored > 0 {
 		fmt.Fprintf(os.Stderr, "units: replay did not apply %d unit records that broke a rule (see units.UnitReducer)\n", ignored)
 	}
-	fmt.Println("id\tstage\tupdated_at\tworktree\tbranch\tpr\tlane\trelaunch")
+	fmt.Println("id\tstatus\tupdated_at\tworktree\tbranch\tpr\tlane\trelaunch")
 	for i := 0; i < len(rows); i++ {
 		r := rows[i]
-		fmt.Printf("%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n", r.ID, r.Stage, r.UpdatedAt, r.Worktree, r.Branch, r.PR, r.Lane, r.Relaunch)
+		fmt.Printf("%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n", r.ID, r.Status, r.UpdatedAt, r.Worktree, r.Branch, r.PR, r.Lane, r.Relaunch)
 	}
 	return nil
 }

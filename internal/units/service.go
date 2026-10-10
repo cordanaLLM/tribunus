@@ -50,7 +50,7 @@ func (s *Service) Replay(ctx context.Context) (eventlog.State, error) {
 	return eventlog.ReplayStable(ctx, s.dir, s.signer.PublicKey(), s.limits, UnitReducer)
 }
 
-// Record appends one stage record and returns the unit as it stands after it.
+// Record appends one status record and returns the unit as it stands after it.
 func (s *Service) Record(ctx context.Context, id string, payload RecordPayload) (eventlog.Unit, error) {
 	if err := readyContext(ctx, "record"); err != nil {
 		return eventlog.Unit{}, err
@@ -65,7 +65,7 @@ func (s *Service) Record(ctx context.Context, id string, payload RecordPayload) 
 	if err != nil {
 		return eventlog.Unit{}, err
 	}
-	if err = validateRecordState(st, id, payload.Stage, payload.Reopen); err != nil {
+	if err = validateRecordState(st, id, payload.Status, payload.Reopen); err != nil {
 		return eventlog.Unit{}, err
 	}
 	body, err := json.Marshal(payload)
@@ -91,18 +91,24 @@ func (s *Service) appendAndReduce(ctx context.Context, st eventlog.State, ev eve
 	return UnitReducer(st, rec)
 }
 
-func validateRecordState(st eventlog.State, id string, stage string, reopen bool) error {
+func validateRecordState(st eventlog.State, id string, status string, reopen bool) error {
 	existing, exists := st.Units[id]
-	if !exists && len(st.Units) >= MaxUnits {
-		return fmt.Errorf("units: the run record already holds %d units", MaxUnits)
+	if !exists {
+		if len(st.Units) >= MaxUnits {
+			return fmt.Errorf("units: the run record already holds %d units", MaxUnits)
+		}
+		return nil
 	}
-	if exists && IsTerminalStage(existing.Stage) && !IsTerminalStage(stage) && !reopen {
-		return fmt.Errorf("units: %q is %s; pass --reopen to move it again", id, existing.Stage)
+	if err := transitionRefusal(existing.Status, status, reopen); err != nil {
+		if IsTerminalStatus(existing.Status) {
+			return fmt.Errorf("units: %q is %s; pass --reopen to move it again", id, existing.Status)
+		}
+		return fmt.Errorf("units: %q: %w", id, err)
 	}
 	return nil
 }
 
-// Note appends a note to a unit's inbox. The unit reads it at its next stage boundary.
+// Note appends a note to a unit's inbox. The unit reads it at its next status record.
 func (s *Service) Note(ctx context.Context, id string, from string, text string) (eventlog.UnitNote, error) {
 	if err := readyContext(ctx, "note"); err != nil {
 		return eventlog.UnitNote{}, err
@@ -195,7 +201,7 @@ func (s *Service) Resume(ctx context.Context) ([]ResumeRow, int, error) {
 	}
 	openIDs := make([]string, 0, len(st.Units))
 	for id, u := range st.Units {
-		if !IsTerminalStage(u.Stage) {
+		if !IsTerminalStatus(u.Status) {
 			openIDs = append(openIDs, id)
 		}
 	}
@@ -207,7 +213,7 @@ func (s *Service) Resume(ctx context.Context) ([]ResumeRow, int, error) {
 		if safe, reason := RelaunchRule(u); !safe {
 			relaunch = "no: " + reason
 		}
-		rows = append(rows, ResumeRow{ID: u.ID, Stage: u.Stage, UpdatedAt: u.UpdatedAt, Worktree: u.Worktree,
+		rows = append(rows, ResumeRow{ID: u.ID, Status: u.Status, UpdatedAt: u.UpdatedAt, Worktree: u.Worktree,
 			Branch: u.Branch, PR: u.PR, Lane: u.Lane, Relaunch: relaunch})
 	}
 	return rows, st.UnitRecordsIgnored, nil

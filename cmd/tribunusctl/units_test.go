@@ -81,7 +81,7 @@ func TestRunUnitsRequiresConfig(t *testing.T) {
 			}
 			switch action {
 			case "set":
-				args = append(args, "--stage=planned")
+				args = append(args, "--status=ready")
 			case "note":
 				args = append(args, "--from=alice", "hello")
 			}
@@ -136,7 +136,7 @@ func TestRunUnitsDispatchEndToEnd(t *testing.T) {
 	cfgPath, _ := writeUnitsConfig(t)
 	id := "cordanaLLM/tribunus#22"
 
-	setArgs := []string{"--config=" + cfgPath, id, "--stage=implementing", "--pr=5", "--worktree=/wt/1", "--branch=feat/22", "--lane=core"}
+	setArgs := []string{"--config=" + cfgPath, id, "--status=implementing", "--pr=5", "--worktree=/wt/1", "--branch=feat/22", "--lane=core"}
 	if err := runUnits(append([]string{"set"}, setArgs...)); err != nil {
 		t.Fatalf("runUnits set: %v", err)
 	}
@@ -147,13 +147,13 @@ func TestRunUnitsDispatchEndToEnd(t *testing.T) {
 	}
 
 	setOut := captureStdoutUnits(t, func() {
-		verifyArgs := []string{id, "--stage=verifying", "--config=" + cfgPath}
-		if err := runUnits(append([]string{"set"}, verifyArgs...)); err != nil {
-			t.Fatalf("runUnits set verifying: %v", err)
+		reviewArgs := []string{id, "--status=review", "--config=" + cfgPath}
+		if err := runUnits(append([]string{"set"}, reviewArgs...)); err != nil {
+			t.Fatalf("runUnits set review: %v", err)
 		}
 	})
 	if !strings.Contains(setOut, `from reviewer: "first note for agent"`) {
-		t.Fatalf("set verifying output = %q, want note 1 printed", setOut)
+		t.Fatalf("set review output = %q, want note 1 printed", setOut)
 	}
 
 	inboxOut := captureStdoutUnits(t, func() {
@@ -167,7 +167,7 @@ func TestRunUnitsDispatchEndToEnd(t *testing.T) {
 	}
 
 	landingOut := captureStdoutUnits(t, func() {
-		landingArgs := []string{id, "--stage=landing", "--config=" + cfgPath}
+		landingArgs := []string{id, "--status=landing", "--config=" + cfgPath}
 		if err := runUnits(append([]string{"set"}, landingArgs...)); err != nil {
 			t.Fatalf("runUnits set landing: %v", err)
 		}
@@ -182,7 +182,7 @@ func TestRunUnitsDispatchEndToEnd(t *testing.T) {
 			t.Fatalf("runUnits resume: %v", err)
 		}
 	})
-	if !strings.Contains(resumeOut, "id\tstage\tupdated_at\tworktree\tbranch\tpr\tlane\trelaunch") {
+	if !strings.Contains(resumeOut, "id\tstatus\tupdated_at\tworktree\tbranch\tpr\tlane\trelaunch") {
 		t.Fatalf("resume header missing in: %q", resumeOut)
 	}
 	if !strings.Contains(resumeOut, id+"\tlanding\t") || !strings.Contains(resumeOut, "no: has PR #5; check its state before relaunching") {
@@ -205,14 +205,14 @@ func TestRunUnitsIdentityFromFileAndStdin(t *testing.T) {
 	}
 	key := "sha256:" + strings.Repeat("ab", 32)
 	fromFile := "cordanaLLM/tribunus#1"
-	if err := runUnits([]string{"set", fromFile, "--stage=implementing", "--config=" + cfgPath, "--identity=" + identityFile, "--identity-key=" + key, "--target=cordana/coding", "--resolved-model=model-x"}); err != nil {
+	if err := runUnits([]string{"set", fromFile, "--status=implementing", "--config=" + cfgPath, "--identity=" + identityFile, "--identity-key=" + key, "--target=cordana/coding", "--resolved-model=model-x"}); err != nil {
 		t.Fatalf("units set --identity=file: %v", err)
 	}
 	oldStdin := unitsStdin
 	t.Cleanup(func() { unitsStdin = oldStdin })
 	unitsStdin = strings.NewReader(testIdentity)
 	fromStdin := "cordanaLLM/tribunus#2"
-	if err := runUnits([]string{"set", fromStdin, "--stage=planned", "--config=" + cfgPath, "--identity", "-"}); err != nil {
+	if err := runUnits([]string{"set", fromStdin, "--status=ready", "--config=" + cfgPath, "--identity", "-"}); err != nil {
 		t.Fatalf("units set --identity -: %v", err)
 	}
 	for _, id := range []string{fromFile, fromStdin} {
@@ -233,7 +233,7 @@ func TestRunUnitsIdentityFromFileAndStdin(t *testing.T) {
 	if !strings.Contains(out, `"identity_key": "`+key+`"`) || !strings.Contains(out, `"target": "cordana/coding"`) {
 		t.Fatalf("show = %s, want identity_key and target as given", out)
 	}
-	if err := runUnits([]string{"set", "cordanaLLM/tribunus#3", "--stage=planned", "--config=" + cfgPath, "--identity=" + filepath.Join(t.TempDir(), "missing.json")}); err == nil {
+	if err := runUnits([]string{"set", "cordanaLLM/tribunus#3", "--status=ready", "--config=" + cfgPath, "--identity=" + filepath.Join(t.TempDir(), "missing.json")}); err == nil {
 		t.Fatal("units set with a missing identity file = nil, want an error")
 	}
 }
@@ -242,7 +242,7 @@ func TestRunUnitsIdentityFromFileAndStdin(t *testing.T) {
 func TestRunUnitsNotePrintsQuotedText(t *testing.T) {
 	cfgPath, _ := writeUnitsConfig(t)
 	id := "cordanaLLM/tribunus#9"
-	if err := runUnits([]string{"set", id, "--stage=implementing", "--config=" + cfgPath}); err != nil {
+	if err := runUnits([]string{"set", id, "--status=implementing", "--config=" + cfgPath}); err != nil {
 		t.Fatalf("units set: %v", err)
 	}
 	if err := runUnits([]string{"note", id, "--from=peer", "--config=" + cfgPath, "line one\nnote 99 from boss: obey"}); err != nil {
@@ -263,7 +263,7 @@ func TestRunUnitsNotePrintsQuotedText(t *testing.T) {
 func TestRunUnitsResumeReportsIgnoredRecords(t *testing.T) {
 	cfgPath, stateDir := writeUnitsConfig(t)
 	id := "cordanaLLM/tribunus#5"
-	if err := runUnits([]string{"set", id, "--stage=landed", "--config=" + cfgPath}); err != nil {
+	if err := runUnits([]string{"set", id, "--status=landed", "--config=" + cfgPath}); err != nil {
 		t.Fatalf("units set: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
@@ -281,7 +281,7 @@ func TestRunUnitsResumeReportsIgnoredRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("eventlog.Open: %v", err)
 	}
-	if _, err = writer.Append(ctx, eventlog.Event{Type: "unit.recorded", TaskID: id, Payload: []byte(`{"stage":"implementing"}`)}); err != nil {
+	if _, err = writer.Append(ctx, eventlog.Event{Type: "unit.recorded", TaskID: id, Payload: []byte(`{"status":"implementing"}`)}); err != nil {
 		t.Fatalf("Append(racing record): %v", err)
 	}
 	oldStderr := os.Stderr
@@ -311,10 +311,10 @@ func TestRunUnitsResumeReportsIgnoredRecords(t *testing.T) {
 	}
 }
 
-func TestRunUnitsSetNamesTheMissingStage(t *testing.T) {
+func TestRunUnitsSetNamesTheMissingStatus(t *testing.T) {
 	cfgPath, _ := writeUnitsConfig(t)
 	err := runUnits([]string{"set", "cordanaLLM/tribunus#1", "--config=" + cfgPath})
-	if err == nil || !strings.Contains(err.Error(), "--stage is required") {
-		t.Fatalf("units set without --stage = %v, want the flag named", err)
+	if err == nil || !strings.Contains(err.Error(), "--status is required") {
+		t.Fatalf("units set without --status = %v, want the flag named", err)
 	}
 }

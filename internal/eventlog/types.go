@@ -84,7 +84,7 @@ type UnitNote struct {
 // join without a mapping; Identity is stored as given and IdentityKey is never recomputed.
 type Unit struct {
 	ID            string          `json:"id"`
-	Stage         string          `json:"stage"`
+	Status        string          `json:"status"`
 	Worktree      string          `json:"worktree,omitempty"`
 	Branch        string          `json:"branch,omitempty"`
 	PR            int             `json:"pr,omitempty"`

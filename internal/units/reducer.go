@@ -10,7 +10,7 @@ import (
 
 // UnitReducer rebuilds the run record from the shared log. It skips the other known
 // domains and fails on a record no writer of this version could have produced: an
-// unknown type, a bad id, a payload that does not parse, an unknown stage.
+// unknown type, a bad id, a payload that does not parse, an unknown status.
 //
 // It never fails on a rule two honest writers can break by racing, because the log is
 // append-only: one such record would stop every later replay for good. The API checks
@@ -46,20 +46,20 @@ func reduceUnitRecorded(st eventlog.State, rec eventlog.Record) (eventlog.State,
 	if err := json.Unmarshal(rec.Payload, &payload); err != nil {
 		return eventlog.State{}, fmt.Errorf("eventlog: seq %d: payload: %w", rec.Seq, err)
 	}
-	if !IsValidStage(payload.Stage) {
-		return eventlog.State{}, fmt.Errorf("eventlog: seq %d: unknown stage %q", rec.Seq, payload.Stage)
+	if !IsValidStatus(payload.Status) {
+		return eventlog.State{}, fmt.Errorf("eventlog: seq %d: unknown status %q", rec.Seq, payload.Status)
 	}
 	unit, exists := st.Units[rec.TaskID]
 	if !exists && len(st.Units) >= MaxUnits {
 		st.UnitRecordsIgnored++
 		return st, nil
 	}
-	if exists && IsTerminalStage(unit.Stage) && !IsTerminalStage(payload.Stage) && !payload.Reopen {
+	if exists && !moveAllowed(unit.Status, payload.Status, payload.Reopen) {
 		st.UnitRecordsIgnored++
 		return st, nil
 	}
 	unit.ID = rec.TaskID
-	unit.Stage = payload.Stage
+	unit.Status = payload.Status
 	unit.UpdatedAt = rec.Time
 	applyStickyFields(&unit, payload)
 	st.Units[rec.TaskID] = unit

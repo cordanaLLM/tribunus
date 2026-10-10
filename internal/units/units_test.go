@@ -53,7 +53,7 @@ func mustRecord(t *testing.T, svc *Service, id string, payload RecordPayload) ev
 	t.Helper()
 	unit, err := svc.Record(testContext(t), id, payload)
 	if err != nil {
-		t.Fatalf("Record(%s, %s) = %v, want nil", id, payload.Stage, err)
+		t.Fatalf("Record(%s, %s) = %v, want nil", id, payload.Status, err)
 	}
 	return unit
 }
@@ -74,11 +74,12 @@ func rawAppend(t *testing.T, svc *Service, typ string, id string, payload string
 
 func TestResumeListsOnlyOpenUnitsSorted(t *testing.T) {
 	svc := testService(t)
-	mustRecord(t, svc, unitB, RecordPayload{Stage: string(StagePlanned)})
-	mustRecord(t, svc, unitA, RecordPayload{Stage: string(StageImplementing)})
-	mustRecord(t, svc, "cordanaLLM/tribunus#7", RecordPayload{Stage: string(StageReview)})
-	mustRecord(t, svc, "cordanaLLM/tribunus#7", RecordPayload{Stage: string(StageLanded)})
-	mustRecord(t, svc, "cordanaLLM/tribunus#8", RecordPayload{Stage: string(StageAbandoned)})
+	mustRecord(t, svc, unitB, RecordPayload{Status: "ready"})
+	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing"})
+	mustRecord(t, svc, "cordanaLLM/tribunus#7", RecordPayload{Status: "review"})
+	mustRecord(t, svc, "cordanaLLM/tribunus#7", RecordPayload{Status: "landing"})
+	mustRecord(t, svc, "cordanaLLM/tribunus#7", RecordPayload{Status: "landed"})
+	mustRecord(t, svc, "cordanaLLM/tribunus#8", RecordPayload{Status: "dropped"})
 	rows, ignored, err := svc.Resume(testContext(t))
 	if err != nil || ignored != 0 {
 		t.Fatalf("Resume() = %v, ignored %d, want nil and 0", err, ignored)
@@ -93,52 +94,86 @@ func TestResumeListsOnlyOpenUnitsSorted(t *testing.T) {
 
 func TestRelaunchRule(t *testing.T) {
 	cases := []struct {
-		stage Stage
-		pr    int
-		safe  bool
-		why   string
+		status string
+		pr     int
+		safe   bool
+		why    string
 	}{
-		{StagePlanned, 0, true, ""},
-		{StageImplementing, 0, true, ""},
-		{StageVerifying, 0, true, ""},
-		{StageImplementing, 5, false, "has PR #5"},
-		{StageVerifying, 5, false, "has PR #5"},
-		{StageReview, 0, false, "in review/landing"},
-		{StageLanding, 0, false, "in review/landing"},
-		{StageBlocked, 0, false, "blocked"},
-		{StageBlocked, 5, false, "blocked"},
-		{StageLanded, 0, false, "landed"},
+		{"ready", 0, true, ""},
+		{"claimed", 0, true, ""},
+		{"implementing", 0, true, ""},
+		{"implementing", 5, false, "has PR #5"},
+		{"proposed", 0, false, "proposed; not ready to start"},
+		{"review", 0, false, "in review"},
+		{"fix-round-2", 0, false, "in fix-round-2"},
+		{"queued", 0, false, "in queued"},
+		{"landing", 0, false, "in landing"},
+		{"blocked", 0, false, "blocked"},
+		{"blocked", 5, false, "blocked"},
 	}
 	for _, tc := range cases {
-		safe, why := RelaunchRule(eventlog.Unit{Stage: string(tc.stage), PR: tc.pr})
+		safe, why := RelaunchRule(eventlog.Unit{Status: tc.status, PR: tc.pr})
 		if safe != tc.safe || !strings.HasPrefix(why, tc.why) {
-			t.Fatalf("RelaunchRule(%s, pr %d) = %v, %q, want %v, %q", tc.stage, tc.pr, safe, why, tc.safe, tc.why)
+			t.Fatalf("RelaunchRule(%s, pr %d) = %v, %q, want %v, %q", tc.status, tc.pr, safe, why, tc.safe, tc.why)
 		}
 	}
 }
 
 func TestTerminalUnitNeedsReopen(t *testing.T) {
 	svc := testService(t)
-	mustRecord(t, svc, unitA, RecordPayload{Stage: string(StageLanded)})
-	if _, err := svc.Record(testContext(t), unitA, RecordPayload{Stage: string(StageImplementing)}); err == nil || !strings.Contains(err.Error(), "--reopen") {
-		t.Fatalf("Record(landed -> implementing) = %v, want a refusal naming --reopen", err)
+	mustRecord(t, svc, unitA, RecordPayload{Status: "landed"})
+	for _, next := range []string{"implementing", "dropped"} {
+		if _, err := svc.Record(testContext(t), unitA, RecordPayload{Status: next}); err == nil || !strings.Contains(err.Error(), "--reopen") {
+			t.Fatalf("Record(landed -> %s) = %v, want a refusal naming --reopen", next, err)
+		}
 	}
-	mustRecord(t, svc, unitA, RecordPayload{Stage: string(StageAbandoned)})
-	if unit := mustRecord(t, svc, unitA, RecordPayload{Stage: string(StageImplementing), Reopen: true}); unit.Stage != string(StageImplementing) {
-		t.Fatalf("stage after --reopen = %q, want implementing", unit.Stage)
+	if unit := mustRecord(t, svc, unitA, RecordPayload{Status: "implementing", Reopen: true}); unit.Status != "implementing" {
+		t.Fatalf("status after --reopen = %q, want implementing", unit.Status)
+	}
+	// reopen is an override for a landed or dropped unit only: it does not bypass the table.
+	if _, err := svc.Record(testContext(t), unitA, RecordPayload{Status: "landed", Reopen: true}); err == nil || !strings.Contains(err.Error(), "refused") {
+		t.Fatalf("Record(implementing -> landed, reopen) = %v, want the table's refusal", err)
+	}
+}
+
+// TestStatusMovesFollowTheTaskGraphTable: the run record has no status rules of its own. A
+// move is allowed exactly when internal/graph allows it; a record that keeps the status only
+// updates fields.
+func TestStatusMovesFollowTheTaskGraphTable(t *testing.T) {
+	svc := testService(t)
+	ctx := testContext(t)
+	for _, status := range []string{"proposed", "ready", "claimed", "implementing", "implementing", "review", "fix-round-1", "review", "queued", "landing", "landed"} {
+		mustRecord(t, svc, unitA, RecordPayload{Status: status})
+	}
+	mustRecord(t, svc, unitB, RecordPayload{Status: "implementing"})
+	for _, next := range []string{"landed", "landing", "queued", "claimed", "proposed"} {
+		if _, err := svc.Record(ctx, unitB, RecordPayload{Status: next}); err == nil || !strings.Contains(err.Error(), "refused") {
+			t.Fatalf("Record(implementing -> %s) = %v, want the table's refusal", next, err)
+		}
+	}
+	for _, unknown := range []string{"verifying", "abandoned", "planned", "fix-round-N", "fix-round-0"} {
+		if _, err := svc.Record(ctx, unitB, RecordPayload{Status: unknown}); err == nil || !strings.Contains(err.Error(), "unknown status") {
+			t.Fatalf("Record(%s) = %v, want an unknown-status refusal", unknown, err)
+		}
+	}
+	// A racing writer's illegal move is in the log anyway: replay leaves it unapplied.
+	rawAppend(t, svc, "unit.recorded", unitB, `{"status":"landed"}`)
+	st, err := svc.Replay(ctx)
+	if err != nil || st.Units[unitB].Status != "implementing" || st.UnitRecordsIgnored != 1 {
+		t.Fatalf("after an illegal move in the log: status %q, ignored %d, %v; want implementing, 1, nil", st.Units[unitB].Status, st.UnitRecordsIgnored, err)
 	}
 }
 
 func TestStickyFieldsKeepTheirValue(t *testing.T) {
 	svc := testService(t)
-	mustRecord(t, svc, unitA, RecordPayload{Stage: string(StageImplementing), Worktree: strPtr("/wt/22"), Branch: strPtr("feat/22"),
+	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing", Worktree: strPtr("/wt/22"), Branch: strPtr("feat/22"),
 		PR: intPtr(5), Lane: strPtr("agy"), By: strPtr("tribunus-85"), Target: strPtr("cordana/coding"), ResolvedModel: strPtr("model-x")})
-	mustRecord(t, svc, unitA, RecordPayload{Stage: string(StageLanding), Lane: strPtr("orchestrator")})
+	mustRecord(t, svc, unitA, RecordPayload{Status: "review", Lane: strPtr("orchestrator")})
 	unit, err := testService2(t, svc).Show(testContext(t), unitA)
 	if err != nil {
 		t.Fatalf("Show after replay = %v, want nil", err)
 	}
-	want := eventlog.Unit{ID: unitA, Stage: "landing", Worktree: "/wt/22", Branch: "feat/22", PR: 5, Lane: "orchestrator",
+	want := eventlog.Unit{ID: unitA, Status: "review", Worktree: "/wt/22", Branch: "feat/22", PR: 5, Lane: "orchestrator",
 		By: "tribunus-85", Target: "cordana/coding", ResolvedModel: "model-x", UpdatedAt: unit.UpdatedAt}
 	if !reflect.DeepEqual(unit, want) {
 		t.Fatalf("unit after a second record = %+v, want %+v", unit, want)
@@ -158,8 +193,8 @@ func testService2(t *testing.T, first *Service) *Service {
 func TestIdentityIsKeptAsGivenWithItsKey(t *testing.T) {
 	svc := testService(t)
 	key := "sha256:" + strings.Repeat("0f", 32)
-	mustRecord(t, svc, unitA, RecordPayload{Stage: string(StageImplementing), Identity: json.RawMessage(goodIdentity), IdentityKey: strPtr(key)})
-	mustRecord(t, svc, unitA, RecordPayload{Stage: string(StageVerifying)})
+	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing", Identity: json.RawMessage(goodIdentity), IdentityKey: strPtr(key)})
+	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing"})
 	unit, err := testService2(t, svc).Show(testContext(t), unitA)
 	if err != nil {
 		t.Fatalf("Show = %v, want nil", err)
@@ -175,7 +210,7 @@ func TestIdentityIsKeptAsGivenWithItsKey(t *testing.T) {
 		t.Fatalf("identity = %s key %q, want every given field (unknown ones too) and the key as given", unit.Identity, unit.IdentityKey)
 	}
 	other := `{"physical_model":"model-y","harness":"harness-a","harness_version":"1.2.3"}`
-	if unit = mustRecord(t, svc, unitA, RecordPayload{Stage: string(StageVerifying), Identity: json.RawMessage(other)}); unit.IdentityKey != "" {
+	if unit = mustRecord(t, svc, unitA, RecordPayload{Status: "implementing", Identity: json.RawMessage(other)}); unit.IdentityKey != "" {
 		t.Fatalf("identity_key after a new identity without a key = %q, want it cleared", unit.IdentityKey)
 	}
 }
@@ -198,7 +233,7 @@ func TestIdentityRefusals(t *testing.T) {
 		{"too large", `{"physical_model":"m","harness":"h","harness_version":"1","pad":"` + strings.Repeat("a", MaxIdentityBytes) + `"}`, nil, "identity exceeds"},
 	}
 	for _, tc := range cases {
-		_, err := svc.Record(testContext(t), unitA, RecordPayload{Stage: string(StagePlanned), Identity: json.RawMessage(tc.identity), IdentityKey: tc.key})
+		_, err := svc.Record(testContext(t), unitA, RecordPayload{Status: "ready", Identity: json.RawMessage(tc.identity), IdentityKey: tc.key})
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Fatalf("%s: Record() = %v, want error containing %q", tc.name, err, tc.want)
 		}
@@ -208,7 +243,7 @@ func TestIdentityRefusals(t *testing.T) {
 func TestInboxIsReadAtStageBoundaries(t *testing.T) {
 	svc := testService(t)
 	ctx := testContext(t)
-	mustRecord(t, svc, unitA, RecordPayload{Stage: string(StageImplementing)})
+	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing"})
 	note, err := svc.Note(ctx, unitA, "reviewer", "rebase before landing")
 	if err != nil {
 		t.Fatalf("Note() = %v, want nil", err)
@@ -217,7 +252,7 @@ func TestInboxIsReadAtStageBoundaries(t *testing.T) {
 		t.Fatalf("note seq = %d, want 2: the sequence number of its own record", note.Seq)
 	}
 	for i := 0; i < 2; i++ {
-		unit := mustRecord(t, svc, unitA, RecordPayload{Stage: string(StageVerifying)})
+		unit := mustRecord(t, svc, unitA, RecordPayload{Status: "implementing"})
 		if unread := UnreadNotes(unit); len(unread) != 1 || unread[0].Text != "rebase before landing" {
 			t.Fatalf("unread after set %d = %+v, want the note until the inbox is read", i, unread)
 		}
@@ -241,7 +276,7 @@ func TestInboxIsReadAtStageBoundaries(t *testing.T) {
 func TestReadMarkerNeverSwallowsLaterNotes(t *testing.T) {
 	svc := testService(t)
 	ctx := testContext(t)
-	mustRecord(t, svc, unitA, RecordPayload{Stage: string(StageImplementing)})
+	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing"})
 	rawAppend(t, svc, "unit.note_read", unitA, `{"upto_seq":999999}`)
 	if _, err := svc.Note(ctx, unitA, "reviewer", "still to read"); err != nil {
 		t.Fatalf("Note() = %v, want nil", err)
@@ -268,16 +303,17 @@ func TestReadMarkerNeverSwallowsLaterNotes(t *testing.T) {
 func TestReducerSettlesRacesWithoutFailing(t *testing.T) {
 	svc := testService(t)
 	ctx := testContext(t)
-	mustRecord(t, svc, unitA, RecordPayload{Stage: string(StageReview), PR: intPtr(5)})
-	mustRecord(t, svc, unitA, RecordPayload{Stage: string(StageLanded)})
-	rawAppend(t, svc, "unit.recorded", unitA, `{"stage":"implementing","pr":9}`)
+	mustRecord(t, svc, unitA, RecordPayload{Status: "review", PR: intPtr(5)})
+	mustRecord(t, svc, unitA, RecordPayload{Status: "landing"})
+	mustRecord(t, svc, unitA, RecordPayload{Status: "landed"})
+	rawAppend(t, svc, "unit.recorded", unitA, `{"status":"implementing","pr":9}`)
 	rawAppend(t, svc, "unit.note", "cordanaLLM/tribunus#404", `{"from":"peer","text":"nobody home"}`)
 	rawAppend(t, svc, "unit.note_read", "cordanaLLM/tribunus#404", `{"upto_seq":1}`)
 	st, err := svc.Replay(ctx)
 	if err != nil {
 		t.Fatalf("Replay() = %v, want nil: one racing record must not stop every later replay", err)
 	}
-	if unit := st.Units[unitA]; unit.Stage != string(StageLanded) || unit.PR != 5 {
+	if unit := st.Units[unitA]; unit.Status != "landed" || unit.PR != 5 {
 		t.Fatalf("landed unit after a racing record = %+v, want it still landed with PR 5", unit)
 	}
 	if st.UnitRecordsIgnored != 3 {
@@ -286,22 +322,22 @@ func TestReducerSettlesRacesWithoutFailing(t *testing.T) {
 	if _, ignored, resumeErr := svc.Resume(ctx); resumeErr != nil || ignored != 3 {
 		t.Fatalf("Resume() = ignored %d, %v, want 3 reported", ignored, resumeErr)
 	}
-	mustRecord(t, svc, unitB, RecordPayload{Stage: string(StagePlanned)})
+	mustRecord(t, svc, unitB, RecordPayload{Status: "ready"})
 }
 
 func TestReducerIgnoresUnitsBeyondCapacity(t *testing.T) {
 	st := eventlog.State{Units: make(map[string]eventlog.Unit, MaxUnits)}
 	for i := 0; i < MaxUnits; i++ {
 		id := fmt.Sprintf("r#%d", i)
-		st.Units[id] = eventlog.Unit{ID: id, Stage: string(StagePlanned)}
+		st.Units[id] = eventlog.Unit{ID: id, Status: "ready"}
 	}
-	if err := validateRecordState(st, "r#99999", string(StagePlanned), false); err == nil || !strings.Contains(err.Error(), "already holds") {
+	if err := validateRecordState(st, "r#99999", "ready", false); err == nil || !strings.Contains(err.Error(), "already holds") {
 		t.Fatalf("validateRecordState(full record) = %v, want a refusal", err)
 	}
-	if err := validateRecordState(st, "r#1", string(StageReview), false); err != nil {
+	if err := validateRecordState(st, "r#1", "claimed", false); err != nil {
 		t.Fatalf("validateRecordState(existing unit in a full record) = %v, want nil", err)
 	}
-	next, err := UnitReducer(st, eventlog.Record{Seq: 1, Type: "unit.recorded", TaskID: "r#99999", Payload: json.RawMessage(`{"stage":"planned"}`)})
+	next, err := UnitReducer(st, eventlog.Record{Seq: 1, Type: "unit.recorded", TaskID: "r#99999", Payload: json.RawMessage(`{"status":"ready"}`)})
 	if err != nil || len(next.Units) != MaxUnits || next.UnitRecordsIgnored != 1 {
 		t.Fatalf("UnitReducer(full record) = %d units, ignored %d, %v, want %d, 1, nil", len(next.Units), next.UnitRecordsIgnored, err, MaxUnits)
 	}
@@ -315,9 +351,9 @@ func TestReducerFailsOnRecordsNoWriterProduces(t *testing.T) {
 	}{
 		{"unknown unit type", "unit.renamed", unitA, `{}`, "unknown event type"},
 		{"unknown domain", "foo.bar", unitA, `{}`, "unknown event type"},
-		{"bad id", "unit.recorded", "no-suffix", `{"stage":"planned"}`, "invalid unit id"},
+		{"bad id", "unit.recorded", "no-suffix", `{"status":"ready"}`, "invalid unit id"},
 		{"malformed record", "unit.recorded", unitA, `[1]`, "payload"},
-		{"unknown stage", "unit.recorded", unitA, `{"stage":"paused"}`, "unknown stage"},
+		{"unknown status", "unit.recorded", unitA, `{"status":"paused"}`, "unknown status"},
 		{"malformed note", "unit.note", unitA, `"x"`, "payload"},
 		{"malformed marker", "unit.note_read", unitA, `{"upto_seq":"7"}`, "payload"},
 	}
@@ -333,7 +369,7 @@ func TestSharedLogReplaysBesideJobsAndTasks(t *testing.T) {
 	svc := testService(t)
 	rawAppend(t, svc, "task.created", "task-1", `{"state":"open"}`)
 	rawAppend(t, svc, "job.started", "daemon", `{"state":"running"}`)
-	mustRecord(t, svc, unitA, RecordPayload{Stage: string(StageImplementing)})
+	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing"})
 	st, err := svc.Replay(testContext(t))
 	if err != nil || len(st.Units) != 1 {
 		t.Fatalf("Replay(task + job + unit) = %d units, %v, want 1, nil", len(st.Units), err)
@@ -343,7 +379,7 @@ func TestSharedLogReplaysBesideJobsAndTasks(t *testing.T) {
 func TestRecordAndNoteRefusals(t *testing.T) {
 	svc := testService(t)
 	ctx := testContext(t)
-	mustRecord(t, svc, unitA, RecordPayload{Stage: string(StageImplementing)})
+	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing"})
 	refusedFrom := logLength(t, svc)
 	records := []struct {
 		name    string
@@ -351,12 +387,12 @@ func TestRecordAndNoteRefusals(t *testing.T) {
 		payload RecordPayload
 		want    string
 	}{
-		{"bad id", "no-suffix", RecordPayload{Stage: string(StagePlanned)}, "invalid unit id"},
-		{"unknown stage", unitA, RecordPayload{Stage: "paused"}, "unknown stage"},
-		{"tab in a field", unitA, RecordPayload{Stage: string(StagePlanned), Branch: strPtr("feat\t22")}, "control character"},
-		{"newline in a field", unitA, RecordPayload{Stage: string(StagePlanned), Lane: strPtr("a\nb")}, "control character"},
-		{"field too long", unitA, RecordPayload{Stage: string(StagePlanned), Worktree: strPtr(strings.Repeat("a", MaxFieldBytes+1))}, "exceeds"},
-		{"negative pr", unitA, RecordPayload{Stage: string(StagePlanned), PR: intPtr(-1)}, "pr must be"},
+		{"bad id", "no-suffix", RecordPayload{Status: "ready"}, "invalid unit id"},
+		{"unknown status", unitA, RecordPayload{Status: "paused"}, "unknown status"},
+		{"tab in a field", unitA, RecordPayload{Status: "ready", Branch: strPtr("feat\t22")}, "control character"},
+		{"newline in a field", unitA, RecordPayload{Status: "ready", Lane: strPtr("a\nb")}, "control character"},
+		{"field too long", unitA, RecordPayload{Status: "ready", Worktree: strPtr(strings.Repeat("a", MaxFieldBytes+1))}, "exceeds"},
+		{"negative pr", unitA, RecordPayload{Status: "ready", PR: intPtr(-1)}, "pr must be"},
 	}
 	for _, tc := range records {
 		if _, err := svc.Record(ctx, tc.id, tc.payload); err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -366,7 +402,7 @@ func TestRecordAndNoteRefusals(t *testing.T) {
 	if got := logLength(t, svc); got != refusedFrom {
 		t.Fatalf("the log grew from %d to %d records during refused records: a refusal must append nothing", refusedFrom, got)
 	}
-	if unit := mustRecord(t, svc, unitA, RecordPayload{Stage: string(StageImplementing), Worktree: strPtr(strings.Repeat("a", MaxFieldBytes))}); len(unit.Worktree) != MaxFieldBytes {
+	if unit := mustRecord(t, svc, unitA, RecordPayload{Status: "implementing", Worktree: strPtr(strings.Repeat("a", MaxFieldBytes))}); len(unit.Worktree) != MaxFieldBytes {
 		t.Fatalf("a field of exactly %d bytes was not kept", MaxFieldBytes)
 	}
 	before := logLength(t, svc)
@@ -410,7 +446,7 @@ func logLength(t *testing.T, svc *Service) int {
 func TestInboxHoldsAtMostItsCap(t *testing.T) {
 	svc := testService(t)
 	ctx := testContext(t)
-	mustRecord(t, svc, unitA, RecordPayload{Stage: string(StageImplementing)})
+	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing"})
 	for i := 0; i < MaxUnreadNotes; i++ {
 		rawAppend(t, svc, "unit.note", unitA, `{"from":"peer","text":"n"}`)
 	}
@@ -427,7 +463,7 @@ func TestInboxHoldsAtMostItsCap(t *testing.T) {
 
 func TestServiceNeedsADeadline(t *testing.T) {
 	svc := testService(t)
-	if _, err := svc.Record(context.Background(), unitA, RecordPayload{Stage: string(StagePlanned)}); err == nil || !strings.Contains(err.Error(), "deadline") {
+	if _, err := svc.Record(context.Background(), unitA, RecordPayload{Status: "ready"}); err == nil || !strings.Contains(err.Error(), "deadline") {
 		t.Fatalf("Record(no deadline) = %v, want a refusal", err)
 	}
 }

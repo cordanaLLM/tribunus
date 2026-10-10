@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
+	"strings"
 	"unicode"
 
 	"github.com/cordanaLLM/tribunus/internal/eventlog"
@@ -21,12 +23,14 @@ const (
 	MaxFieldBytes    = 512
 	MaxIdentityBytes = 8192
 	MaxPR            = 1 << 30
+	MaxEvidenceLines = 1 << 30
 )
 
 var (
 	unitIDRegex      = regexp.MustCompile(`^[A-Za-z0-9._/-]{1,100}(#[0-9]{1,9}|:[a-z0-9-]{1,40})$`)
 	senderRegex      = regexp.MustCompile(`^[A-Za-z0-9._@/:-]{1,64}$`)
 	identityKeyRegex = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	evidenceDigest   = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
 )
 
 // RecordPayload is the payload of unit.recorded. A nil field keeps the unit's previous
@@ -43,6 +47,9 @@ type RecordPayload struct {
 	Identity      json.RawMessage `json:"identity,omitempty"`
 	IdentityKey   *string         `json:"identity_key,omitempty"`
 	Reopen        bool            `json:"reopen,omitempty"`
+	// Evidence is sticky like the fields above: nil keeps the unit's pointer, a new one
+	// replaces it.
+	Evidence *eventlog.UnitEvidence `json:"evidence,omitempty"`
 }
 
 type NotePayload struct {
@@ -143,7 +150,54 @@ func validateRecordPayload(payload RecordPayload) error {
 	if payload.PR != nil && (*payload.PR < 0 || *payload.PR > MaxPR) {
 		return fmt.Errorf("units: pr must be 0..%d", MaxPR)
 	}
+	if err := validateEvidence(payload.Evidence); err != nil {
+		return err
+	}
 	return validateIdentity(payload.Identity, payload.IdentityKey)
+}
+
+// validateEvidence checks an evidence pointer: a path that prints on one line, a SHA-256
+// digest or a prefix of at least 12 hex digits, and a line count.
+func validateEvidence(evidence *eventlog.UnitEvidence) error {
+	if evidence == nil {
+		return nil
+	}
+	if evidence.Path == "" {
+		return errors.New("units: evidence needs a path")
+	}
+	if err := checkPlainField("evidence path", evidence.Path); err != nil {
+		return err
+	}
+	if !evidenceDigest.MatchString(evidence.SHA256) {
+		return errors.New("units: evidence sha256 must be 12..64 lower-case hex digits")
+	}
+	if evidence.Lines < 0 || evidence.Lines > MaxEvidenceLines {
+		return fmt.Errorf("units: evidence lines must be 0..%d", MaxEvidenceLines)
+	}
+	return nil
+}
+
+// ParseEvidence reads an evidence pointer in the form "<path> sha256:<hex> lines:<n>". The
+// path is everything before the last two fields, so it may hold spaces.
+func ParseEvidence(text string) (*eventlog.UnitEvidence, error) {
+	fields := strings.Fields(text)
+	if len(fields) < 3 {
+		return nil, errors.New("units: evidence must be \"<path> sha256:<hex> lines:<n>\"")
+	}
+	digest, hasDigest := strings.CutPrefix(fields[len(fields)-2], "sha256:")
+	count, hasLines := strings.CutPrefix(fields[len(fields)-1], "lines:")
+	if !hasDigest || !hasLines {
+		return nil, errors.New("units: evidence must end in \"sha256:<hex> lines:<n>\"")
+	}
+	lines, err := strconv.Atoi(count)
+	if err != nil {
+		return nil, fmt.Errorf("units: evidence lines: %w", err)
+	}
+	evidence := &eventlog.UnitEvidence{Path: strings.Join(fields[:len(fields)-2], " "), SHA256: digest, Lines: lines}
+	if err = validateEvidence(evidence); err != nil {
+		return nil, err
+	}
+	return evidence, nil
 }
 
 // checkPlainField keeps a value printable on one tab-separated line.

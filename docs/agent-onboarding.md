@@ -54,7 +54,7 @@ Call models only through router aliases such as `cordana/auto`, `cordana/light`,
 - `internal/eventlog`: append-only signed event log; private signing key stays outside the Git working tree and must not be readable by group or others.
 - `internal/supervisor`: declared background jobs, RT-03 sandboxed runner, lock-backed liveness, Linux shim death orphan prevention and replay-based re-adoption.
 - `internal/releasewatch`: upstream release watch (`tribunusctl watch run|seed`), run as a sandboxed job; files one issue per new release in the consuming repository.
-- `internal/units`: the run record (`tribunusctl units set|resume|show|note|inbox`): one entry per work unit and status in the signed log, on the task graph's status vocabulary; a relaunch verdict after a crash; an inbox read at the next status record.
+- `internal/units`: the run record (`tribunusctl units set|resume|show|note|inbox`): one entry per work unit and status in the signed log, on the task graph's status vocabulary; a relaunch verdict after a crash; an inbox read at the next status record. `units set --evidence="<path> sha256:<hex> lines:<n>"` records where the proof of a unit's result lies; the pointer stays on the unit until a new one replaces it, and `units show` prints it.
 - `REUSE.toml`, `LICENSES/`: licensing (EUPL-1.2).
 - `docs/`: these documents.
 

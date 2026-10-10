@@ -6,7 +6,7 @@ require (
 	github.com/golusoris/golusoris v0.13.0
 	github.com/golusoris/golusoris/core v0.10.0
 	github.com/jonboulle/clockwork v0.5.0
-	golang.org/x/sys v0.48.0
+	golang.org/x/sys v0.49.0
 )
 
 require (

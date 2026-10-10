@@ -18,7 +18,14 @@ func TestLoadPositiveFullFile(t *testing.T) {
   "jobs": [{"name": "daily-catalog-sync", "schedule": "0 2 * * *", "router_alias": "cordana/auto"}],
   "watches": [{"name": "catalog-source-change", "trigger": "git:internal/sources", "router_alias": "cordana/coding"}],
   "router": {"aliases": ["cordana/auto", "cordana/coding"]},
-  "admission": {"probe": {"timeout_seconds": 45, "interval_seconds": 3, "ready_threshold": 4}}
+  "admission": {"probe": {"timeout_seconds": 45, "interval_seconds": 3, "ready_threshold": 4}},
+  "event_log": {
+    "dir": ".tribunus",
+    "signing_key_path": "/run/secrets/tribunus-eventlog-seed",
+    "public_key": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+    "lock_timeout_seconds": 7,
+    "max_replay_records": 1234
+  }
 }`))
 	if err != nil {
 		t.Fatalf("Load() = %v, want nil", err)
@@ -28,6 +35,9 @@ func TestLoadPositiveFullFile(t *testing.T) {
 	}
 	if len(cfg.Jobs) != 1 || cfg.Jobs[0].RouterAlias != "cordana/auto" {
 		t.Fatalf("Load() jobs = %+v, want one scheduled alias declaration", cfg.Jobs)
+	}
+	if cfg.EventLog.LockTimeoutSeconds != 7 || cfg.EventLog.MaxReplayRecords != 1234 {
+		t.Fatalf("Load() event_log = %+v, want full event log values", cfg.EventLog)
 	}
 }
 
@@ -52,6 +62,8 @@ func TestLoadNegativeValidation(t *testing.T) {
 		{"wrong type", `{"graph": {"max_depth": "12"}}`, []string{"/graph/max_depth", "want integer"}},
 		{"out of range", `{"graph": {"max_depth": 65}}`, []string{"/graph/max_depth", "maximum"}},
 		{"bad alias", `{"router": {"aliases": ["public/alias"]}}`, []string{"/router/aliases/0", "pattern"}},
+		{"bad event public key", `{"event_log": {"public_key": "xyz"}}`, []string{"/event_log/public_key", "pattern"}},
+		{"bad replay max", `{"event_log": {"max_replay_records": 1000001}}`, []string{"/event_log/max_replay_records", "maximum"}},
 		{"duplicate job names", `{"jobs": [
   {"name": "repeat-job", "schedule": "0 1 * * *", "router_alias": "cordana/auto"},
   {"name": "repeat-job", "schedule": "0 2 * * *", "router_alias": "cordana/auto"}
@@ -128,6 +140,11 @@ func TestConfigSchemaDefaultsAgreeWithGoTypes(t *testing.T) {
 	assertSchemaDefault(t, doc, def.Admission.Probe.TimeoutSeconds, "admission", "probe", "timeout_seconds")
 	assertSchemaDefault(t, doc, def.Admission.Probe.IntervalSeconds, "admission", "probe", "interval_seconds")
 	assertSchemaDefault(t, doc, def.Admission.Probe.ReadyThreshold, "admission", "probe", "ready_threshold")
+	assertSchemaDefault(t, doc, def.EventLog.Dir, "event_log", "dir")
+	assertSchemaDefault(t, doc, def.EventLog.SigningKeyPath, "event_log", "signing_key_path")
+	assertSchemaDefault(t, doc, def.EventLog.PublicKey, "event_log", "public_key")
+	assertSchemaDefault(t, doc, def.EventLog.LockTimeoutSeconds, "event_log", "lock_timeout_seconds")
+	assertSchemaDefault(t, doc, def.EventLog.MaxReplayRecords, "event_log", "max_replay_records")
 	assertSchemaDefault(t, doc, def.Router.Aliases, "router", "aliases")
 	assertSchemaDefault(t, doc, def.Jobs, "jobs")
 	assertSchemaDefault(t, doc, def.Watches, "watches")

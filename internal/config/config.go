@@ -17,6 +17,7 @@ const (
 	MaxJobs             = 64
 	MaxWatches          = 64
 	MaxRouterAliases    = 32
+	MaxReplayRecords    = 1000000
 	maxConfigKeyDepth   = 8
 	disabledEnvPrefix   = "\x00TRIBUNUS_CONFIG_ENV_DISABLED_"
 	schemaResourceID    = "config.schema.json"
@@ -27,6 +28,9 @@ const (
 	defaultTimeoutSec   = 30
 	defaultIntervalSec  = 5
 	defaultReadyCount   = 2
+	defaultEventLogDir  = ".tribunus"
+	defaultLockSeconds  = 5
+	defaultReplayMax    = 100000
 )
 
 //go:embed config.schema.json
@@ -41,6 +45,7 @@ type Config struct {
 	Watches   []WatchConfig   `koanf:"watches" json:"watches"`
 	Router    RouterConfig    `koanf:"router" json:"router"`
 	Admission AdmissionConfig `koanf:"admission" json:"admission"`
+	EventLog  EventLogConfig  `koanf:"event_log" json:"event_log"`
 }
 
 type GraphConfig struct {
@@ -82,6 +87,14 @@ type ProbeConfig struct {
 	ReadyThreshold  int `koanf:"ready_threshold" json:"ready_threshold"`
 }
 
+type EventLogConfig struct {
+	Dir                string `koanf:"dir" json:"dir"`
+	SigningKeyPath     string `koanf:"signing_key_path" json:"signing_key_path"`
+	PublicKey          string `koanf:"public_key" json:"public_key"`
+	LockTimeoutSeconds int    `koanf:"lock_timeout_seconds" json:"lock_timeout_seconds"`
+	MaxReplayRecords   int    `koanf:"max_replay_records" json:"max_replay_records"`
+}
+
 // SchemaJSON returns the embedded JSON Schema document used by Load.
 func SchemaJSON() []byte {
 	return append([]byte(nil), schemaJSON...)
@@ -103,6 +116,13 @@ func Default() Config {
 			IntervalSeconds: defaultIntervalSec,
 			ReadyThreshold:  defaultReadyCount,
 		}},
+		EventLog: EventLogConfig{
+			Dir:                defaultEventLogDir,
+			SigningKeyPath:     "",
+			PublicKey:          "",
+			LockTimeoutSeconds: defaultLockSeconds,
+			MaxReplayRecords:   defaultReplayMax,
+		},
 	}
 }
 

@@ -85,9 +85,9 @@ func sandboxToolchain(sandbox config.SandboxConfig, tools sandboxTools) (sandbox
 		return sandboxTools{}, err
 	}
 	if sandbox.Network == "egress" {
-		tools.Pasta, err = resolveExecutable("pasta")
+		tools.Pasta, err = resolvePasta()
 		if err != nil {
-			return sandboxTools{}, fmt.Errorf("sandbox: pasta: %w", err)
+			return sandboxTools{}, err
 		}
 		if err = requireReadable(resolvedConfPath); err != nil {
 			return sandboxTools{}, err
@@ -115,6 +115,23 @@ func resolveSignalEnv() (string, error) {
 	// #nosec G204 -- fixed probe of the resolved env binary.
 	if out, err := exec.CommandContext(ctx, path, "--ignore-signal=TERM", "--default-signal=TERM", "true").CombinedOutput(); err != nil {
 		return "", fmt.Errorf("sandbox: env %s lacks --ignore-signal/--default-signal: %w: %s", path, err, strings.TrimSpace(string(out)))
+	}
+	return path, nil
+}
+
+// resolvePasta finds pasta by its own name. pasta and passt are one binary that picks its
+// mode from the name it was started under, and distributions ship pasta as a symlink to
+// passt; started under the resolved name it would run as passt and refuse --config-net.
+func resolvePasta() (string, error) {
+	path, err := sandboxLookPath("pasta")
+	if err != nil {
+		return "", fmt.Errorf("sandbox: pasta: %w", err)
+	}
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("sandbox: pasta: %s is not absolute", path)
+	}
+	if _, err = filepath.EvalSymlinks(path); err != nil {
+		return "", fmt.Errorf("sandbox: pasta: eval symlinks %s: %w", path, err)
 	}
 	return path, nil
 }

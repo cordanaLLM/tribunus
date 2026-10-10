@@ -178,7 +178,13 @@ func rt03Tools(t *testing.T, network string) sandboxTools {
 	bwrap := rt03LookPath(t, "bwrap")
 	tools := sandboxTools{Bwrap: bwrap, Env: rt03LookPath(t, "env"), Systemd: false}
 	if network == "egress" {
-		tools.Pasta = rt03LookPath(t, "pasta")
+		// The production lookup, so the egress fixtures run pasta under the name production uses.
+		rt03LookPath(t, "pasta")
+		pasta, err := resolvePasta()
+		if err != nil {
+			t.Fatalf("resolvePasta() = %v, want nil", err)
+		}
+		tools.Pasta = pasta
 	}
 	return tools
 }
@@ -791,5 +797,33 @@ func TestRT03RuntimeUnavailableRecognisesBwrapMessages(t *testing.T) {
 	}
 	if rt03RuntimeUnavailable("bash: line 1: /workspace/x: Read-only file system", exit) {
 		t.Fatal("rt03RuntimeUnavailable(job failure) = true, want false: a job failure must not skip")
+	}
+}
+
+func TestResolvePastaKeepsTheNamePastaChoosesItsModeBy(t *testing.T) {
+	dir := t.TempDir()
+	passt := filepath.Join(dir, "passt")
+	if err := os.WriteFile(passt, []byte("#!/bin/sh\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(passt) = %v, want nil", err)
+	}
+	pasta := filepath.Join(dir, "pasta")
+	if err := os.Symlink("passt", pasta); err != nil {
+		t.Fatalf("Symlink(pasta) = %v, want nil", err)
+	}
+	old := sandboxLookPath
+	t.Cleanup(func() { sandboxLookPath = old })
+	sandboxLookPath = func(name string) (string, error) {
+		if name == "pasta" {
+			return pasta, nil
+		}
+		return old(name)
+	}
+	got, err := resolvePasta()
+	if err != nil || got != pasta {
+		t.Fatalf("resolvePasta() = %q, %v, want %q: started as passt it refuses --config-net", got, err, pasta)
+	}
+	sandboxLookPath = func(string) (string, error) { return "pasta", nil }
+	if _, err = resolvePasta(); err == nil || !strings.Contains(err.Error(), "not absolute") {
+		t.Fatalf("resolvePasta(relative) = %v, want refusal", err)
 	}
 }

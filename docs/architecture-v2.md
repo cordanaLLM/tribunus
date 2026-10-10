@@ -22,6 +22,21 @@ Status: design draft. Only the catalog exists in code today.
 
 Owns task graphs, the event bus and budgets.
 
+`internal/graph` is the in-memory task graph store. It stages node, edge and
+status edits, validates the staged result with Kahn acyclicity, configured depth
+and vocabulary guardrails, then swaps the state only after every guard passes.
+Replay wiring belongs to the append-only event log (#32); the package provides
+the pure `Apply(event)` reducer that replay will call once both are on the same
+branch. Removing a node with any incident dependency edge is refused; callers
+remove edges first so history stays explicit.
+
+The task-graph node vocabulary follows Praetor #883 as amended on 2026-10-09
+and the claim-code source `feat/issue-claims` at `42f2a486b`
+(`internal/forge/claim_marker.go`). Kinds are `epic`, `unit`, `decision`,
+`research` and `gate`; statuses are `proposed`, `ready`, `claimed`,
+`implementing`, `review`, `fix-round-N`, `blocked`, `queued`, `landing`,
+`landed` and `dropped`.
+
 - Task graphs are acyclic. A cycle is rejected before the graph changes.
 - Traversal is bounded. The proposed depth limit is 12; it is a design parameter, not a standard.
 - State changes are staged and roll back when a trajectory breaks a guardrail.

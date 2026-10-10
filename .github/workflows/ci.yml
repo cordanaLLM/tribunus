@@ -47,6 +47,12 @@ jobs:
             exit 1
           fi
       - run: go vet ./...
+      # The supervisor runs on Linux only. Its tests still have to compile elsewhere, or
+      # nobody on another platform can vet or test the repository at all.
+      - name: go vet for macOS and Windows
+        run: |
+          GOOS=darwin go vet ./...
+          GOOS=windows go vet ./...
       # A module update that leaves stale lines in go.sum passes every other step.
       - name: go.mod and go.sum are tidy
         run: go mod tidy -diff

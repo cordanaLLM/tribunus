@@ -48,6 +48,10 @@ jobs:
           fi
       - run: go vet ./...
       - run: go test -race ./...
+      # A sandbox test that cannot get a systemd user scope skips with its reason. The
+      # plain run above prints no skips, so the supervisor tests run again verbosely.
+      - name: Supervisor tests, verbose so that skips show
+        run: go test -race -count=1 -v ./internal/supervisor/
       - name: golangci-lint
         run: go tool -modfile=tools/go/go.mod golangci-lint run ./...
       - name: HISS scan (praetorctl audit)

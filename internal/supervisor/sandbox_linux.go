@@ -64,7 +64,11 @@ func buildSandboxCommand(command []string, sandbox config.SandboxConfig, opts sa
 	if !tools.Systemd {
 		return jobCommand{Argv: inner, Env: env}, nil
 	}
-	return jobCommand{Argv: append(systemdRunArgs(tools.SystemdRun, sandbox), inner...), Env: env}, nil
+	scope, err := newScopeName()
+	if err != nil {
+		return jobCommand{}, err
+	}
+	return jobCommand{Argv: append(systemdRunArgs(tools.SystemdRun, scope, sandbox), inner...), Env: env, Scope: scope}, nil
 }
 
 func sandboxToolchain(sandbox config.SandboxConfig, tools sandboxTools) (sandboxTools, error) {
@@ -246,9 +250,9 @@ func pathOverlapsSandbox(a string, b string) bool {
 	return a == b || strings.HasPrefix(a, b+string(os.PathSeparator)) || strings.HasPrefix(b, a+string(os.PathSeparator))
 }
 
-func systemdRunArgs(path string, sandbox config.SandboxConfig) []string {
+func systemdRunArgs(path string, scope string, sandbox config.SandboxConfig) []string {
 	return []string{
-		path, "--user", "--scope", "--quiet", "--collect",
+		path, "--user", "--scope", "--quiet", "--collect", "--unit=" + scope,
 		"-p", "MemoryMax=" + sandbox.MemoryMax,
 		"-p", "CPUWeight=" + strconv.Itoa(sandbox.CPUWeight),
 		"-p", "TasksMax=" + strconv.Itoa(sandbox.TasksMax),

@@ -3,6 +3,7 @@
 package supervisor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -73,11 +74,20 @@ func TestSandboxProductionArgvKeepsSystemdPrefix(t *testing.T) {
 		t.Fatalf("buildSandboxCommand() = %v, want nil", err)
 	}
 	args := built.Argv
-	want := []string{"/usr/bin/systemd-run", "--user", "--scope", "--quiet", "--collect"}
+	if !strings.HasPrefix(built.Scope, scopeNamePrefix) {
+		t.Fatalf("Scope = %q, want the unit the shim must find the job in", built.Scope)
+	}
+	want := []string{"/usr/bin/systemd-run", "--user", "--scope", "--quiet", "--collect", "--unit=" + built.Scope}
 	for i := 0; i < len(want); i++ {
 		if args[i] != want[i] {
 			t.Fatalf("argv[%d] = %q, want %q in %q", i, args[i], want[i], args)
 		}
+	}
+	direct, err := buildSandboxCommand([]string{"/usr/bin/bash", "-c", "true"}, sandbox, sandboxBuildOptions{
+		Tools: sandboxTools{Bwrap: "/usr/bin/bwrap", Env: "/usr/bin/env"},
+	})
+	if err != nil || direct.Scope != "" || strings.Contains(strings.Join(direct.Argv, " "), "--unit=") {
+		t.Fatalf("buildSandboxCommand(no systemd) = scope %q argv %q, %v, want no scope to confirm", direct.Scope, direct.Argv, err)
 	}
 }
 
@@ -486,51 +496,58 @@ func TestSandboxedJobCgroupMemoryMax(t *testing.T) {
 	if err != nil {
 		t.Skipf("cgroup memory.max unavailable: %v", err)
 	}
-	if !strings.Contains(cgroup, "run-") || !strings.Contains(cgroup, ".scope") {
-		t.Fatalf("cgroup = %q, want run-*.scope", cgroup)
+	if unit := filepath.Base(cgroup); !strings.HasPrefix(unit, scopeNamePrefix) || !strings.HasSuffix(unit, ".scope") {
+		t.Fatalf("cgroup = %q, want the job's own %s*.scope", cgroup, scopeNamePrefix)
 	}
 	if memoryMax != "268435456" {
 		t.Fatalf("memory.max = %q, want 268435456", memoryMax)
 	}
 }
 
+// requireSystemdUserScope skips unless a process started the way the shim starts a job ends
+// up in a scope of its own, checked the way the shim checks it. systemd-run exiting 0 is no
+// such proof.
 func requireSystemdUserScope(t *testing.T) {
 	t.Helper()
 	rt03LookPath(t, "systemd-run")
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "systemd-run", "--user", "--scope", "--quiet", "--collect", "--", "/usr/bin/true")
-	out, err := cmd.CombinedOutput()
-	if err == nil {
-		return
+	runner, err := resolveExecutable("systemd-run")
+	if err != nil {
+		t.Fatalf("resolveExecutable(systemd-run) = %v, want nil", err)
 	}
-	t.Skipf("sandbox supervisor integration skipped: systemd user scope unavailable: %v: %s", err, out)
+	scope, err := newScopeName()
+	if err != nil {
+		t.Fatalf("newScopeName() = %v, want nil", err)
+	}
+	args := append(systemdRunArgs(runner, scope, config.SandboxConfig{MemoryMax: "64M", CPUWeight: 100, TasksMax: 16}), "/usr/bin/sleep", "30")
+	var out bytes.Buffer
+	cmd := exec.CommandContext(t.Context(), args[0], args[1:]...) // #nosec G204 -- fixed probe through the production scope arguments.
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err = cmd.Start(); err != nil {
+		t.Skipf("sandbox supervisor integration skipped: systemd-run did not start: %v", err)
+	}
+	confirmErr := confirmJobScope(cmd.Process.Pid, scope, runner)
+	if err = cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		t.Fatalf("Kill(scope probe %d) = %v, want nil", cmd.Process.Pid, err)
+	}
+	if err = cmd.Wait(); err == nil && confirmErr == nil {
+		t.Fatalf("Wait(killed scope probe) = nil, want its kill status")
+	}
+	if confirmErr != nil {
+		own, cgroupErr := processCgroup(os.Getpid())
+		t.Skipf("sandbox supervisor integration skipped: no systemd user scope for a job started from cgroup %q (%v): %v: %s", own, cgroupErr, confirmErr, strings.TrimSpace(out.String()))
+	}
 }
 
 func jobCgroupMemoryMax(pid int) (string, string, error) {
-	body, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "cgroup"))
+	cgroup, err := processCgroup(pid)
 	if err != nil {
 		return "", "", err
 	}
-	cgroup, err := unifiedCgroupPath(string(body))
-	if err != nil {
-		return "", "", err
-	}
-	body, err = os.ReadFile(filepath.Join("/sys/fs/cgroup", cgroup, "memory.max")) // #nosec G304 -- cgroup path comes from /proc for the child under test.
+	body, err := os.ReadFile(filepath.Join("/sys/fs/cgroup", cgroup, "memory.max")) // #nosec G304 -- cgroup path comes from /proc for the child under test.
 	if err != nil {
 		return cgroup, "", err
 	}
 	return cgroup, strings.TrimSpace(string(body)), nil
-}
-
-func unifiedCgroupPath(body string) (string, error) {
-	lines := strings.Split(body, "\n")
-	for i := 0; i < len(lines); i++ {
-		if strings.HasPrefix(lines[i], "0::") {
-			return strings.TrimPrefix(lines[i], "0::"), nil
-		}
-	}
-	return "", fmt.Errorf("unified cgroup entry missing")
 }
 
 func sandboxedSupervisorJob(t *testing.T, name string, script string) config.JobConfig {

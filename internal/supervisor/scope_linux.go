@@ -22,6 +22,9 @@ const (
 	scopeNamePrefix = "tribunus-job-"
 
 	// The shim waits this long for systemd-run to place the job: 400 polls, 25 ms apart.
+	// Measured, a job is in its scope within one or two polls of systemd-run starting. The
+	// 10 s are a margin for a loaded host, not an expected wait; the scope probe of the tests
+	// logs the measured time on every run, so a drift shows in the CI log.
 	scopeConfirmPolls    = 400
 	scopeConfirmInterval = 25 * time.Millisecond
 )

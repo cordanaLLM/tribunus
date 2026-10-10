@@ -308,17 +308,41 @@ func TestProcessGoneReportsUnreadableState(t *testing.T) {
 }
 
 // TestScopeProbeRefusesAScopeCommandThatCreatesNoScope is the negative case of the probe the
-// sandbox integration tests depend on: a scope command that exits 0 without a scope must
-// skip them, not let them run against a job outside any scope.
+// sandbox integration tests depend on: a scope command that exits 0 without a scope is no
+// scope, and the tests must not run against a job outside any scope.
 func TestScopeProbeRefusesAScopeCommandThatCreatesNoScope(t *testing.T) {
 	plantFakeScopeCommand(t)
-	passed := false
-	t.Run("probe", func(t *testing.T) {
-		requireSystemdUserScope(t)
-		passed = true
-	})
-	if passed {
-		t.Fatalf("requireSystemdUserScope passed with a scope command that creates no scope, want skip")
+	_, err := systemdUserScopeProbe(t)
+	if err == nil || !strings.Contains(err.Error(), "no systemd user scope for a job started from cgroup ") || !strings.Contains(err.Error(), "outside scope "+scopeNamePrefix) {
+		t.Fatalf("systemdUserScopeProbe(scope command that creates no scope) = %v, want the reason", err)
+	}
+}
+
+// stopRecorder records what reportMissingScope does with a test.
+type stopRecorder struct {
+	skipped string
+	failed  string
+}
+
+func (r *stopRecorder) Helper() {}
+
+func (r *stopRecorder) Skipf(format string, args ...any) { r.skipped = fmt.Sprintf(format, args...) }
+
+func (r *stopRecorder) Fatalf(format string, args ...any) { r.failed = fmt.Sprintf(format, args...) }
+
+// TestMissingScopeFailsUnderCIAndSkipsElsewhere: the hosted runner provides a user scope, so
+// a run there without one has lost the sandbox tests and must not pass.
+func TestMissingScopeFailsUnderCIAndSkipsElsewhere(t *testing.T) {
+	cause := errors.New("no scope here")
+	underCI := &stopRecorder{}
+	reportMissingScope(underCI, true, cause)
+	if underCI.skipped != "" || !strings.Contains(underCI.failed, "no systemd user scope under CI") || !strings.Contains(underCI.failed, "no scope here") {
+		t.Fatalf("under CI: skipped %q failed %q, want a failure with the reason and no skip", underCI.skipped, underCI.failed)
+	}
+	elsewhere := &stopRecorder{}
+	reportMissingScope(elsewhere, false, cause)
+	if elsewhere.failed != "" || !strings.Contains(elsewhere.skipped, "skipped: no scope here") {
+		t.Fatalf("outside CI: skipped %q failed %q, want a skip with the reason and no failure", elsewhere.skipped, elsewhere.failed)
 	}
 }
 
@@ -335,8 +359,8 @@ func TestSandboxedJobOutsideItsScopeIsRefused(t *testing.T) {
 	beat := filepath.Join(job.Sandbox.Workspace, "beat")
 	sup := testSupervisor(t, job)
 	err := sup.Start(testContext(t), job.Name)
-	if err == nil || !strings.Contains(err.Error(), "did not start: its shim exited") {
-		t.Fatalf("Start(job outside its scope) = %v, want did-not-start naming the exited shim", err)
+	if !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "sandbox-noscope: sandbox: job ") || !strings.Contains(err.Error(), "scope "+scopeNamePrefix) {
+		t.Fatalf("Start(job outside its scope) = %v, want ErrRefused naming the job and the scope", err)
 	}
 	log, err := os.ReadFile(job.LogPath)
 	if err != nil {
@@ -350,8 +374,12 @@ func TestSandboxedJobOutsideItsScopeIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("replayState() = %v, want nil", err)
 	}
-	if recorded := state.Jobs[job.Name]; recorded.Since != "" || recorded.LastEvent != "" {
+	recorded := state.Jobs[job.Name]
+	if recorded.Since != "" || recorded.ShimPID != 0 || recorded.PID != 0 {
 		t.Fatalf("event log holds %+v for the refused job, want no record of a start", recorded)
+	}
+	if recorded.LastEvent != "job.refused" || recorded.State != string(StateDead) || recorded.RefusedShimPID == 0 || recorded.RefusedAt == "" || !strings.Contains(recorded.LastReason, "scope "+scopeNamePrefix) {
+		t.Fatalf("event log holds %+v for the refused job, want job.refused with the shim, the time and the reason", recorded)
 	}
 	rec, ok := readJobRecord(sup.recordPath(job.Name))
 	if !ok {

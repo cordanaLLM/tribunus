@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -504,10 +505,43 @@ func TestSandboxedJobCgroupMemoryMax(t *testing.T) {
 	}
 }
 
-// requireSystemdUserScope skips unless a process started the way the shim starts a job ends
-// up in a scope of its own, checked the way the shim checks it. systemd-run exiting 0 is no
-// such proof.
+// requireSystemdUserScope stops a test that needs a systemd user scope where there is none.
+// The check is the shim's own: a process started the way the shim starts a job must end up
+// in a scope of its own; systemd-run exiting 0 is no such proof. Under CI the scope is part
+// of what the runner must provide, so its absence fails the test; elsewhere it skips.
 func requireSystemdUserScope(t *testing.T) {
+	t.Helper()
+	latency, err := systemdUserScopeProbe(t)
+	if err != nil {
+		reportMissingScope(t, os.Getenv("CI") == "true", err)
+		return
+	}
+	scopeFactsOnce.Do(func() {
+		t.Logf("scope probe: %s; a job entered its scope %s after systemd-run started (the shim waits up to %s)", systemdVersion(t), latency.Round(time.Millisecond), scopeConfirmPolls*scopeConfirmInterval)
+	})
+}
+
+var scopeFactsOnce sync.Once
+
+// scopeStopper is the part of testing.T that reportMissingScope uses.
+type scopeStopper interface {
+	Helper()
+	Skipf(format string, args ...any)
+	Fatalf(format string, args ...any)
+}
+
+func reportMissingScope(tb scopeStopper, underCI bool, cause error) {
+	tb.Helper()
+	if underCI {
+		tb.Fatalf("no systemd user scope under CI, want the runner to provide one: %v", cause)
+		return
+	}
+	tb.Skipf("sandbox supervisor integration skipped: %v", cause)
+}
+
+// systemdUserScopeProbe starts a process through the production scope arguments and reports
+// how long it took to appear in its scope, or why it did not.
+func systemdUserScopeProbe(t *testing.T) (time.Duration, error) {
 	t.Helper()
 	rt03LookPath(t, "systemd-run")
 	runner, err := resolveExecutable("systemd-run")
@@ -522,10 +556,12 @@ func requireSystemdUserScope(t *testing.T) {
 	var out bytes.Buffer
 	cmd := exec.CommandContext(t.Context(), args[0], args[1:]...) // #nosec G204 -- fixed probe through the production scope arguments.
 	cmd.Stdout, cmd.Stderr = &out, &out
+	began := time.Now()
 	if err = cmd.Start(); err != nil {
-		t.Skipf("sandbox supervisor integration skipped: systemd-run did not start: %v", err)
+		return 0, fmt.Errorf("systemd-run did not start: %w", err)
 	}
 	confirmErr := confirmJobScope(cmd.Process.Pid, scope, runner)
+	latency := time.Since(began)
 	if err = cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		t.Fatalf("Kill(scope probe %d) = %v, want nil", cmd.Process.Pid, err)
 	}
@@ -534,8 +570,23 @@ func requireSystemdUserScope(t *testing.T) {
 	}
 	if confirmErr != nil {
 		own, cgroupErr := processCgroup(os.Getpid())
-		t.Skipf("sandbox supervisor integration skipped: no systemd user scope for a job started from cgroup %q (%v): %v: %s", own, cgroupErr, confirmErr, strings.TrimSpace(out.String()))
+		if cgroupErr != nil {
+			own = "unknown: " + cgroupErr.Error()
+		}
+		return 0, fmt.Errorf("no systemd user scope for a job started from cgroup %q: %w: %s", own, confirmErr, strings.TrimSpace(out.String()))
 	}
+	return latency, nil
+}
+
+// systemdVersion returns the first line of systemd-run --version, for the test log.
+func systemdVersion(t *testing.T) string {
+	t.Helper()
+	out, err := exec.CommandContext(t.Context(), "systemd-run", "--version").Output()
+	if err != nil {
+		return "systemd version unknown: " + err.Error()
+	}
+	first, _, _ := strings.Cut(string(out), "\n")
+	return first
 }
 
 func jobCgroupMemoryMax(pid int) (string, string, error) {

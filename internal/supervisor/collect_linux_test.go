@@ -38,7 +38,7 @@ func TestSupervisorCollectsItsShims(t *testing.T) {
 			t.Fatalf("Start(%d) = %v, want nil", i, err)
 		}
 		shims = append(shims, eventlogJob(t, sup, job.Name).ShimPID)
-		waitForUnlock(t, sup, job)
+		waitForShimWaiters(t, sup, 0)
 	}
 	// The bound only ends a run in which a shim is never collected.
 	left := len(shims)
@@ -56,11 +56,19 @@ func TestSupervisorCollectsItsShims(t *testing.T) {
 	if left > 0 {
 		t.Fatalf("%d of %d shims %v are zombies of the supervisor, want every shim collected", left, starts, shims)
 	}
-	for i := 0; i < 500 && sup.shimWaiters.Load() != 0; i++ {
+	waitForShimWaiters(t, sup, 0)
+}
+
+// waitForShimWaiters waits until the supervisor has collected its shims down to want. A shim
+// that has recorded its start still appends job.exited, with a sync to disk, before it
+// exits; the bound here is the 30 s that append may take, not a guess at a fast disk.
+func waitForShimWaiters(t *testing.T, sup *Supervisor, want int32) {
+	t.Helper()
+	for i := 0; i < 3000 && sup.shimWaiters.Load() != want; i++ {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if waiting := sup.shimWaiters.Load(); waiting != 0 {
-		t.Fatalf("shim waiters = %d after every shim exited, want 0", waiting)
+	if waiting := sup.shimWaiters.Load(); waiting != want {
+		t.Fatalf("shim waiters = %d after 30 s, want %d: a shim was not collected", waiting, want)
 	}
 }
 
@@ -83,12 +91,7 @@ func TestStartRefusesAShimBeyondTheWaiterBound(t *testing.T) {
 	if err = sup.Start(testContext(t), job.Name); err != nil {
 		t.Fatalf("Start(one below the waiter bound) = %v, want nil", err)
 	}
-	for i := 0; i < 500 && sup.shimWaiters.Load() != maxShimWaiters-1; i++ {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if waiting := sup.shimWaiters.Load(); waiting != maxShimWaiters-1 {
-		t.Fatalf("shim waiters = %d after the shim exited, want %d", waiting, maxShimWaiters-1)
-	}
+	waitForShimWaiters(t, sup, maxShimWaiters-1)
 	sup.shimWaiters.Store(0)
 }
 

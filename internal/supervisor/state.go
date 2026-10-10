@@ -42,6 +42,8 @@ func JobReducer(st eventlog.State, rec eventlog.Record) (eventlog.State, error) 
 		return reduceJobStarted(st, rec)
 	case "job.exited":
 		return reduceJobExited(st, rec)
+	case "job.refused":
+		return reduceJobRefused(st, rec)
 	case "job.restarted":
 		return reduceJobRestarted(st, rec)
 	case "job.stopped":
@@ -81,6 +83,27 @@ func reduceJobExited(st eventlog.State, rec eventlog.Record) (eventlog.State, er
 	job := st.Jobs[rec.TaskID]
 	job.Name, job.State, job.LastExitCode = rec.TaskID, payload.State, payload.Code
 	job.LastReason, job.LastEvent = payload.Reason, rec.Type
+	st.Jobs[rec.TaskID] = job
+	return st, nil
+}
+
+// reduceJobRefused records a start the shim refused: the job is not running, and the reason
+// is kept. ShimPID and Since stay as they are; they belong to the last recorded start, and
+// startedBy reads them.
+func reduceJobRefused(st eventlog.State, rec eventlog.Record) (eventlog.State, error) {
+	var payload struct {
+		State   string `json:"state"`
+		ShimPID int    `json:"shim_pid"`
+		At      string `json:"at"`
+		Reason  string `json:"reason"`
+	}
+	if err := json.Unmarshal(rec.Payload, &payload); err != nil {
+		return eventlog.State{}, fmt.Errorf("job payload: %w", err)
+	}
+	job := st.Jobs[rec.TaskID]
+	job.Name, job.State, job.LastEvent = rec.TaskID, payload.State, rec.Type
+	job.LastReason, job.LastExitCode = payload.Reason, nil
+	job.RefusedShimPID, job.RefusedAt = payload.ShimPID, payload.At
 	st.Jobs[rec.TaskID] = job
 	return st, nil
 }

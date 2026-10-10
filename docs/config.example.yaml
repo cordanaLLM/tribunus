@@ -49,3 +49,38 @@ event_log:
   public_key: ""
   lock_timeout_seconds: 5
   max_replay_records: 100000
+# The release watch runs as its own supervised, sandboxed job, for example:
+#   jobs:
+#     - name: release-watch
+#       command: [/usr/local/bin/tribunusctl, watch, run, --config=/etc/tribunus/release-watch.yaml]
+#       schedule: always
+#       restart: {policy: on-failure, max_restarts: 3, backoff_seconds: 300}
+#       sandbox:
+#         workspace: /var/tmp/tribunus/release-watch   # = state_dir; the seen-set is all it writes
+#         inputs: [/etc/tribunus/release-watch.yaml]
+#         env_allow: [GITHUB_TOKEN]
+#         network: egress
+# The job reads a separate file that holds only the release_watch block: the sandbox
+# refuses the control-plane config as an input. Run `tribunusctl watch seed` once before
+# the first `watch run`, or the first pass files an issue for every release it can see,
+# within the caps. Give the job GITHUB_TOKEN: unauthenticated GitHub allows 60 requests an
+# hour, below the default rate_limit_floor, so every pass would stop after one request.
+release_watch:
+  state_dir: /var/tmp/tribunus/release-watch
+  rate_limit_floor: 100
+  max_actions_per_run: 12
+  per_source_cap: 3
+  routes:
+    - name: serving-stack
+      sources:
+        - github: example-org/example-upstream
+        - huggingface_org: ExampleOrg
+      sinks:
+        - github_issue:
+            repo: example-org/example-consumer
+            labels:
+              - upstream-release
+        # Optional second sink, unused unless configured:
+        - ntfy:
+            topic: example-topic
+            priority: 3

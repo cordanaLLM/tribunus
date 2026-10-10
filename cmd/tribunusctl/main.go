@@ -6,6 +6,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 )
@@ -26,6 +27,8 @@ func main() {
 		err = runSync(os.Args[2:])
 	case "jobs":
 		err = runJobs(os.Args[2:])
+	case "watch":
+		err = runWatch(os.Args[2:])
 	case "show":
 		err = runShow(os.Args[2:])
 	case "schema":
@@ -42,6 +45,10 @@ func main() {
 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		var exitCoder interface{ ExitCode() int }
+		if errors.As(err, &exitCoder) {
+			os.Exit(exitCoder.ExitCode())
+		}
 		os.Exit(1)
 	}
 }
@@ -55,6 +62,7 @@ func printUsage() {
 	fmt.Println("  tribunusctl schema")
 	fmt.Println("  tribunusctl version")
 	fmt.Println("  tribunusctl jobs start|status|stop|supervise --config=file [name]")
+	fmt.Println("  tribunusctl watch run|seed --config=file [--once] [--interval=duration]")
 }
 
 func printVersion() {

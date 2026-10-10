@@ -66,3 +66,43 @@ func GetWithHeader(ctx context.Context, url string, header http.Header, timeout 
 	}
 	return body, nil
 }
+
+// Do performs req with httpClient (defaulting to client.New with timeout if
+// httpClient is nil), enforcing a per-call deadline, and reading at most
+// maxBytes of response body. It returns the HTTP status code, response headers,
+// and bounded body without converting non-200 status codes into errors.
+func Do(ctx context.Context, httpClient *http.Client, req *http.Request, timeout time.Duration, maxBytes int) (statusCode int, header http.Header, body []byte, err error) {
+	if maxBytes <= 0 {
+		return 0, nil, nil, fmt.Errorf("httpfetch: non-positive maxBytes %d", maxBytes)
+	}
+	if req == nil {
+		return 0, nil, nil, fmt.Errorf("httpfetch: nil request")
+	}
+	if ctx == nil {
+		return 0, nil, nil, fmt.Errorf("httpfetch: nil context")
+	}
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	// The call deadline applies even under a caller deadline; the earlier one wins.
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req = req.WithContext(reqCtx)
+
+	cl := httpClient
+	if cl == nil {
+		cl = client.New(client.Options{Name: clientName, Timeout: timeout})
+	}
+	// #nosec G704 -- caller supplies target URL and client; bounded transport utility.
+	resp, err := cl.Do(req)
+	if err != nil {
+		return 0, nil, nil, fmt.Errorf("request %s: %w", req.URL.String(), err)
+	}
+	defer func() { gerrors.CloseJoin(resp.Body, &err, "close response body from "+req.URL.String()) }()
+
+	body, err = client.ReadAllBounded(resp.Body, int64(maxBytes))
+	if err != nil {
+		return resp.StatusCode, resp.Header.Clone(), nil, fmt.Errorf("read response body from %s: %w", req.URL.String(), err)
+	}
+	return resp.StatusCode, resp.Header.Clone(), body, nil
+}

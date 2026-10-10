@@ -33,7 +33,7 @@ func runJobsAction(action string, args []string) error {
 	configPath := fs.String("config", "", "configuration file")
 	pollSeconds := fs.Int("poll-interval-seconds", 1, "supervisor poll interval")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return flagErr{err: err}
 	}
 	if *configPath == "" {
 		return fmt.Errorf("jobs %s: --config is required", action)

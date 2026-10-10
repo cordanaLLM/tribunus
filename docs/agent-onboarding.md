@@ -51,6 +51,7 @@ Call models only through router aliases such as `cordana/auto`, `cordana/light`,
 - `docs/config.schema.json`: published Tribunus config schema; `internal/config.Load` validates files against the embedded byte-identical copy.
 - `internal/eventlog`: append-only signed event log; private signing key stays outside the Git working tree and must not be readable by group or others.
 - `internal/supervisor`: declared background jobs, RT-03 sandboxed runner, lock-backed liveness, Linux shim death orphan prevention and replay-based re-adoption.
+- `internal/releasewatch`: upstream release watch (`tribunusctl watch run|seed`), run as a sandboxed job; files one issue per new release in the consuming repository.
 - `REUSE.toml`, `LICENSES/`: licensing (EUPL-1.2).
 - `docs/`: these documents.
 

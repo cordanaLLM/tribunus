@@ -8,9 +8,43 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	corereceipt "github.com/golusoris/golusoris/core/crypto/receipt"
 )
+
+const maxStableReplayTries = 100
+
+// ReplayStable is Replay for a log that other processes append to. An append writes its
+// record and then HEAD; a replay that lands between the two reports a HEAD mismatch that
+// the next try no longer sees. It retries only that case, for at most a second; every
+// other error is returned at once.
+func ReplayStable(ctx context.Context, dir string, pubKeyHex string, limits Limits, reducer Reducer) (State, error) {
+	deadline := time.Now().Add(time.Second)
+	var last error
+	for i := 0; i < maxStableReplayTries; i++ {
+		state, err := Replay(ctx, dir, pubKeyHex, limits, reducer)
+		if err == nil || !transientReplayError(err) {
+			return state, err
+		}
+		last = err
+		if !sleepUntilNextTry(ctx, deadline) {
+			break
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return State{}, fmt.Errorf("eventlog: replay: %w", err)
+	}
+	return State{}, last
+}
+
+func transientReplayError(err error) bool {
+	text := err.Error()
+	if strings.Contains(text, "HEAD mismatch") || strings.Contains(text, "missing HEAD") {
+		return true
+	}
+	return strings.Contains(text, "HEAD.json") && strings.Contains(text, "no such file")
+}
 
 func Replay(ctx context.Context, dir string, pubKeyHex string, limits Limits, reducer Reducer) (State, error) {
 	if err := readyContext(ctx, "replay"); err != nil {

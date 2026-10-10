@@ -69,6 +69,10 @@ type Job struct {
 	LastReason   string `json:"last_reason,omitempty"`
 	LastEvent    string `json:"last_event"`
 	Sandbox      string `json:"sandbox,omitempty"`
+	// RefusedShimPID and RefusedAt name the last start a shim refused (job.refused). They are
+	// kept apart from ShimPID and Since, which belong to the last start that was recorded.
+	RefusedShimPID int    `json:"refused_shim_pid,omitempty"`
+	RefusedAt      string `json:"refused_at,omitempty"`
 }
 
 // UnitNote is one unread inbox note. Seq is the log sequence number of its record.

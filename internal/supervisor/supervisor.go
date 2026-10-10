@@ -34,7 +34,9 @@ const (
 )
 
 var (
-	ErrUnknownJob   = errors.New("supervisor: unknown job")
+	ErrUnknownJob = errors.New("supervisor: unknown job")
+	// ErrRefused marks a start the shim refused; the error text carries the job and the reason.
+	ErrRefused      = errors.New("supervisor: job refused")
 	ErrNotSupported = errors.New("supervisor: not-supported")
 )
 
@@ -284,8 +286,10 @@ func (s *Supervisor) waitStarted(ctx context.Context, name string, before eventl
 	shimGone := false
 	for i := 0; i < maxStartPolls; i++ {
 		state, err := s.replayState(ctx)
-		if err == nil && startedBy(state.Jobs[name], before, shimPID) {
-			return nil
+		if err == nil {
+			if settled, startErr := startOutcome(name, state.Jobs[name], before, shimPID); settled {
+				return startErr
+			}
 		}
 		lastErr = lastReplayError(lastErr, err, ctx.Err())
 		if shimGone {
@@ -328,6 +332,27 @@ func startWaitEnded(name string, ctxErr error, lastErr error) error {
 func shimExited(pid int) bool {
 	gone, err := processGone(pid)
 	return err == nil && gone
+}
+
+// startOutcome reports whether the shim has settled this start, by recording it or by
+// refusing it, and the error of a refusal.
+func startOutcome(name string, job eventlog.Job, before eventlog.Job, shimPID int) (bool, error) {
+	if startedBy(job, before, shimPID) {
+		return true, nil
+	}
+	if refusedBy(job, before, shimPID) {
+		return true, fmt.Errorf("%w: %s: %s", ErrRefused, name, job.LastReason)
+	}
+	return false, nil
+}
+
+// refusedBy reports whether job's last event is a refusal by shimPID recorded after before
+// was read. As with a start, the changed time is what proves the refusal is new.
+func refusedBy(job eventlog.Job, before eventlog.Job, shimPID int) bool {
+	if job.LastEvent != "job.refused" || job.RefusedShimPID != shimPID || job.RefusedAt == "" {
+		return false
+	}
+	return job.RefusedAt != before.RefusedAt
 }
 
 // startedBy reports whether job holds a start by shimPID recorded after before was read.

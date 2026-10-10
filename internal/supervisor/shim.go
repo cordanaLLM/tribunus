@@ -112,30 +112,9 @@ func runShim(cfg shimConfig) error {
 	defer runtime.UnlockOSThread()
 	runCtx, cancel := context.WithTimeout(context.Background(), maxJobRuntime)
 	defer cancel()
-	command, err := buildJobCommand(cfg.Command, cfg.Sandbox, sandboxBuildOptions{
-		Paths: sandboxPaths{EventLogDir: cfg.EventLogDir, SigningKey: cfg.SigningKey},
-		Env:   os.LookupEnv,
-	})
+	cmd, started, err := startConfirmedJob(runCtx, cfg, logFile)
 	if err != nil {
-		return fmt.Errorf("job-shim: sandbox %s: %w", cfg.Name, err)
-	}
-	// #nosec G204 -- job command comes from validated operator config and is
-	// executed as argv without a shell.
-	cmd := exec.CommandContext(runCtx, command.Argv[0], command.Argv[1:]...)
-	cmd.Env = command.Env
-	cmd.Stdout, cmd.Stderr = logFile, logFile
-	prepareProcess(cmd)
-	if err = cmd.Start(); err != nil {
-		return fmt.Errorf("job-shim: start %s: %w", cfg.Command[0], err)
-	}
-	started := time.Now().UTC().Format(time.RFC3339Nano)
-	if err = writeRecord(cfg, cmd.Process.Pid, started); err != nil {
-		return killAfterShimError(cmd.Process.Pid, err)
-	}
-	// The record comes first so that a stop during the wait can reach the job; job.started
-	// is appended only for a job confirmed inside its scope.
-	if err = confirmJobScope(cmd.Process.Pid, command.Scope, command.Argv[0]); err != nil {
-		return killAfterShimError(cmd.Process.Pid, reportRefusal(logFile, cfg.Name, err))
+		return refuseJob(cfg, logFile, err)
 	}
 	writer, err := shimWriter(cfg)
 	if err != nil {
@@ -145,6 +124,38 @@ func runShim(cfg shimConfig) error {
 		return killAfterShimError(cmd.Process.Pid, err)
 	}
 	return waitAndRecordExit(writer, cfg, cmd)
+}
+
+// startConfirmedJob builds the job's command, starts it, writes its record and confirms its
+// scope. After any error the job is not running: one that had started is killed with its
+// process group.
+func startConfirmedJob(ctx context.Context, cfg shimConfig, logFile *os.File) (*exec.Cmd, string, error) {
+	command, err := buildJobCommand(cfg.Command, cfg.Sandbox, sandboxBuildOptions{
+		Paths: sandboxPaths{EventLogDir: cfg.EventLogDir, SigningKey: cfg.SigningKey},
+		Env:   os.LookupEnv,
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("job-shim: sandbox %s: %w", cfg.Name, err)
+	}
+	// #nosec G204 -- job command comes from validated operator config and is
+	// executed as argv without a shell.
+	cmd := exec.CommandContext(ctx, command.Argv[0], command.Argv[1:]...)
+	cmd.Env = command.Env
+	cmd.Stdout, cmd.Stderr = logFile, logFile
+	prepareProcess(cmd)
+	if err = cmd.Start(); err != nil {
+		return nil, "", fmt.Errorf("job-shim: start %s: %w", cfg.Command[0], err)
+	}
+	started := time.Now().UTC().Format(time.RFC3339Nano)
+	if err = writeRecord(cfg, cmd.Process.Pid, started); err != nil {
+		return nil, "", killAfterShimError(cmd.Process.Pid, err)
+	}
+	// The record comes first so that a stop during the wait can reach the job; job.started
+	// is appended only for a job confirmed inside its scope.
+	if err = confirmJobScope(cmd.Process.Pid, command.Scope, command.Argv[0]); err != nil {
+		return nil, "", killAfterShimError(cmd.Process.Pid, err)
+	}
+	return cmd, started, nil
 }
 
 func openAppendLog(path string) (*os.File, error) {
@@ -233,13 +244,40 @@ func exitCode(err error) int {
 	return -1
 }
 
-// reportRefusal writes why a started job was killed into the job's log, where its own
-// output is read; the shim's stderr is not kept.
-func reportRefusal(logFile io.Writer, name string, cause error) error {
-	err := fmt.Errorf("job-shim: %s refused: %w", name, cause)
+// maxRefusalReasonBytes bounds the reason a job.refused event carries.
+const maxRefusalReasonBytes = 2048
+
+// refuseJob records why the shim did not start a job, or killed it before recording a start:
+// a line in the job's log, where its own output is read, and a job.refused event, which a
+// caller can act on without reading a log. The shim's stderr is not kept.
+func refuseJob(cfg shimConfig, logFile io.Writer, cause error) error {
+	err := fmt.Errorf("job-shim: %s refused: %w", cfg.Name, cause)
 	if _, writeErr := fmt.Fprintf(logFile, "tribunus: %v\n", err); writeErr != nil {
-		return errors.Join(err, fmt.Errorf("job-shim: write refusal to the job log: %w", writeErr))
+		err = errors.Join(err, fmt.Errorf("job-shim: write refusal to the job log: %w", writeErr))
 	}
+	if appendErr := appendRefused(cfg, cause); appendErr != nil {
+		err = errors.Join(err, fmt.Errorf("job-shim: record refusal: %w", appendErr))
+	}
+	return err
+}
+
+func appendRefused(cfg shimConfig, cause error) error {
+	writer, err := shimWriter(cfg)
+	if err != nil {
+		return err
+	}
+	reason := cause.Error()
+	if len(reason) > maxRefusalReasonBytes {
+		reason = reason[:maxRefusalReasonBytes]
+	}
+	payload := map[string]any{"state": string(StateDead), "shim_pid": os.Getpid(), "at": time.Now().UTC().Format(time.RFC3339Nano), "reason": reason, "sandbox": sandboxStatus(cfg.Sandbox)}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("job-shim: marshal refused: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, err = writer.Append(ctx, eventlog.Event{Type: "job.refused", TaskID: cfg.Name, Payload: body})
 	return err
 }
 

@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -385,5 +386,148 @@ func TestLoadRefusesHomeReachedThroughSymlink(t *testing.T) {
 	body := fmt.Sprintf(`{"jobs": [{"name": "daemon", "command": ["/bin/true"], "log_path": "/tmp/daemon.log", "sandbox": {"workspace": %q}}]}`, home)
 	if _, err := Load(testContext(t), writeConfig(t, body)); err == nil || !strings.Contains(err.Error(), "refuse HOME") {
 		t.Fatalf("Load(workspace = HOME behind a symlink) = %v, want HOME refusal", err)
+	}
+}
+
+func TestValidateSandboxRules(t *testing.T) {
+	tooMany := make([]string, MaxSandboxEnvAllow+1)
+	for i := range tooMany {
+		tooMany[i] = fmt.Sprintf("NAME_%d", i)
+	}
+	cases := []struct {
+		name string
+		edit func(*SandboxConfig)
+		want string
+	}{
+		{"enforce", func(*SandboxConfig) {}, ""},
+		{"off with reason", func(s *SandboxConfig) { s.Mode, s.Reason = "off", "legacy" }, ""},
+		{"off without reason", func(s *SandboxConfig) { s.Mode, s.Reason = "off", "  " }, "reason: required"},
+		{"enforce with reason", func(s *SandboxConfig) { s.Reason = "why" }, "reason: forbidden"},
+		{"unknown mode", func(s *SandboxConfig) { s.Mode = "audit" }, "mode: unknown"},
+		{"unknown network", func(s *SandboxConfig) { s.Network = "host" }, "network: unknown"},
+		{"memory at floor", func(s *SandboxConfig) { s.MemoryMax = "64M" }, ""},
+		{"memory below floor", func(s *SandboxConfig) { s.MemoryMax = "65535K" }, "memory_max: must be 64M..64G"},
+		{"memory at ceiling", func(s *SandboxConfig) { s.MemoryMax = "64G" }, ""},
+		{"memory above ceiling", func(s *SandboxConfig) { s.MemoryMax = "65537M" }, "memory_max: must be 64M..64G"},
+		{"memory wraps int64", func(s *SandboxConfig) { s.MemoryMax = "17179869189G" }, "memory_max: is too large"},
+		{"memory not a size", func(s *SandboxConfig) { s.MemoryMax = "2X" }, "memory_max: must be positive"},
+		{"cpu at floor", func(s *SandboxConfig) { s.CPUWeight = 1 }, ""},
+		{"cpu below floor", func(s *SandboxConfig) { s.CPUWeight = -1 }, "cpu_weight"},
+		{"cpu at ceiling", func(s *SandboxConfig) { s.CPUWeight = 10000 }, ""},
+		{"cpu above ceiling", func(s *SandboxConfig) { s.CPUWeight = 10001 }, "cpu_weight"},
+		{"tasks at floor", func(s *SandboxConfig) { s.TasksMax = 16 }, ""},
+		{"tasks below floor", func(s *SandboxConfig) { s.TasksMax = 15 }, "tasks_max"},
+		{"tasks at ceiling", func(s *SandboxConfig) { s.TasksMax = 32768 }, ""},
+		{"tasks above ceiling", func(s *SandboxConfig) { s.TasksMax = 32769 }, "tasks_max"},
+		{"env name invalid", func(s *SandboxConfig) { s.EnvAllow = []string{"lower"} }, "invalid name"},
+		{"env names at limit", func(s *SandboxConfig) { s.EnvAllow = tooMany[:MaxSandboxEnvAllow] }, ""},
+		{"env names over limit", func(s *SandboxConfig) { s.EnvAllow = tooMany }, "env_allow: exceeds"},
+	}
+	for _, tc := range cases {
+		sandbox := SandboxConfig{Mode: "enforce", Network: "none", MemoryMax: "2G", CPUWeight: 100, TasksMax: 512}
+		tc.edit(&sandbox)
+		err := ValidateSandbox(sandbox)
+		if tc.want == "" && err != nil {
+			t.Fatalf("%s: ValidateSandbox() = %v, want nil", tc.name, err)
+		}
+		if tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+			t.Fatalf("%s: ValidateSandbox() = %v, want error containing %q", tc.name, err, tc.want)
+		}
+	}
+}
+
+type sandboxPathWorld struct {
+	root, events, keys, key, confDir, home, file, exeDir string
+}
+
+func newSandboxPathWorld(t *testing.T) sandboxPathWorld {
+	t.Helper()
+	root := t.TempDir()
+	w := sandboxPathWorld{root: root, events: filepath.Join(root, "state", "events"), keys: filepath.Join(root, "keys"),
+		confDir: filepath.Join(root, "conf"), home: filepath.Join(root, "home", "user"), file: filepath.Join(root, "file")}
+	w.key = filepath.Join(w.keys, "seed")
+	for _, dir := range []string{w.events, filepath.Join(w.events, "sub"), w.keys, w.confDir, filepath.Join(w.home, "jobs"), filepath.Join(root, "ws")} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("MkdirAll(%s) = %v, want nil", dir, err)
+		}
+	}
+	for _, file := range []string{w.key, w.file} {
+		if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+			t.Fatalf("WriteFile(%s) = %v, want nil", file, err)
+		}
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable() = %v, want nil", err)
+	}
+	if exe, err = filepath.EvalSymlinks(exe); err != nil {
+		t.Fatalf("EvalSymlinks(executable) = %v, want nil", err)
+	}
+	w.exeDir = filepath.Dir(exe)
+	t.Setenv("HOME", w.home)
+	return w
+}
+
+func (w sandboxPathWorld) load(t *testing.T, workspace string, inputs []string) error {
+	t.Helper()
+	sandbox, err := json.Marshal(map[string]any{"workspace": workspace, "inputs": inputs})
+	if err != nil {
+		t.Fatalf("marshal sandbox: %v", err)
+	}
+	body := fmt.Sprintf(`{"event_log": {"dir": %q, "signing_key_path": %q}, "jobs": [{"name": "daemon", "command": ["/bin/true"], "log_path": "/tmp/daemon.log", "sandbox": %s}]}`, w.events, w.key, sandbox)
+	path := filepath.Join(w.confDir, "config.json")
+	if err = os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("WriteFile(config) = %v, want nil", err)
+	}
+	_, err = Load(testContext(t), path)
+	return err
+}
+
+func TestLoadRefusesSandboxPathsReachingTheControlPlane(t *testing.T) {
+	w := newSandboxPathWorld(t)
+	ws := filepath.Join(w.root, "ws")
+	cases := []struct {
+		name      string
+		workspace string
+		inputs    []string
+		want      string
+	}{
+		{"own workspace", ws, []string{}, ""},
+		{"workspace below HOME", filepath.Join(w.home, "jobs"), []string{}, ""},
+		{"no workspace", "", []string{}, "workspace: required"},
+		{"root", "/", []string{}, "refuse /"},
+		{"relative", "ws", []string{}, "is not absolute"},
+		{"missing", filepath.Join(w.root, "missing"), []string{}, "workspace:"},
+		{"not a directory", w.file, []string{}, "is not a directory"},
+		{"HOME", w.home, []string{}, "refuse HOME"},
+		{"directory containing HOME", filepath.Dir(w.home), []string{}, "refuse HOME"},
+		{"contains the event log", filepath.Dir(w.events), []string{}, "overlaps protected path"},
+		{"inside the event log", filepath.Join(w.events, "sub"), []string{}, "overlaps protected path"},
+		{"contains the signing key", w.keys, []string{}, "overlaps protected path"},
+		{"contains the config", w.confDir, []string{}, "overlaps protected path"},
+		{"contains the executable", w.exeDir, []string{}, "overlaps protected path"},
+		{"input contains the signing key", ws, []string{w.keys}, "inputs/0: overlaps protected path"},
+		{"input contains HOME", ws, []string{filepath.Dir(w.home)}, "inputs/0: refuse HOME"},
+		{"input relative", ws, []string{"rel"}, "inputs/0:"},
+	}
+	for _, tc := range cases {
+		err := w.load(t, tc.workspace, tc.inputs)
+		if tc.want == "" && err != nil {
+			t.Fatalf("%s: Load() = %v, want nil", tc.name, err)
+		}
+		if tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+			t.Fatalf("%s: Load() = %v, want error containing %q", tc.name, err, tc.want)
+		}
+	}
+}
+
+func TestLoadSandboxFailsClosedWithoutExecutable(t *testing.T) {
+	old := sandboxExecutable
+	t.Cleanup(func() { sandboxExecutable = old })
+	sandboxExecutable = func() (string, error) { return "", errors.New("no /proc") }
+	workspace := t.TempDir()
+	body := fmt.Sprintf(`{"jobs": [{"name": "daemon", "command": ["/bin/true"], "log_path": "/tmp/daemon.log", "sandbox": {"workspace": %q}}]}`, workspace)
+	if _, err := Load(testContext(t), writeConfig(t, body)); err == nil || !strings.Contains(err.Error(), "sandbox needs the executable path") {
+		t.Fatalf("Load(no executable path) = %v, want fail-closed error", err)
 	}
 }

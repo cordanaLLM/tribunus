@@ -346,6 +346,7 @@ func TestCheckJobRejectsRequiredFields(t *testing.T) {
 		{name: "command", job: config.JobConfig{Name: "daemon", LogPath: "/tmp/job.log"}, want: "command must have"},
 		{name: "too many args", job: config.JobConfig{Name: "daemon", Command: manyArgs(config.MaxJobArgs + 1), LogPath: "/tmp/job.log"}, want: "command must have"},
 		{name: "log path", job: config.JobConfig{Name: "daemon", Command: []string{"/bin/true"}}, want: "log_path is required"},
+		{name: "sandbox", job: withJobSandbox(testJob("daemon", []string{"/bin/true"}), config.SandboxConfig{Mode: "off"}), want: "sandbox.reason: required when mode=off"},
 	}
 	for i := 0; i < len(tests); i++ {
 		t.Run(tests[i].name, func(t *testing.T) {
@@ -428,6 +429,7 @@ func TestCheckShimConfigRejectsRequiredFields(t *testing.T) {
 		{name: "paths", cfg: withShimLock(base, ""), want: "lock, record and log paths are required"},
 		{name: "command", cfg: withShimCommand(base, nil), want: "command must have"},
 		{name: "too many args", cfg: withShimCommand(base, manyArgs(config.MaxJobArgs+1)), want: "command must have"},
+		{name: "sandbox", cfg: withShimSandbox(base, config.SandboxConfig{Mode: "off"}), want: "sandbox.reason: required when mode=off"},
 	}
 	for i := 0; i < len(tests); i++ {
 		t.Run(tests[i].name, func(t *testing.T) {
@@ -1828,4 +1830,14 @@ func TestRunningSandboxIsUnknownUntilThisStartIsReplayed(t *testing.T) {
 	if got := runningSandbox(rec, eventlog.Job{Since: rec.StartedAt, Sandbox: "enforce/egress"}); got != "enforce/egress" {
 		t.Fatalf("runningSandbox(this start) = %q, want enforce/egress", got)
 	}
+}
+
+func withJobSandbox(job config.JobConfig, sandbox config.SandboxConfig) config.JobConfig {
+	job.Sandbox = sandbox
+	return job
+}
+
+func withShimSandbox(cfg shimConfig, sandbox config.SandboxConfig) shimConfig {
+	cfg.Sandbox = sandbox
+	return cfg
 }

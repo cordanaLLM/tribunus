@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -522,8 +523,17 @@ func sandboxPathGuard(cfg Config, configPath string) (protectedPaths, error) {
 	return protectedPaths{paths: paths, home: home}, nil
 }
 
+// sandboxExecutable finds the running Tribunus binary. The supervisor re-executes it as
+// each job's shim, so a job that could write it would run its own code outside the sandbox
+// at the next start.
+var sandboxExecutable = os.Executable
+
 func protectedPathList(cfg Config, configPath string) ([]string, error) {
-	candidates := []string{cfg.EventLog.Dir, cfg.EventLog.SigningKeyPath, configPath}
+	executable, err := sandboxExecutable()
+	if err != nil {
+		return nil, fmt.Errorf("config: sandbox needs the executable path to guard it: %w", err)
+	}
+	candidates := []string{cfg.EventLog.Dir, cfg.EventLog.SigningKeyPath, configPath, executable}
 	out := make([]string, 0, len(candidates))
 	for i := 0; i < len(candidates); i++ {
 		if candidates[i] == "" {
@@ -542,8 +552,9 @@ func (guard protectedPaths) check(field string, path string) error {
 	if path == "/" {
 		return fmt.Errorf("%s: refuse /", field)
 	}
-	if guard.home != "" && samePath(path, guard.home) {
-		return fmt.Errorf("%s: refuse HOME %s", field, guard.home)
+	// A directory containing HOME would hand the job the user's whole home directory.
+	if guard.home != "" && pathContains(path, guard.home) {
+		return fmt.Errorf("%s: refuse HOME %s or a directory containing it", field, guard.home)
 	}
 	for i := 0; i < len(guard.paths); i++ {
 		if pathOverlaps(path, guard.paths[i]) {
@@ -604,6 +615,9 @@ func parseMemoryMax(value string) (int64, error) {
 	number, err := strconv.ParseInt(digits, 10, 64)
 	if err != nil || number <= 0 {
 		return 0, fmt.Errorf("must be positive systemd size")
+	}
+	if number > math.MaxInt64/multiplier {
+		return 0, fmt.Errorf("is too large")
 	}
 	return number * multiplier, nil
 }

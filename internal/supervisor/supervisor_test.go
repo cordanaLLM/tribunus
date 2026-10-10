@@ -977,10 +977,25 @@ func TestWaitStartedReportsReplayError(t *testing.T) {
 		t.Fatalf("append seed = %v, want nil", err)
 	}
 	corruptEventLog(t, sup.cfg.EventLog.Dir)
-	err := sup.waitStarted(testContext(t), "probe", eventlog.Job{}, 1234)
-	if err == nil || !strings.Contains(err.Error(), "probe did not start: ") {
-		t.Fatalf("waitStarted(corrupt log) = %v, want did-not-start wrapping the replay error", err)
+	// The wait follows the shim, so the shim must be one that is known to have exited: any
+	// fixed number may be a live process on the machine that runs the test.
+	err := sup.waitStarted(testContext(t), "probe", eventlog.Job{}, exitedPID(t))
+	if err == nil || !strings.Contains(err.Error(), "probe did not start: ") || !strings.Contains(err.Error(), "eventlog: seq 1 file ") {
+		t.Fatalf("waitStarted(corrupt log, exited shim) = %v, want did-not-start wrapping the replay error", err)
 	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("waitStarted(corrupt log, exited shim) = %v, want it to end with the shim, not at the deadline", err)
+	}
+}
+
+// exitedPID returns the process id of a child that has exited and been collected.
+func exitedPID(t *testing.T) int {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), "/bin/true")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Run(/bin/true) = %v, want nil", err)
+	}
+	return cmd.Process.Pid
 }
 
 func TestStartStatusStopReconcileErrorPaths(t *testing.T) {

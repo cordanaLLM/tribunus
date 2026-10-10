@@ -237,6 +237,9 @@ func TestSignalValidationAndDeliveryErrors(t *testing.T) {
 func TestLinuxCmdlineShimChecksEveryRequiredArg(t *testing.T) {
 	rec := withRecordingSignaller(t)
 	target := testSignalTarget(123, 456)
+	// A lock of this test's own: the helper's path is the same for every test process on the
+	// machine, and two of them holding it at once would refuse each other.
+	target.LockPath = filepath.Join(t.TempDir(), "daemon.lock")
 	lock, err := holdLock(target.LockPath)
 	if err != nil {
 		t.Fatalf("holdLock(%s) = %v, want nil", target.LockPath, err)

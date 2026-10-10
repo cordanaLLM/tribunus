@@ -11,7 +11,7 @@ import (
 )
 
 // renovate: datasource=git-refs depName=https://github.com/BerriAI/litellm branch=main
-const liteLLMPriceMapRevision = "fff86d637686c674d85cdcc42e2c728cde1cb1cf"
+const liteLLMPriceMapRevision = "7ff5010674348be45b96e9c7e0c8da3b657f08af"
 
 // DefaultLiteLLMPriceMapURL is LiteLLM's pinned, unauthenticated model
 // price/context map, checked 2026-10-09.

@@ -3,7 +3,7 @@
 package supervisor
 
 import (
-	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -105,10 +105,12 @@ func TestStartGivesTheWaiterBackWhenTheShimCannotStart(t *testing.T) {
 }
 
 func TestCollectShimReportsOnlyAWaitThatFails(t *testing.T) {
-	var out bytes.Buffer
-	old := shimErrorOutput
-	t.Cleanup(func() { shimErrorOutput = old })
-	shimErrorOutput = &out
+	var reported []string
+	old := reportShimError
+	t.Cleanup(func() { reportShimError = old })
+	reportShimError = func(name string, err error) {
+		reported = append(reported, fmt.Sprintf("%s: %v", name, err))
+	}
 	sup := &Supervisor{}
 
 	failed := exec.CommandContext(t.Context(), "/bin/false")
@@ -117,8 +119,8 @@ func TestCollectShimReportsOnlyAWaitThatFails(t *testing.T) {
 	}
 	sup.shimWaiters.Store(2)
 	sup.collectShim(failed, "refused")
-	if out.Len() != 0 {
-		t.Fatalf("collectShim(exit status 1) wrote %q, want nothing: the shim reports its own failures", out.String())
+	if len(reported) != 0 {
+		t.Fatalf("collectShim(exit status 1) reported %q, want nothing: the shim reports its own failures", reported)
 	}
 	if zombieChildOfThisProcess(failed.Process.Pid) {
 		t.Fatalf("shim %d is a zombie after collectShim, want it collected", failed.Process.Pid)
@@ -126,8 +128,8 @@ func TestCollectShimReportsOnlyAWaitThatFails(t *testing.T) {
 
 	neverStarted := exec.CommandContext(t.Context(), "/bin/true")
 	sup.collectShim(neverStarted, "lost")
-	if got := out.String(); !strings.HasPrefix(got, "Error: collect shim of lost: ") || !strings.HasSuffix(got, "\n") {
-		t.Fatalf("collectShim(wait fails) wrote %q, want the wait error named for the job", got)
+	if len(reported) != 1 || !strings.HasPrefix(reported[0], "lost: ") || strings.HasSuffix(reported[0], "<nil>") {
+		t.Fatalf("collectShim(wait fails) reported %q, want one wait error named for the job", reported)
 	}
 	if waiting := sup.shimWaiters.Load(); waiting != 0 {
 		t.Fatalf("shim waiters = %d after two collections, want 0", waiting)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"sync/atomic"
@@ -74,8 +73,11 @@ type Supervisor struct {
 	shimWaiters  atomic.Int32
 }
 
-// shimErrorOutput is where a shim that could not be collected is reported.
-var shimErrorOutput io.Writer = os.Stderr
+// reportShimError tells the operator about a shim that could not be collected. Nothing
+// returns to a caller from the waiter, so it goes to stderr like the shim's own errors.
+var reportShimError = func(name string, err error) {
+	fmt.Fprintf(os.Stderr, "Error: collect shim of %s: %v\n", name, err)
+}
 
 func New(cfg config.Config, opts Options) (*Supervisor, error) {
 	if err := platformSupported(); err != nil {
@@ -162,7 +164,7 @@ func (s *Supervisor) collectShim(cmd *exec.Cmd, name string) {
 	err := cmd.Wait()
 	var exit *exec.ExitError
 	if err != nil && !errors.As(err, &exit) {
-		fmt.Fprintf(shimErrorOutput, "Error: collect shim of %s: %v\n", name, err)
+		reportShimError(name, err)
 	}
 }
 

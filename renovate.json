@@ -3,6 +3,9 @@
   "extends": [
     "config:recommended"
   ],
+  "postUpdateOptions": [
+    "gomodTidy"
+  ],
   "customManagers": [
     {
       "customType": "regex",
@@ -108,6 +111,17 @@
         "tools/apicompat/gate/placeholder.go",
         ".devcontainer/devcontainer.json",
         ".devcontainer/Dockerfile.praetor"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "the Praetor engine pin moves on purpose, as one change with the re-adoption and PRAETOR_REF in ci.yml, never as a lone module update",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchPackageNames": [
+        "github.com/cordanaLLM/praetor",
+        "github.com/cordanaLLM/praetor/**"
       ],
       "enabled": false
     }

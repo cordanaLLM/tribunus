@@ -47,6 +47,9 @@ jobs:
             exit 1
           fi
       - run: go vet ./...
+      # A module update that leaves stale lines in go.sum passes every other step.
+      - name: go.mod and go.sum are tidy
+        run: go mod tidy -diff
       # One run, verbose: a skipped test shows with its reason, and the scope probe logs the
       # runner's systemd version and how long a job took to enter its scope. A sandbox test
       # that finds no systemd user scope here fails; it skips only outside CI.

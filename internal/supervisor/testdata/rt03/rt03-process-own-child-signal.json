@@ -1,0 +1,1 @@
+{"id":"rt03-process-own-child-signal","boundary":"process","direction":"compliant","task":{"network":"none","env_allow":[]},"attempt":{"kind":"signal_own_child"},"expect":{"result":"allowed"}}

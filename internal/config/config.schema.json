@@ -156,6 +156,86 @@
                 "maximum": 300
               }
             }
+          },
+          "sandbox": {
+            "type": "object",
+            "default": {
+              "mode": "enforce",
+              "reason": "",
+              "workspace": "",
+              "inputs": [],
+              "env_allow": [],
+              "network": "none",
+              "memory_max": "2G",
+              "cpu_weight": 100,
+              "tasks_max": 512
+            },
+            "additionalProperties": false,
+            "properties": {
+              "mode": {
+                "type": "string",
+                "default": "enforce",
+                "enum": [
+                  "enforce",
+                  "off"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "default": "",
+                "maxLength": 512
+              },
+              "workspace": {
+                "type": "string",
+                "default": "",
+                "maxLength": 4096
+              },
+              "inputs": {
+                "type": "array",
+                "default": [],
+                "maxItems": 32,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              },
+              "env_allow": {
+                "type": "array",
+                "default": [],
+                "maxItems": 64,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Z_][A-Z0-9_]*$"
+                }
+              },
+              "network": {
+                "type": "string",
+                "default": "none",
+                "enum": [
+                  "none",
+                  "egress"
+                ]
+              },
+              "memory_max": {
+                "type": "string",
+                "default": "2G",
+                "pattern": "^[1-9][0-9]*[KMGT]?$"
+              },
+              "cpu_weight": {
+                "type": "integer",
+                "default": 100,
+                "minimum": 1,
+                "maximum": 10000
+              },
+              "tasks_max": {
+                "type": "integer",
+                "default": 512,
+                "minimum": 16,
+                "maximum": 32768
+              }
+            }
           }
         }
       }

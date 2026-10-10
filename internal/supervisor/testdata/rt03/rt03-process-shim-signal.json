@@ -1,0 +1,1 @@
+{"id":"rt03-process-shim-signal","boundary":"process","direction":"violation","task":{"network":"none","env_allow":["SHIM_PID"]},"attempt":{"kind":"signal_shim"},"expect":{"result":"refused","event":{"type":"rt03.violation","boundary":"process","task_id":"rt03-process-shim-signal"}}}

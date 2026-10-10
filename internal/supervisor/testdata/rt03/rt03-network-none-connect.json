@@ -1,0 +1,1 @@
+{"id":"rt03-network-none-connect","boundary":"network","direction":"violation","task":{"network":"none","env_allow":["TARGET_HOST","TARGET_PORT"]},"attempt":{"kind":"tcp_connect"},"expect":{"result":"refused","event":{"type":"rt03.violation","boundary":"network","task_id":"rt03-network-none-connect"}}}

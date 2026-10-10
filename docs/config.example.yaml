@@ -19,6 +19,17 @@ jobs:
     stop:
       signal: TERM
       grace_seconds: 10
+    sandbox:
+      mode: enforce
+      # Use a dedicated directory per job; it is the only path the job can write.
+      workspace: /var/tmp
+      inputs: []
+      env_allow:
+        - TRIBUNUS_JOB_TOKEN
+      network: none
+      memory_max: 2G
+      cpu_weight: 100
+      tasks_max: 512
 watches:
   - name: catalog-source-change
     trigger: git:internal/sources

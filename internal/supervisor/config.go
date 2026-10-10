@@ -44,7 +44,13 @@ func checkJob(job config.JobConfig) error {
 	if job.LogPath == "" {
 		return fmt.Errorf("log_path is required")
 	}
-	return checkJobBounds(job)
+	if err := checkJobBounds(job); err != nil {
+		return err
+	}
+	if err := config.ValidateSandbox(job.Sandbox); err != nil {
+		return fmt.Errorf("sandbox.%w", err)
+	}
+	return nil
 }
 
 func checkJobBounds(job config.JobConfig) error {
@@ -90,6 +96,7 @@ func normalizeJob(job config.JobConfig) config.JobConfig {
 	if job.Stop.Signal == "" {
 		job.Stop.Signal = "TERM"
 	}
+	job.Sandbox = config.NormalizeSandbox(job.Sandbox)
 	return job
 }
 

@@ -13,7 +13,9 @@ jobs:
   # The required check. Every gate here runs offline; the tools come from
   # tools/go/go.mod at pinned versions that Renovate moves.
   go:
-    runs-on: ubuntu-latest
+    # The sandbox tests need passt with --map-host-loopback, which Ubuntu 24.04's passt
+    # (2024_02_20) lacks, and an env with --ignore-signal and --default-signal.
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -24,6 +26,12 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: 'go.mod'
+      - name: Sandbox runner dependencies
+        # Ubuntu restricts unprivileged user namespaces, which bwrap needs, through AppArmor.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap passt
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: gofmt
         run: |
           unformatted="$(gofmt -l .)"
@@ -63,4 +71,3 @@ jobs:
             go tool -modfile=tools/go/go.mod standardsctl docs references --path=. \
               --base="$PUSH_BEFORE" --head="$PUSH_HEAD"
           fi
-

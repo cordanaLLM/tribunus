@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -22,7 +23,8 @@ func TestLoadPositiveFullFile(t *testing.T) {
     "schedule": "0 2 * * *",
     "router_alias": "cordana/auto",
     "restart": {"policy": "on-failure", "max_restarts": 3, "backoff_seconds": 2},
-    "stop": {"signal": "TERM", "grace_seconds": 5}
+    "stop": {"signal": "TERM", "grace_seconds": 5},
+    "sandbox": {"mode": "enforce", "workspace": "/var/tmp", "network": "none", "memory_max": "2G", "cpu_weight": 100, "tasks_max": 512}
   }],
   "watches": [{"name": "catalog-source-change", "trigger": "git:internal/sources", "router_alias": "cordana/coding"}],
   "router": {"aliases": ["cordana/auto", "cordana/coding"]},
@@ -81,9 +83,15 @@ func TestLoadNegativeValidation(t *testing.T) {
 		{"bad job stop signal", `{"jobs": [
   {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "schedule": "always", "stop": {"signal": "KILL"}}
 ]}`, []string{"/jobs/0/stop/signal", "valid"}},
+		{"bad job sandbox mode", `{"jobs": [
+  {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "sandbox": {"mode": "maybe"}}
+]}`, []string{"/jobs/0/sandbox/mode", "valid"}},
+		{"bad job sandbox env", `{"jobs": [
+  {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "sandbox": {"mode": "off", "reason": "legacy", "env_allow": ["bad-name"]}}
+]}`, []string{"/jobs/0/sandbox/env_allow/0", "pattern"}},
 		{"duplicate job names", `{"jobs": [
-  {"name": "repeat-job", "command": ["/bin/true"], "log_path": "/tmp/a.log", "schedule": "0 1 * * *", "router_alias": "cordana/auto"},
-  {"name": "repeat-job", "command": ["/bin/true"], "log_path": "/tmp/b.log", "schedule": "0 2 * * *", "router_alias": "cordana/auto"}
+  {"name": "repeat-job", "command": ["/bin/true"], "log_path": "/tmp/a.log", "schedule": "0 1 * * *", "router_alias": "cordana/auto", "sandbox": {"mode": "off", "reason": "test"}},
+  {"name": "repeat-job", "command": ["/bin/true"], "log_path": "/tmp/b.log", "schedule": "0 2 * * *", "router_alias": "cordana/auto", "sandbox": {"mode": "off", "reason": "test"}}
 ]}`, []string{"jobs/1/name", "duplicate"}},
 	}
 	for _, tt := range tests {
@@ -168,17 +176,22 @@ func TestConfigSchemaDefaultsAgreeWithGoTypes(t *testing.T) {
 }
 
 func TestLoadJobDefaults(t *testing.T) {
-	cfg, err := Load(testContext(t), writeConfig(t, `{"jobs": [{
+	workspace := t.TempDir()
+	cfg, err := Load(testContext(t), writeConfig(t, fmt.Sprintf(`{"jobs": [{
   "name": "daemon",
   "command": ["/bin/true"],
-  "log_path": "/tmp/daemon.log"
-}]}`))
+  "log_path": "/tmp/daemon.log",
+  "sandbox": {"workspace": %q}
+}]}`, workspace)))
 	if err != nil {
 		t.Fatalf("Load() = %v, want nil", err)
 	}
 	job := cfg.Jobs[0]
 	if job.Schedule != "always" || job.RouterAlias != "cordana/auto" || job.Restart.Policy != "never" || job.Stop.Signal != "TERM" {
 		t.Fatalf("job defaults = %+v, want schedule, alias, restart and stop defaults", job)
+	}
+	if job.Sandbox.Mode != "enforce" || job.Sandbox.Network != "none" || job.Sandbox.MemoryMax != "2G" {
+		t.Fatalf("sandbox defaults = %+v, want enforce none 2G", job.Sandbox)
 	}
 }
 
@@ -250,6 +263,7 @@ func jobDeclarations(count int) []map[string]any {
 			"log_path":     "/tmp/job-" + jsonInt(i) + ".log",
 			"schedule":     "event",
 			"router_alias": defaultAlias,
+			"sandbox":      map[string]any{"mode": "off", "reason": "test fixture"},
 		})
 	}
 	return out
@@ -334,5 +348,42 @@ func TestLoadPartialFileKeepsSiblingDefaults(t *testing.T) {
 	want.Budgets.Default.Tokens = 7
 	if !reflect.DeepEqual(cfg, want) {
 		t.Fatalf("Load() = %+v, want %+v", cfg, want)
+	}
+}
+
+func TestLoadRefusesReservedSandboxEnv(t *testing.T) {
+	workspace := t.TempDir()
+	reserved := []string{"PATH", "HOME", "TMPDIR", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "INVOCATION_ID"}
+	for i := 0; i < len(reserved); i++ {
+		body := fmt.Sprintf(`{"jobs": [{"name": "daemon", "command": ["/bin/true"], "log_path": "/tmp/daemon.log", "sandbox": {"workspace": %q, "env_allow": [%q]}}]}`, workspace, reserved[i])
+		if _, err := Load(testContext(t), writeConfig(t, body)); err == nil || !strings.Contains(err.Error(), reserved[i]+" is reserved") {
+			t.Fatalf("Load(env_allow %s) = %v, want reserved-name error", reserved[i], err)
+		}
+	}
+}
+
+func TestLoadSandboxFailsClosedWithoutHome(t *testing.T) {
+	workspace := t.TempDir()
+	enforced := writeConfig(t, fmt.Sprintf(`{"jobs": [{"name": "daemon", "command": ["/bin/true"], "log_path": "/tmp/daemon.log", "sandbox": {"workspace": %q}}]}`, workspace))
+	off := writeConfig(t, `{"jobs": [{"name": "daemon", "command": ["/bin/true"], "log_path": "/tmp/daemon.log", "sandbox": {"mode": "off", "reason": "test"}}]}`)
+	t.Setenv("HOME", "")
+	if _, err := Load(testContext(t), enforced); err == nil || !strings.Contains(err.Error(), "sandbox needs HOME") {
+		t.Fatalf("Load(no HOME, enforced sandbox) = %v, want fail-closed HOME error", err)
+	}
+	if _, err := Load(testContext(t), off); err != nil {
+		t.Fatalf("Load(no HOME, sandbox off) = %v, want nil", err)
+	}
+}
+
+func TestLoadRefusesHomeReachedThroughSymlink(t *testing.T) {
+	home := t.TempDir()
+	link := filepath.Join(t.TempDir(), "home-link")
+	if err := os.Symlink(home, link); err != nil {
+		t.Fatalf("Symlink(home) = %v, want nil", err)
+	}
+	t.Setenv("HOME", link)
+	body := fmt.Sprintf(`{"jobs": [{"name": "daemon", "command": ["/bin/true"], "log_path": "/tmp/daemon.log", "sandbox": {"workspace": %q}}]}`, home)
+	if _, err := Load(testContext(t), writeConfig(t, body)); err == nil || !strings.Contains(err.Error(), "refuse HOME") {
+		t.Fatalf("Load(workspace = HOME behind a symlink) = %v, want HOME refusal", err)
 	}
 }

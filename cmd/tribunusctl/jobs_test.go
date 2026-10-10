@@ -76,7 +76,7 @@ func TestRunJobsActionStatusWithLoadedConfig(t *testing.T) {
 			t.Fatalf("runJobsAction(status loaded) = %v, want nil", err)
 		}
 	})
-	if !strings.HasPrefix(out, "idle\tdead\t0\t\t0\n") {
+	if !strings.HasPrefix(out, "idle\tdead\t0\t\t0\t") {
 		t.Fatalf("status output = %q, want idle row", out)
 	}
 }
@@ -122,7 +122,7 @@ func TestPrintJobsStatusWritesTabRows(t *testing.T) {
 			t.Fatalf("printJobsStatus() = %v, want nil", err)
 		}
 	})
-	if !strings.HasPrefix(out, "idle\tdead\t0\t\t0\n") {
+	if !strings.HasPrefix(out, "idle\tdead\t0\t\t0\t") {
 		t.Fatalf("status output = %q, want tab row", out)
 	}
 }
@@ -137,7 +137,7 @@ func TestRunLoadedJobsActionDispatchesStatus(t *testing.T) {
 			t.Fatalf("runLoadedJobsAction(status) = %v, want nil", err)
 		}
 	})
-	if !strings.HasPrefix(out, "idle\tdead\t0\t\t0\n") {
+	if !strings.HasPrefix(out, "idle\tdead\t0\t\t0\t") {
 		t.Fatalf("status output = %q, want tab row", out)
 	}
 }
@@ -218,6 +218,7 @@ func testJobsSupervisor(t *testing.T) *supervisor.Supervisor {
 		Command:  []string{"sleep", "30"},
 		LogPath:  filepath.Join(base, "idle.log"),
 		Schedule: "always",
+		Sandbox:  config.SandboxConfig{Mode: "off", Reason: "command dispatch unit test"},
 	}}
 	if err := os.MkdirAll(filepath.Join(cfg.EventLog.Dir, ".git"), 0o700); err != nil {
 		t.Fatalf("MkdirAll(state/.git) = %v, want nil", err)
@@ -248,7 +249,7 @@ func writeJobsConfig(t *testing.T, keyMode string) string {
 	if err := os.MkdirAll(filepath.Join(stateDir, ".git"), 0o700); err != nil {
 		t.Fatalf("MkdirAll(state/.git) = %v, want nil", err)
 	}
-	body := `{"event_log":{"dir":"` + stateDir + `","signing_key_path":"` + keyPath + `"},"jobs":[{"name":"idle","command":["/bin/true"],"log_path":"` + filepath.Join(base, "idle.log") + `"}]}`
+	body := `{"event_log":{"dir":"` + stateDir + `","signing_key_path":"` + keyPath + `"},"jobs":[{"name":"idle","command":["/bin/true"],"log_path":"` + filepath.Join(base, "idle.log") + `","sandbox":{"mode":"off","reason":"jobs cli unit test"}}]}`
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("WriteFile(config) = %v, want nil", err)
 	}

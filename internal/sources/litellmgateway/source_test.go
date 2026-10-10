@@ -3,12 +3,15 @@ package litellmgateway
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/golusoris/golusoris/httpx/client"
 
 	"github.com/cordanaLLM/tribunus/catalog"
 )
@@ -210,6 +213,36 @@ func TestFetch_Boundary(t *testing.T) {
 		}
 		if !strings.Contains(res.Detail, "empty response") {
 			t.Fatalf("Detail = %q, want empty response", res.Detail)
+		}
+	})
+}
+
+// TestListModels_ResponseCap pins the /v1/models byte cap at its exact edge:
+// a body of exactly maxResponseBytes is read, one byte more fails with
+// client.ErrBodyTooLarge, so a caller can tell an oversized gateway response
+// from a network or status failure.
+func TestListModels_ResponseCap(t *testing.T) {
+	serve := func(size int) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body := []byte(`{"data":[]}` + strings.Repeat(" ", size-len(`{"data":[]}`)))
+			_, _ = w.Write(body) //nolint:errcheck // test httptest server response; a write failure here would fail the test's own HTTP round trip, not silently corrupt anything
+		}))
+	}
+
+	t.Run("exactly at cap", func(t *testing.T) {
+		server := serve(maxResponseBytes)
+		defer server.Close()
+		if _, err := listModels(context.Background(), server.URL, "tok"); err != nil {
+			t.Fatalf("listModels() = %v, want success for a response exactly at the cap", err)
+		}
+	})
+
+	t.Run("one byte over cap", func(t *testing.T) {
+		server := serve(maxResponseBytes + 1)
+		defer server.Close()
+		_, err := listModels(context.Background(), server.URL, "tok")
+		if !errors.Is(err, client.ErrBodyTooLarge) {
+			t.Fatalf("listModels() = %v, want an error wrapping client.ErrBodyTooLarge", err)
 		}
 	})
 }

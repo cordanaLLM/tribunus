@@ -14,15 +14,17 @@ package litellmgateway
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	gerrors "github.com/golusoris/golusoris/core/errors"
+	"github.com/golusoris/golusoris/httpx/client"
+
 	"github.com/cordanaLLM/tribunus/catalog"
+	"github.com/cordanaLLM/tribunus/internal/sources/httpfetch"
 )
 
 // SourceName identifies this source in Snapshot.SourceRuns and CLI flags.
@@ -87,7 +89,7 @@ func readToken(tokenFile string) (token string, err error) {
 	if err != nil {
 		return "", fmt.Errorf("litellm-gateway: open token file %s: %w", tokenFile, err)
 	}
-	defer func() { err = errors.Join(err, f.Close()) }()
+	defer gerrors.CloseJoin(f, &err, "litellm-gateway: close token file "+tokenFile)
 
 	info, err := f.Stat()
 	if err != nil {
@@ -100,12 +102,9 @@ func readToken(tokenFile string) (token string, err error) {
 		return "", fmt.Errorf("litellm-gateway: token file %s exceeds %d bytes", tokenFile, maxTokenFileBytes)
 	}
 
-	data, err := io.ReadAll(io.LimitReader(f, maxTokenFileBytes+1))
+	data, err := client.ReadAllBounded(f, maxTokenFileBytes)
 	if err != nil {
 		return "", fmt.Errorf("litellm-gateway: read token file %s: %w", tokenFile, err)
-	}
-	if len(data) > maxTokenFileBytes {
-		return "", fmt.Errorf("litellm-gateway: token file %s exceeds %d bytes", tokenFile, maxTokenFileBytes)
 	}
 	return strings.TrimSpace(string(data)), nil
 }
@@ -119,42 +118,25 @@ type modelsResponse struct {
 	Data []modelEntry `json:"data"`
 }
 
-// listModels performs the bounded GET and decodes the response body.
-func listModels(ctx context.Context, baseURL, token string) (entries []modelEntry, err error) {
-	reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
-	defer cancel()
-
-	body, err := fetchModelsBody(reqCtx, baseURL, token)
+// listModels performs the bounded, authenticated GET through httpfetch and
+// decodes the response body.
+func listModels(ctx context.Context, baseURL, token string) ([]modelEntry, error) {
+	body, err := fetchModelsBody(ctx, baseURL, token)
 	if err != nil {
 		return nil, err
 	}
 	return decodeModelsBody(body)
 }
 
-func fetchModelsBody(ctx context.Context, baseURL, token string) (body []byte, err error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/v1/models", nil)
+// fetchModelsBody sends the token only in the Authorization header;
+// httpfetch errors name the URL, never header values.
+func fetchModelsBody(ctx context.Context, baseURL, token string) ([]byte, error) {
+	header := http.Header{}
+	header.Set("Authorization", "Bearer "+token)
+	url := strings.TrimRight(baseURL, "/") + "/v1/models"
+	body, err := httpfetch.GetWithHeader(ctx, url, header, requestTimeout, maxResponseBytes)
 	if err != nil {
-		return nil, fmt.Errorf("litellm-gateway: build request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-
-	client := &http.Client{Timeout: requestTimeout}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("litellm-gateway: request %s/v1/models: %w", baseURL, err)
-	}
-	defer func() { err = errors.Join(err, resp.Body.Close()) }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("litellm-gateway: %s/v1/models returned HTTP %d", baseURL, resp.StatusCode)
-	}
-
-	body, err = io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("litellm-gateway: read response body: %w", err)
-	}
-	if len(body) > maxResponseBytes {
-		return nil, fmt.Errorf("litellm-gateway: response exceeds %d bytes", maxResponseBytes)
+		return nil, fmt.Errorf("litellm-gateway: %w", err)
 	}
 	return body, nil
 }

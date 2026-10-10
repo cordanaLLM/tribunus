@@ -16,12 +16,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/cordanaLLM/tribunus/internal/sources/httpfetch"
 )
 
 const (
@@ -135,25 +136,9 @@ func check(ctx context.Context, manifest schemaManifest, root string) error {
 }
 
 func fetchPinned(ctx context.Context, source schemaSource) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL(source), nil)
-	if err != nil {
-		return nil, fmt.Errorf("%s: build request: %w", source.ID, err)
-	}
-	client := &http.Client{Timeout: fetchTimeout}
-	resp, err := client.Do(req)
+	body, err := httpfetch.Get(ctx, sourceURL(source), fetchTimeout, maxFetchBytes)
 	if err != nil {
 		return nil, fmt.Errorf("%s: fetch: %w", source.ID, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: fetch returned HTTP %d", source.ID, resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxFetchBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("%s: read response: %w", source.ID, err)
-	}
-	if len(body) > maxFetchBytes {
-		return nil, fmt.Errorf("%s: response exceeds %d bytes", source.ID, maxFetchBytes)
 	}
 	return body, nil
 }

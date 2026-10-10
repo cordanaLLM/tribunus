@@ -32,6 +32,8 @@ import (
 	"strings"
 	"time"
 
+	gerrors "github.com/golusoris/golusoris/core/errors"
+
 	"github.com/cordanaLLM/tribunus/catalog"
 )
 
@@ -198,7 +200,7 @@ func latestRateLimits(ctx context.Context, path string) (result *rateLimits, err
 	if err != nil {
 		return nil, err
 	}
-	defer func() { err = errors.Join(err, f.Close()) }()
+	defer gerrors.CloseJoin(f, &err, "codex-local: close "+path)
 
 	scanner := bufio.NewScanner(io.LimitReader(f, maxSessionFileBytes+1))
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLineBytes)

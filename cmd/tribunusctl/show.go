@@ -1,13 +1,15 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
+
+	gerrors "github.com/golusoris/golusoris/core/errors"
+	"github.com/golusoris/golusoris/httpx/client"
 
 	"github.com/cordanaLLM/tribunus/catalog"
 )
@@ -39,7 +41,7 @@ func readSnapshotFile(path string) (snap catalog.Snapshot, err error) {
 	if err != nil {
 		return catalog.Snapshot{}, fmt.Errorf("open snapshot %s: %w", path, err)
 	}
-	defer func() { err = errors.Join(err, f.Close()) }()
+	defer gerrors.CloseJoin(f, &err, "close snapshot "+path)
 
 	info, err := f.Stat()
 	if err != nil {
@@ -52,12 +54,9 @@ func readSnapshotFile(path string) (snap catalog.Snapshot, err error) {
 		return catalog.Snapshot{}, fmt.Errorf("snapshot %s exceeds %d bytes", path, maxSnapshotReadBytes)
 	}
 
-	data, err := io.ReadAll(io.LimitReader(f, maxSnapshotReadBytes+1))
+	data, err := client.ReadAllBounded(f, maxSnapshotReadBytes)
 	if err != nil {
 		return catalog.Snapshot{}, fmt.Errorf("read snapshot %s: %w", path, err)
-	}
-	if len(data) > maxSnapshotReadBytes {
-		return catalog.Snapshot{}, fmt.Errorf("snapshot %s exceeds %d bytes", path, maxSnapshotReadBytes)
 	}
 
 	snap, err = catalog.ParseSnapshot(data)

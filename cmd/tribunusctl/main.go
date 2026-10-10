@@ -19,8 +19,12 @@ func main() {
 
 	var err error
 	switch os.Args[1] {
+	case "__job-shim":
+		os.Exit(runJobShim(os.Args[1:]))
 	case "sync":
 		err = runSync(os.Args[2:])
+	case "jobs":
+		err = runJobs(os.Args[2:])
 	case "show":
 		err = runShow(os.Args[2:])
 	case "help", "-h", "--help":
@@ -43,4 +47,5 @@ func printUsage() {
 	fmt.Println("Usage:")
 	fmt.Println("  tribunusctl sync [--sources=a,b] [--out=file] [--litellm-base=url] [--litellm-token-file=path] [--ollama=url]")
 	fmt.Println("  tribunusctl show [--in=file]")
+	fmt.Println("  tribunusctl jobs start|status|stop|supervise --config=file [name]")
 }

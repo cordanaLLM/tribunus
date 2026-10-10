@@ -15,7 +15,15 @@ func TestLoadPositiveFullFile(t *testing.T) {
 	cfg, err := Load(testContext(t), writeConfig(t, `{
   "graph": {"max_depth": 24},
   "budgets": {"default": {"tokens": 300000, "wall_clock_seconds": 7200}},
-  "jobs": [{"name": "daily-catalog-sync", "schedule": "0 2 * * *", "router_alias": "cordana/auto"}],
+  "jobs": [{
+    "name": "daily-catalog-sync",
+    "command": ["/bin/echo", "catalog"],
+    "log_path": "/var/log/tribunus/daily-catalog-sync.log",
+    "schedule": "0 2 * * *",
+    "router_alias": "cordana/auto",
+    "restart": {"policy": "on-failure", "max_restarts": 3, "backoff_seconds": 2},
+    "stop": {"signal": "TERM", "grace_seconds": 5}
+  }],
   "watches": [{"name": "catalog-source-change", "trigger": "git:internal/sources", "router_alias": "cordana/coding"}],
   "router": {"aliases": ["cordana/auto", "cordana/coding"]},
   "admission": {"probe": {"timeout_seconds": 45, "interval_seconds": 3, "ready_threshold": 4}},
@@ -35,6 +43,9 @@ func TestLoadPositiveFullFile(t *testing.T) {
 	}
 	if len(cfg.Jobs) != 1 || cfg.Jobs[0].RouterAlias != "cordana/auto" {
 		t.Fatalf("Load() jobs = %+v, want one scheduled alias declaration", cfg.Jobs)
+	}
+	if cfg.Jobs[0].Command[1] != "catalog" || cfg.Jobs[0].Restart.Policy != "on-failure" {
+		t.Fatalf("Load() jobs = %+v, want command and restart policy", cfg.Jobs)
 	}
 	if cfg.EventLog.LockTimeoutSeconds != 7 || cfg.EventLog.MaxReplayRecords != 1234 {
 		t.Fatalf("Load() event_log = %+v, want full event log values", cfg.EventLog)
@@ -64,9 +75,15 @@ func TestLoadNegativeValidation(t *testing.T) {
 		{"bad alias", `{"router": {"aliases": ["public/alias"]}}`, []string{"/router/aliases/0", "pattern"}},
 		{"bad event public key", `{"event_log": {"public_key": "xyz"}}`, []string{"/event_log/public_key", "pattern"}},
 		{"bad replay max", `{"event_log": {"max_replay_records": 1000001}}`, []string{"/event_log/max_replay_records", "maximum"}},
+		{"bad job restart policy", `{"jobs": [
+  {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "schedule": "always", "restart": {"policy": "sometimes"}}
+]}`, []string{"/jobs/0/restart/policy", "valid"}},
+		{"bad job stop signal", `{"jobs": [
+  {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "schedule": "always", "stop": {"signal": "KILL"}}
+]}`, []string{"/jobs/0/stop/signal", "valid"}},
 		{"duplicate job names", `{"jobs": [
-  {"name": "repeat-job", "schedule": "0 1 * * *", "router_alias": "cordana/auto"},
-  {"name": "repeat-job", "schedule": "0 2 * * *", "router_alias": "cordana/auto"}
+  {"name": "repeat-job", "command": ["/bin/true"], "log_path": "/tmp/a.log", "schedule": "0 1 * * *", "router_alias": "cordana/auto"},
+  {"name": "repeat-job", "command": ["/bin/true"], "log_path": "/tmp/b.log", "schedule": "0 2 * * *", "router_alias": "cordana/auto"}
 ]}`, []string{"jobs/1/name", "duplicate"}},
 	}
 	for _, tt := range tests {
@@ -150,6 +167,21 @@ func TestConfigSchemaDefaultsAgreeWithGoTypes(t *testing.T) {
 	assertSchemaDefault(t, doc, def.Watches, "watches")
 }
 
+func TestLoadJobDefaults(t *testing.T) {
+	cfg, err := Load(testContext(t), writeConfig(t, `{"jobs": [{
+  "name": "daemon",
+  "command": ["/bin/true"],
+  "log_path": "/tmp/daemon.log"
+}]}`))
+	if err != nil {
+		t.Fatalf("Load() = %v, want nil", err)
+	}
+	job := cfg.Jobs[0]
+	if job.Schedule != "always" || job.RouterAlias != "cordana/auto" || job.Restart.Policy != "never" || job.Stop.Signal != "TERM" {
+		t.Fatalf("job defaults = %+v, want schedule, alias, restart and stop defaults", job)
+	}
+}
+
 func TestExampleConfigValidates(t *testing.T) {
 	path := filepath.Join("..", "..", "docs", "config.example.yaml")
 	if _, err := Load(testContext(t), path); err != nil {
@@ -199,8 +231,8 @@ func jsonInt(v int) string {
 func declarationsJSON(t *testing.T, jobs int, watches int) string {
 	t.Helper()
 	doc := map[string]any{
-		"jobs":    declarations("job", "schedule", jobs),
-		"watches": declarations("watch", "trigger", watches),
+		"jobs":    jobDeclarations(jobs),
+		"watches": watchDeclarations(watches),
 	}
 	body, err := json.Marshal(doc)
 	if err != nil {
@@ -209,12 +241,26 @@ func declarationsJSON(t *testing.T, jobs int, watches int) string {
 	return string(body)
 }
 
-func declarations(prefix string, field string, count int) []map[string]string {
-	out := make([]map[string]string, 0, count)
+func jobDeclarations(count int) []map[string]any {
+	out := make([]map[string]any, 0, count)
 	for i := 0; i < count; i++ {
-		out = append(out, map[string]string{
-			"name":         prefix + "-" + jsonInt(i),
-			field:          "event",
+		out = append(out, map[string]any{
+			"name":         "job-" + jsonInt(i),
+			"command":      []string{"/bin/true"},
+			"log_path":     "/tmp/job-" + jsonInt(i) + ".log",
+			"schedule":     "event",
+			"router_alias": defaultAlias,
+		})
+	}
+	return out
+}
+
+func watchDeclarations(count int) []map[string]any {
+	out := make([]map[string]any, 0, count)
+	for i := 0; i < count; i++ {
+		out = append(out, map[string]any{
+			"name":         "watch-" + jsonInt(i),
+			"trigger":      "event",
 			"router_alias": defaultAlias,
 		})
 	}

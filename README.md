@@ -39,6 +39,15 @@ go vet ./...
 go test -race ./...
 ```
 
+## CLI
+
+```bash
+tribunusctl sync [--sources=a,b] [--out=file]
+tribunusctl show [--in=file]
+tribunusctl jobs start|status|stop --config=file [name]
+tribunusctl jobs supervise --config=file [--poll-interval-seconds=1]
+```
+
 ## Documents
 
 - [Agent onboarding](docs/agent-onboarding.md)

@@ -30,6 +30,8 @@ jobs:
         - TRIBUNUS_JOB_TOKEN
       network: none
       memory_max: 2G
+      # Optional soft limit below memory_max: the job is throttled there before it is killed.
+      # memory_high: 1536M
       cpu_weight: 100
       tasks_max: 512
 watches:

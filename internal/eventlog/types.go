@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golusoris/golusoris/core/clock"
@@ -45,6 +46,10 @@ type Record struct {
 type State struct {
 	Tasks map[string]Task `json:"tasks"`
 	Jobs  map[string]Job  `json:"jobs,omitempty"`
+	Units map[string]Unit `json:"units,omitempty"`
+	// UnitRecordsIgnored counts well-formed unit records the reducer did not apply because
+	// they broke a rule a racing writer can break, such as moving a landed unit.
+	UnitRecordsIgnored int `json:"unit_records_ignored,omitempty"`
 }
 
 type Task struct {
@@ -64,6 +69,34 @@ type Job struct {
 	LastReason   string `json:"last_reason,omitempty"`
 	LastEvent    string `json:"last_event"`
 	Sandbox      string `json:"sandbox,omitempty"`
+}
+
+// UnitNote is one unread inbox note. Seq is the log sequence number of its record.
+type UnitNote struct {
+	Seq  uint64 `json:"seq"`
+	From string `json:"from"`
+	Text string `json:"text"`
+	At   string `json:"at"`
+}
+
+// Unit is one work unit of the run record. Lane, Target, ResolvedModel, Branch, Identity
+// and IdentityKey carry the names and meanings of Praetor's run identity, so both records
+// join without a mapping; Identity is stored as given and IdentityKey is never recomputed.
+type Unit struct {
+	ID            string          `json:"id"`
+	Status        string          `json:"status"`
+	Worktree      string          `json:"worktree,omitempty"`
+	Branch        string          `json:"branch,omitempty"`
+	PR            int             `json:"pr,omitempty"`
+	Lane          string          `json:"lane,omitempty"`
+	By            string          `json:"by,omitempty"`
+	Target        string          `json:"target,omitempty"`
+	ResolvedModel string          `json:"resolved_model,omitempty"`
+	Identity      json.RawMessage `json:"identity,omitempty"`
+	IdentityKey   string          `json:"identity_key,omitempty"`
+	UpdatedAt     string          `json:"updated_at,omitempty"`
+	Notes         []UnitNote      `json:"notes,omitempty"`
+	ReadUpto      uint64          `json:"read_upto,omitempty"`
 }
 
 type Reducer func(State, Record) (State, error)
@@ -98,9 +131,21 @@ func (s State) CanonicalJSON() ([]byte, error) {
 	return canonicalJSON(s)
 }
 
+func KnownDomain(eventType string) bool {
+	return strings.HasPrefix(eventType, "task.") ||
+		strings.HasPrefix(eventType, "job.") ||
+		strings.HasPrefix(eventType, "unit.")
+}
+
 func TaskReducer(st State, rec Record) (State, error) {
 	if st.Tasks == nil {
 		st.Tasks = map[string]Task{}
+	}
+	if !strings.HasPrefix(rec.Type, "task.") {
+		if KnownDomain(rec.Type) {
+			return st, nil
+		}
+		return State{}, fmt.Errorf("eventlog: seq %d: unknown event type %q", rec.Seq, rec.Type)
 	}
 	if rec.TaskID == "" {
 		return State{}, fmt.Errorf("eventlog: seq %d: task_id is required", rec.Seq)

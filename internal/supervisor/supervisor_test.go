@@ -858,18 +858,6 @@ func TestAdoptIfFreshStartOnlyAdoptsStartedEvent(t *testing.T) {
 	}
 }
 
-func TestTransientReplayErrorRecognizesHeadFailures(t *testing.T) {
-	cases := []string{
-		"eventlog: missing HEAD with last seq 1",
-		"eventlog: read /state/events/HEAD.json: no such file or directory",
-	}
-	for i := 0; i < len(cases); i++ {
-		if !transientReplayError(errors.New(cases[i])) {
-			t.Fatalf("transientReplayError(%q) = false, want true", cases[i])
-		}
-	}
-}
-
 func TestReplayStateReturnsContextWhenTransientRetryCanceled(t *testing.T) {
 	rt := testRuntime(t)
 	sup := testSupervisorAt(t, rt, testJob("daemon", []string{"/bin/true"}))

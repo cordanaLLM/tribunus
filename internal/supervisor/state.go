@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/cordanaLLM/tribunus/internal/config"
@@ -31,26 +30,7 @@ func (s *Supervisor) replayState(ctx context.Context) (eventlog.State, error) {
 		return eventlog.State{}, fmt.Errorf("supervisor: stat %s: %w", events, err)
 	}
 	limits := eventlog.Limits{Clock: s.clk, MaxReplayRecords: s.cfg.EventLog.MaxReplayRecords}
-	var last error
-	for i := 0; i < maxStatusPolls; i++ {
-		state, err := eventlog.Replay(ctx, s.cfg.EventLog.Dir, s.signer.PublicKey(), limits, JobReducer)
-		if err == nil || !transientReplayError(err) {
-			return state, err
-		}
-		last = err
-		if !sleepContext(ctx, 10*time.Millisecond) {
-			return eventlog.State{}, ctx.Err()
-		}
-	}
-	return eventlog.State{}, last
-}
-
-func transientReplayError(err error) bool {
-	text := err.Error()
-	if strings.Contains(text, "HEAD mismatch") || strings.Contains(text, "missing HEAD") {
-		return true
-	}
-	return strings.Contains(text, "HEAD.json") && strings.Contains(text, "no such file")
+	return eventlog.ReplayStable(ctx, s.cfg.EventLog.Dir, s.signer.PublicKey(), limits, JobReducer)
 }
 
 func JobReducer(st eventlog.State, rec eventlog.Record) (eventlog.State, error) {

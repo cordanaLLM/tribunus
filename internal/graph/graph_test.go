@@ -584,3 +584,40 @@ func requireEqualBytes(t *testing.T, got, want []byte) {
 		t.Fatalf("bytes differ:\n got %s\nwant %s", got, want)
 	}
 }
+
+// TestExportedStatusVocabulary pins the vocabulary other packages import: what is known,
+// what is terminal, and that the exported transition check is the table itself.
+func TestExportedStatusVocabulary(t *testing.T) {
+	for _, name := range []StatusName{StatusProposed, StatusReady, StatusClaimed, StatusImplementing, StatusReview, "fix-round-1", "fix-round-999", StatusBlocked, StatusQueued, StatusLanding, StatusLanded, StatusDropped} {
+		if !KnownStatus(name) {
+			t.Fatalf("KnownStatus(%q) = false, want true", name)
+		}
+	}
+	for _, name := range []StatusName{"", "verifying", "abandoned", StatusFixRound, "fix-round-0", "fix-round-1000", "fix-round-x"} {
+		if KnownStatus(name) {
+			t.Fatalf("KnownStatus(%q) = true, want false", name)
+		}
+	}
+	for _, name := range []StatusName{StatusLanded, StatusDropped} {
+		if !TerminalStatus(name) {
+			t.Fatalf("TerminalStatus(%q) = false, want true", name)
+		}
+	}
+	for _, name := range []StatusName{StatusProposed, StatusImplementing, StatusLanding, "fix-round-2", "unknown"} {
+		if TerminalStatus(name) {
+			t.Fatalf("TerminalStatus(%q) = true, want false", name)
+		}
+	}
+	allowed := [][2]StatusName{{StatusImplementing, StatusReview}, {StatusReview, "fix-round-1"}, {"fix-round-1", StatusReview}, {StatusLanding, StatusLanded}, {StatusBlocked, StatusImplementing}}
+	for _, pair := range allowed {
+		if err := AllowTransition(pair[0], pair[1]); err != nil {
+			t.Fatalf("AllowTransition(%q, %q) = %v, want nil", pair[0], pair[1], err)
+		}
+	}
+	refused := [][2]StatusName{{StatusLanded, StatusImplementing}, {StatusDropped, StatusReady}, {StatusImplementing, StatusLanded}, {StatusProposed, StatusLanding}, {StatusImplementing, "verifying"}, {"unknown", StatusReady}}
+	for _, pair := range refused {
+		if err := AllowTransition(pair[0], pair[1]); err == nil {
+			t.Fatalf("AllowTransition(%q, %q) = nil, want a refusal", pair[0], pair[1])
+		}
+	}
+}

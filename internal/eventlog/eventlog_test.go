@@ -437,3 +437,99 @@ func TestHeadHashMustMatchTail(t *testing.T) {
 	_, err := Replay(testContext(t), a, signer.PublicKey(), limits, TaskReducer)
 	assertErrContains(t, err, "HEAD mismatch", "hash mismatch")
 }
+
+func TestKnownDomain(t *testing.T) {
+	if !KnownDomain("task.created") || !KnownDomain("job.started") || !KnownDomain("unit.recorded") {
+		t.Fatalf("expected task, job, and unit domains to be known")
+	}
+	if KnownDomain("foo.bar") || KnownDomain("unknown.event") || KnownDomain("") {
+		t.Fatalf("expected unknown domains to be false")
+	}
+}
+
+func TestTaskReducerSharedLogReplay(t *testing.T) {
+	dir, signer, limits := testLog(t)
+	appendEvent(t, dir, signer, limits, Event{Type: "task.created", TaskID: "task-1", Payload: raw(`{"state":"open"}`)})
+	appendEvent(t, dir, signer, limits, Event{Type: "job.started", TaskID: "job-1", Payload: raw(`{"state":"running"}`)})
+	appendEvent(t, dir, signer, limits, Event{Type: "unit.recorded", TaskID: "cordanaLLM/tribunus#22", Payload: raw(`{"status":"implementing"}`)})
+	appendEvent(t, dir, signer, limits, Event{Type: "task.state_changed", TaskID: "task-1", Payload: raw(`{"state":"done"}`)})
+
+	st := replayTasks(t, dir, signer.PublicKey(), limits)
+	if st.Tasks["task-1"].State != "done" {
+		t.Fatalf("task-1 state = %s, want done", st.Tasks["task-1"].State)
+	}
+
+	appendEvent(t, dir, signer, limits, Event{Type: "foo.bar", TaskID: "foo-1", Payload: raw(`{}`)})
+	_, err := Replay(testContext(t), dir, signer.PublicKey(), limits, TaskReducer)
+	assertErrContains(t, err, "seq 5", "unknown event type \"foo.bar\"")
+}
+
+func TestTransientReplayErrorRecognizesHeadFailures(t *testing.T) {
+	for _, text := range []string{
+		"eventlog: missing HEAD with last seq 1",
+		"eventlog: HEAD mismatch at seq 3",
+		"eventlog: read /state/events/HEAD.json: no such file or directory",
+	} {
+		if !transientReplayError(errors.New(text)) {
+			t.Fatalf("transientReplayError(%q) = false, want true", text)
+		}
+	}
+	if transientReplayError(errors.New("eventlog: seq 2: signature does not verify")) {
+		t.Fatal("transientReplayError(bad signature) = true, want false: only a HEAD race is worth a retry")
+	}
+}
+
+// TestReplayStableWaitsOutAnAppendInFlight: a replay that lands between an append's record
+// and its HEAD write succeeds once HEAD is there.
+func TestReplayStableWaitsOutAnAppendInFlight(t *testing.T) {
+	dir, signer, limits := testLog(t)
+	appendEvent(t, dir, signer, limits, Event{Type: "task.created", TaskID: "task-1", Payload: raw(`{"state":"open"}`)})
+	head := filepath.Join(dir, "events", "HEAD.json")
+	body, err := os.ReadFile(head)
+	if err != nil {
+		t.Fatalf("ReadFile(HEAD) = %v, want nil", err)
+	}
+	if err = os.Remove(head); err != nil {
+		t.Fatalf("Remove(HEAD) = %v, want nil", err)
+	}
+	if _, err = Replay(testContext(t), dir, signer.PublicKey(), limits, TaskReducer); err == nil {
+		t.Fatal("Replay(no HEAD) = nil, want the failure ReplayStable retries")
+	}
+	restored := make(chan error, 1)
+	go func() {
+		time.Sleep(60 * time.Millisecond)
+		restored <- os.WriteFile(head, body, 0o600)
+	}()
+	st, err := ReplayStable(testContext(t), dir, signer.PublicKey(), limits, TaskReducer)
+	if writeErr := <-restored; writeErr != nil {
+		t.Fatalf("restore HEAD = %v, want nil", writeErr)
+	}
+	if err != nil || len(st.Tasks) != 1 {
+		t.Fatalf("ReplayStable(HEAD restored after 60ms) = %d tasks, %v, want 1, nil", len(st.Tasks), err)
+	}
+}
+
+func TestReplayStableBoundsItsRetriesAndSkipsThemForOtherErrors(t *testing.T) {
+	dir, signer, limits := testLog(t)
+	appendEvent(t, dir, signer, limits, Event{Type: "foo.bar", TaskID: "x", Payload: raw(`{}`)})
+	began := time.Now()
+	if _, err := ReplayStable(testContext(t), dir, signer.PublicKey(), limits, TaskReducer); err == nil || !strings.Contains(err.Error(), "unknown event type") {
+		t.Fatalf("ReplayStable(unknown type) = %v, want that error", err)
+	}
+	if took := time.Since(began); took > 500*time.Millisecond {
+		t.Fatalf("ReplayStable took %v on an error no retry can fix, want it returned at once", took)
+	}
+	valid, validSigner, validLimits := testLog(t)
+	appendEvent(t, valid, validSigner, validLimits, Event{Type: "task.created", TaskID: "task-1", Payload: raw(`{"state":"open"}`)})
+	if err := os.Remove(filepath.Join(valid, "events", "HEAD.json")); err != nil {
+		t.Fatalf("Remove(HEAD) = %v, want nil", err)
+	}
+	began = time.Now()
+	_, err := ReplayStable(testContext(t), valid, validSigner.PublicKey(), validLimits, TaskReducer)
+	if err == nil || !strings.Contains(err.Error(), "HEAD") {
+		t.Fatalf("ReplayStable(HEAD gone for good) = %v, want the HEAD error", err)
+	}
+	if took := time.Since(began); took < 500*time.Millisecond || took > 5*time.Second {
+		t.Fatalf("ReplayStable gave up after %v, want about a second of retries", took)
+	}
+}

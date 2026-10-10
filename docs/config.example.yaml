@@ -1,0 +1,23 @@
+graph:
+  max_depth: 12
+budgets:
+  default:
+    tokens: 200000
+    wall_clock_seconds: 3600
+jobs:
+  - name: daily-catalog-sync
+    schedule: "0 2 * * *"
+    router_alias: cordana/auto
+watches:
+  - name: catalog-source-change
+    trigger: git:internal/sources
+    router_alias: cordana/auto
+router:
+  aliases:
+    - cordana/auto
+    - cordana/coding
+admission:
+  probe:
+    timeout_seconds: 30
+    interval_seconds: 5
+    ready_threshold: 2

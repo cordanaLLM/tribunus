@@ -26,7 +26,7 @@ func TestLoadPositiveFullFile(t *testing.T) {
     "max_runtime_seconds": 1800,
     "restart": {"policy": "on-failure", "max_restarts": 3, "backoff_seconds": 2},
     "stop": {"signal": "TERM", "grace_seconds": 5},
-    "sandbox": {"mode": "enforce", "workspace": "/var/tmp", "network": "none", "memory_max": "2G", "cpu_weight": 100, "tasks_max": 512}
+    "sandbox": {"mode": "enforce", "workspace": "/var/tmp", "network": "none", "memory_max": "2G", "memory_high": "1536M", "cpu_weight": 100, "tasks_max": 512}
   }],
   "watches": [{"name": "catalog-source-change", "trigger": "git:internal/sources", "router_alias": "cordana/coding"}],
   "router": {"aliases": ["cordana/auto", "cordana/coding"]},
@@ -50,6 +50,9 @@ func TestLoadPositiveFullFile(t *testing.T) {
 	}
 	if cfg.Jobs[0].Command[1] != "catalog" || cfg.Jobs[0].Restart.Policy != "on-failure" {
 		t.Fatalf("Load() jobs = %+v, want command and restart policy", cfg.Jobs)
+	}
+	if cfg.Jobs[0].Sandbox.MemoryHigh != "1536M" {
+		t.Fatalf("Load() jobs[0].sandbox.memory_high = %q, want 1536M", cfg.Jobs[0].Sandbox.MemoryHigh)
 	}
 	if cfg.Jobs[0].MaxRuntimeSeconds != 1800 {
 		t.Fatalf("Load() jobs[0].max_runtime_seconds = %d, want 1800", cfg.Jobs[0].MaxRuntimeSeconds)
@@ -94,6 +97,9 @@ func TestLoadNegativeValidation(t *testing.T) {
 		{"negative job runtime", `{"jobs": [
   {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "max_runtime_seconds": -1, "sandbox": {"mode": "off", "reason": "test"}}
 ]}`, []string{"/jobs/0/max_runtime_seconds", "minimum"}},
+		{"bad job soft memory limit", `{"jobs": [
+  {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "sandbox": {"mode": "off", "reason": "legacy", "memory_high": "lots"}}
+]}`, []string{"/jobs/0/sandbox/memory_high", "pattern"}},
 		{"bad job sandbox mode", `{"jobs": [
   {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "sandbox": {"mode": "maybe"}}
 ]}`, []string{"/jobs/0/sandbox/mode", "valid"}},
@@ -203,6 +209,9 @@ func TestLoadJobDefaults(t *testing.T) {
 	}
 	if job.Sandbox.Mode != "enforce" || job.Sandbox.Network != "none" || job.Sandbox.MemoryMax != "2G" {
 		t.Fatalf("sandbox defaults = %+v, want enforce none 2G", job.Sandbox)
+	}
+	if job.Sandbox.MemoryHigh != "" {
+		t.Fatalf("memory_high default = %q, want none", job.Sandbox.MemoryHigh)
 	}
 	if job.MaxRuntimeSeconds != 0 {
 		t.Fatalf("max_runtime_seconds default = %d, want 0: no deadline of its own", job.MaxRuntimeSeconds)
@@ -437,6 +446,14 @@ func TestValidateSandboxRules(t *testing.T) {
 		{"memory above ceiling", func(s *SandboxConfig) { s.MemoryMax = "65537M" }, "memory_max: must be 64M..64G"},
 		{"memory wraps int64", func(s *SandboxConfig) { s.MemoryMax = "17179869189G" }, "memory_max: is too large"},
 		{"memory not a size", func(s *SandboxConfig) { s.MemoryMax = "2X" }, "memory_max: must be positive"},
+		{"no soft limit", func(s *SandboxConfig) { s.MemoryHigh = "" }, ""},
+		{"soft limit below the hard one", func(s *SandboxConfig) { s.MemoryHigh = "1536M" }, ""},
+		{"soft limit equal to the hard one", func(s *SandboxConfig) { s.MemoryHigh = "2G" }, ""},
+		{"soft limit one byte above the hard one", func(s *SandboxConfig) { s.MemoryHigh = "2147483649" }, "memory_high: must be 64M..memory_max"},
+		{"soft limit at floor", func(s *SandboxConfig) { s.MemoryHigh = "64M" }, ""},
+		{"soft limit below floor", func(s *SandboxConfig) { s.MemoryHigh = "65535K" }, "memory_high: must be 64M..memory_max"},
+		{"soft limit not a size", func(s *SandboxConfig) { s.MemoryHigh = "1.5G" }, "memory_high: must be positive"},
+		{"soft limit wraps int64", func(s *SandboxConfig) { s.MemoryHigh = "17179869189G" }, "memory_high: is too large"},
 		{"cpu at floor", func(s *SandboxConfig) { s.CPUWeight = 1 }, ""},
 		{"cpu below floor", func(s *SandboxConfig) { s.CPUWeight = -1 }, "cpu_weight"},
 		{"cpu at ceiling", func(s *SandboxConfig) { s.CPUWeight = 10000 }, ""},

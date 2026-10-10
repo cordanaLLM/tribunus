@@ -251,13 +251,19 @@ func pathOverlapsSandbox(a string, b string) bool {
 }
 
 func systemdRunArgs(path string, scope string, sandbox config.SandboxConfig) []string {
-	return []string{
+	args := []string{
 		path, "--user", "--scope", "--quiet", "--collect", "--unit=" + scope,
 		"-p", "MemoryMax=" + sandbox.MemoryMax,
-		"-p", "CPUWeight=" + strconv.Itoa(sandbox.CPUWeight),
-		"-p", "TasksMax=" + strconv.Itoa(sandbox.TasksMax),
-		"--",
 	}
+	// The soft limit is optional: without it systemd leaves MemoryHigh at "infinity".
+	if sandbox.MemoryHigh != "" {
+		args = append(args, "-p", "MemoryHigh="+sandbox.MemoryHigh)
+	}
+	return append(args,
+		"-p", "CPUWeight="+strconv.Itoa(sandbox.CPUWeight),
+		"-p", "TasksMax="+strconv.Itoa(sandbox.TasksMax),
+		"--",
+	)
 }
 
 // pastaArgs gives the job egress without the host's loopback: every port forward off

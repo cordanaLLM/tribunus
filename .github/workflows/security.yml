@@ -1,6 +1,9 @@
 ---
 name: Security Scan
 
+# Pull requests run govulncheck and gosec in ci.yml's required go job; this
+# workflow repeats them nightly and on main, where a newly published advisory
+# can fail unchanged code.
 'on':
   schedule:
     - cron: '0 4 * * *'
@@ -15,11 +18,13 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: 'go.mod'
-          # See ci.yml: setup-go's cache key carries no job name, so every job
-          # in the repository would share one build cache entry.
+          # setup-go's cache key carries no job name, so every job in the
+          # repository would share one build cache entry; this job keeps its own.
           cache: false
 
       # A cache key joins the runner, the go.sum hash and, for the build cache,
@@ -46,11 +51,12 @@ jobs:
             gobuild-${{ runner.os }}-${{ runner.arch }}-vulncheck-
       # yamllint enable rule:line-length
 
-      - name: Install Tools
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
-          go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0
-      - name: Run govulncheck
-        run: govulncheck ./...
+      # The scanners come from tools/go/go.mod at pinned versions. govulncheck
+      # runs through praetorctl so security/vex/go.openvex.json is honoured,
+      # the same verdict the pre-push gate reaches.
+      - name: Run govulncheck (VEX-aware)
+        run: >-
+          go tool -modfile=tools/go/go.mod standardsctl security govuln --path=.
+          -- go tool -modfile=tools/go/go.mod govulncheck
       - name: Run gosec
-        run: gosec -conf .gosec.json ./...
+        run: go tool -modfile=tools/go/go.mod gosec -conf .gosec.json ./...

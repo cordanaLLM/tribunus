@@ -39,19 +39,29 @@ go vet ./...
 go test -race ./...
 ```
 
-## CLI
+## CLI usage
 
 ```bash
 tribunusctl sync [--sources=a,b] [--out=file]
 tribunusctl show [--in=file]
+tribunusctl schema
+tribunusctl version
 tribunusctl jobs start|status|stop --config=file [name]
 tribunusctl jobs supervise --config=file [--poll-interval-seconds=1]
 ```
+
+`tribunusctl sync` writes a versioned catalog snapshot with `schema_version: 1`.
+The contract is described by `catalog/snapshot.schema.json`, and
+`tribunusctl schema` prints the embedded copy for downstream pin checks.
+`tribunusctl version` prints the release version, or `dev` for a source build.
+Releases, their signed artefacts and how to verify them are described in [Releasing](docs/releasing.md).
 
 ## Documents
 
 - [Agent onboarding](docs/agent-onboarding.md)
 - [Roadmap](docs/roadmap.md)
+- [Catalog data sync](docs/data-sync.md): installing `tribunusctl`, the sources and their limits
+- [Releasing](docs/releasing.md)
 - [Architecture](docs/architecture-v2.md)
 - [Repository layout](docs/repository-layout-v2.md)
 - [Description](docs/tribunus-description-v2.md)

@@ -5,6 +5,7 @@ go 1.27.2
 require (
 	github.com/golusoris/golusoris v0.13.0
 	github.com/golusoris/golusoris/core v0.10.0
+	github.com/jonboulle/clockwork v0.5.0
 	golang.org/x/sys v0.48.0
 )
 
@@ -25,7 +26,6 @@ require (
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.8 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
-	github.com/jonboulle/clockwork v0.5.0 // indirect
 	github.com/knadh/koanf/maps v0.1.3 // indirect
 	github.com/knadh/koanf/parsers/json v1.0.1 // indirect
 	github.com/knadh/koanf/parsers/yaml v1.1.1 // indirect

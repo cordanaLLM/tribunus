@@ -44,12 +44,25 @@ type Record struct {
 
 type State struct {
 	Tasks map[string]Task `json:"tasks"`
+	Jobs  map[string]Job  `json:"jobs,omitempty"`
 }
 
 type Task struct {
 	ID      string          `json:"id"`
 	State   string          `json:"state"`
 	Payload json.RawMessage `json:"payload"`
+}
+
+type Job struct {
+	Name         string `json:"name"`
+	State        string `json:"state"`
+	PID          int    `json:"pid,omitempty"`
+	ShimPID      int    `json:"shim_pid,omitempty"`
+	Since        string `json:"since,omitempty"`
+	Restarts     int    `json:"restarts"`
+	LastExitCode *int   `json:"last_exit_code,omitempty"`
+	LastReason   string `json:"last_reason,omitempty"`
+	LastEvent    string `json:"last_event"`
 }
 
 type Reducer func(State, Record) (State, error)

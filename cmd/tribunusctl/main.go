@@ -20,8 +20,12 @@ func main() {
 
 	var err error
 	switch os.Args[1] {
+	case "__job-shim":
+		os.Exit(runJobShim(os.Args[1:]))
 	case "sync":
 		err = runSync(os.Args[2:])
+	case "jobs":
+		err = runJobs(os.Args[2:])
 	case "show":
 		err = runShow(os.Args[2:])
 	case "schema":
@@ -50,6 +54,7 @@ func printUsage() {
 	fmt.Println("  tribunusctl show [--in=file]")
 	fmt.Println("  tribunusctl schema")
 	fmt.Println("  tribunusctl version")
+	fmt.Println("  tribunusctl jobs start|status|stop|supervise --config=file [name]")
 }
 
 func printVersion() {

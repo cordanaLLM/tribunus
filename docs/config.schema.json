@@ -63,8 +63,8 @@
         "additionalProperties": false,
         "required": [
           "name",
-          "schedule",
-          "router_alias"
+          "command",
+          "log_path"
         ],
         "properties": {
           "name": {
@@ -72,16 +72,90 @@
             "default": "",
             "pattern": "^[a-z][a-z0-9-]{0,62}$"
           },
-          "schedule": {
+          "command": {
+            "type": "array",
+            "default": [],
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          },
+          "log_path": {
             "type": "string",
             "default": "",
             "minLength": 1,
+            "maxLength": 4096
+          },
+          "schedule": {
+            "type": "string",
+            "default": "always",
+            "minLength": 0,
             "maxLength": 120
           },
           "router_alias": {
             "type": "string",
             "default": "cordana/auto",
             "pattern": "^cordana/[a-z][a-z0-9-]*$"
+          },
+          "restart": {
+            "type": "object",
+            "default": {
+              "policy": "never",
+              "max_restarts": 0,
+              "backoff_seconds": 0
+            },
+            "additionalProperties": false,
+            "properties": {
+              "policy": {
+                "type": "string",
+                "default": "never",
+                "enum": [
+                  "never",
+                  "on-failure",
+                  "always"
+                ]
+              },
+              "max_restarts": {
+                "type": "integer",
+                "default": 0,
+                "minimum": 0,
+                "maximum": 32
+              },
+              "backoff_seconds": {
+                "type": "integer",
+                "default": 0,
+                "minimum": 0,
+                "maximum": 3600
+              }
+            }
+          },
+          "stop": {
+            "type": "object",
+            "default": {
+              "signal": "TERM",
+              "grace_seconds": 0
+            },
+            "additionalProperties": false,
+            "properties": {
+              "signal": {
+                "type": "string",
+                "default": "TERM",
+                "enum": [
+                  "TERM",
+                  "INT",
+                  "HUP"
+                ]
+              },
+              "grace_seconds": {
+                "type": "integer",
+                "default": 0,
+                "minimum": 0,
+                "maximum": 300
+              }
+            }
           }
         }
       }

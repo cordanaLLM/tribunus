@@ -41,6 +41,15 @@ go test -race ./...
 
 ## CLI usage
 
+```bash
+tribunusctl sync [--sources=a,b] [--out=file]
+tribunusctl show [--in=file]
+tribunusctl schema
+tribunusctl version
+tribunusctl jobs start|status|stop --config=file [name]
+tribunusctl jobs supervise --config=file [--poll-interval-seconds=1]
+```
+
 `tribunusctl sync` writes a versioned catalog snapshot with `schema_version: 1`.
 The contract is described by `catalog/snapshot.schema.json`, and
 `tribunusctl schema` prints the embedded copy for downstream pin checks.

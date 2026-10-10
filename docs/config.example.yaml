@@ -6,8 +6,19 @@ budgets:
     wall_clock_seconds: 3600
 jobs:
   - name: daily-catalog-sync
+    command:
+      - /usr/local/bin/tribunusctl
+      - sync
+    log_path: /var/log/tribunus/daily-catalog-sync.log
     schedule: "0 2 * * *"
     router_alias: cordana/auto
+    restart:
+      policy: on-failure
+      max_restarts: 3
+      backoff_seconds: 5
+    stop:
+      signal: TERM
+      grace_seconds: 10
 watches:
   - name: catalog-source-change
     trigger: git:internal/sources

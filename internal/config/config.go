@@ -15,9 +15,13 @@ import (
 const (
 	MaxGraphDepth       = 64
 	MaxJobs             = 64
+	MaxJobArgs          = 32
 	MaxWatches          = 64
 	MaxRouterAliases    = 32
 	MaxReplayRecords    = 1000000
+	MaxJobRestarts      = 32
+	MaxRestartBackoff   = 3600
+	MaxStopGraceSeconds = 300
 	maxConfigKeyDepth   = 8
 	disabledEnvPrefix   = "\x00TRIBUNUS_CONFIG_ENV_DISABLED_"
 	schemaResourceID    = "config.schema.json"
@@ -31,6 +35,9 @@ const (
 	defaultEventLogDir  = ".tribunus"
 	defaultLockSeconds  = 5
 	defaultReplayMax    = 100000
+	defaultJobSchedule  = "always"
+	defaultRestart      = "never"
+	defaultStopSignal   = "TERM"
 )
 
 //go:embed config.schema.json
@@ -62,9 +69,24 @@ type TaskBudget struct {
 }
 
 type JobConfig struct {
-	Name        string `koanf:"name" json:"name"`
-	Schedule    string `koanf:"schedule" json:"schedule"`
-	RouterAlias string `koanf:"router_alias" json:"router_alias"`
+	Name        string           `koanf:"name" json:"name"`
+	Command     []string         `koanf:"command" json:"command"`
+	LogPath     string           `koanf:"log_path" json:"log_path"`
+	Schedule    string           `koanf:"schedule" json:"schedule"`
+	RouterAlias string           `koanf:"router_alias" json:"router_alias"`
+	Restart     JobRestartConfig `koanf:"restart" json:"restart"`
+	Stop        JobStopConfig    `koanf:"stop" json:"stop"`
+}
+
+type JobRestartConfig struct {
+	Policy         string `koanf:"policy" json:"policy"`
+	MaxRestarts    int    `koanf:"max_restarts" json:"max_restarts"`
+	BackoffSeconds int    `koanf:"backoff_seconds" json:"backoff_seconds"`
+}
+
+type JobStopConfig struct {
+	Signal       string `koanf:"signal" json:"signal"`
+	GraceSeconds int    `koanf:"grace_seconds" json:"grace_seconds"`
 }
 
 type WatchConfig struct {
@@ -159,10 +181,28 @@ func Load(ctx context.Context, path string) (Config, error) {
 	if err = loaded.Unmarshal("", &cfg); err != nil {
 		return Config{}, err
 	}
+	applyJobDefaults(cfg.Jobs)
 	if err = validateNames(cfg); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+func applyJobDefaults(jobs []JobConfig) {
+	for i := 0; i < len(jobs); i++ {
+		if jobs[i].Schedule == "" {
+			jobs[i].Schedule = defaultJobSchedule
+		}
+		if jobs[i].RouterAlias == "" {
+			jobs[i].RouterAlias = defaultAlias
+		}
+		if jobs[i].Restart.Policy == "" {
+			jobs[i].Restart.Policy = defaultRestart
+		}
+		if jobs[i].Stop.Signal == "" {
+			jobs[i].Stop.Signal = defaultStopSignal
+		}
+	}
 }
 
 func readyContext(ctx context.Context) error {

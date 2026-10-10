@@ -22,7 +22,10 @@ const (
 	defaultPollInterval = time.Second
 	maxJobRuntime       = 365 * 24 * time.Hour
 	maxStatusPolls      = 100
-	maxSuperviseTicks   = 1 << 30
+	// A start is awaited for 15 s (10 ms apart), longer than the shim may wait for the
+	// job's scope, so a slow start is never reported as failed while it can still succeed.
+	maxStartPolls     = 1500
+	maxSuperviseTicks = 1 << 30
 )
 
 var (
@@ -245,23 +248,39 @@ func (s *Supervisor) Reconcile(ctx context.Context) error {
 
 // waitStarted waits until the event log records a start by the shim just spawned. It
 // does not require the job to still be running: a job that started and already exited
-// did start, and polling for "running" would miss it between two polls.
+// did start, and polling for "running" would miss it between two polls. A shim that has
+// exited records nothing more, so the wait ends one replay after it is seen gone.
 func (s *Supervisor) waitStarted(ctx context.Context, name string, before eventlog.Job, shimPID int) error {
 	var lastErr error
-	for i := 0; i < maxStatusPolls; i++ {
+	shimGone := false
+	for i := 0; i < maxStartPolls; i++ {
 		state, err := s.replayState(ctx)
 		if err == nil && startedBy(state.Jobs[name], before, shimPID) {
 			return nil
 		}
 		lastErr = err
-		if !sleepContext(ctx, 10*time.Millisecond) {
+		if shimGone {
+			break
+		}
+		shimGone = shimExited(shimPID)
+		if !shimGone && !sleepContext(ctx, 10*time.Millisecond) {
 			return ctx.Err()
 		}
 	}
 	if lastErr != nil {
 		return fmt.Errorf("supervisor: %s did not start: %w", name, lastErr)
 	}
+	if shimGone {
+		return fmt.Errorf("supervisor: %s did not start: its shim exited without recording a start; a refused job's log names the reason", name)
+	}
 	return fmt.Errorf("supervisor: %s did not start", name)
+}
+
+// shimExited reports whether the shim has exited. A shim whose state cannot be read is
+// taken as alive; the caller's poll bound still holds.
+func shimExited(pid int) bool {
+	gone, err := processGone(pid)
+	return err == nil && gone
 }
 
 // startedBy reports whether job holds a start by shimPID recorded after before was read.

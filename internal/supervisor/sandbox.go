@@ -57,10 +57,12 @@ func sandboxFlagArgs(sandbox config.SandboxConfig) []string {
 // jobCommand is the argv and environment the shim execs. Env nil means the shim's own
 // environment is inherited (mode=off). A sandboxed job gets an explicit, minimal Env so
 // that no secret travels on a command line, where /proc/<pid>/cmdline would show it, and
-// nothing outside the allowlist reaches the job.
+// nothing outside the allowlist reaches the job. Scope is the systemd scope unit the job
+// must be found in before its start is recorded; empty means the job runs in none.
 type jobCommand struct {
-	Argv []string
-	Env  []string
+	Argv  []string
+	Env   []string
+	Scope string
 }
 
 func buildJobCommand(command []string, sandbox config.SandboxConfig, opts sandboxBuildOptions) (jobCommand, error) {

@@ -17,8 +17,8 @@
     {
       "id": "litellm-price-map",
       "url_template": "https://raw.githubusercontent.com/BerriAI/litellm/{revision}/model_prices_and_context_window.json",
-      "pinned_revision": "a3236ba9479e32ee914d43f12082f4423403e3ca",
-      "full_document_sha256": "116410f2c0151cb748e3203b3b0f8fbc52a30482a820389bfc26b2d06f3e2753",
+      "pinned_revision": "fff86d637686c674d85cdcc42e2c728cde1cb1cf",
+      "full_document_sha256": "9b9730f20c7b93348e591a38babae478fc6671353cd67eae3c6457b78e8cf48d",
       "spdx_license": "MIT",
       "copyright_holder": "Berri AI",
       "fragments": [
@@ -47,7 +47,7 @@
     {
       "id": "ollama-api",
       "url_template": "https://raw.githubusercontent.com/ollama/ollama/{revision}/docs/api.md",
-      "pinned_revision": "c2b7368d4156656ddb9a23b43f721a841b9c23e0",
+      "pinned_revision": "eab97e9f92b9a25c2d52d2cc6c1b1c99bd9fae21",
       "full_document_sha256": "96db03080e385dbabf5d70e75f298d41b75983bc30975cae56f7119f848dd0f5",
       "spdx_license": "MIT",
       "copyright_holder": "Ollama",
@@ -61,7 +61,7 @@
     {
       "id": "codex-rate-limit-status-payload",
       "url_template": "https://raw.githubusercontent.com/openai/codex/{revision}/codex-rs/codex-backend-openapi-models/src/models/rate_limit_status_payload.rs",
-      "pinned_revision": "2351d9e1b608e6f9d9a3699b71d7eb39ee41cfa4",
+      "pinned_revision": "52950c592404f11cc245a83a27fb02f2c23bc0c1",
       "full_document_sha256": "4b44735986720667483a00e59c3cd63da6c3ad488fc0d99df33dd14fbbdd8849",
       "spdx_license": "Apache-2.0",
       "copyright_holder": "OpenAI",
@@ -75,7 +75,7 @@
     {
       "id": "codex-rate-limit-status-details",
       "url_template": "https://raw.githubusercontent.com/openai/codex/{revision}/codex-rs/codex-backend-openapi-models/src/models/rate_limit_status_details.rs",
-      "pinned_revision": "2351d9e1b608e6f9d9a3699b71d7eb39ee41cfa4",
+      "pinned_revision": "52950c592404f11cc245a83a27fb02f2c23bc0c1",
       "full_document_sha256": "38935bb0f24cbb60bb9def3426fdd44bdec75dee92d8c0396698e851f122c00a",
       "spdx_license": "Apache-2.0",
       "copyright_holder": "OpenAI",
@@ -89,7 +89,7 @@
     {
       "id": "codex-rate-limit-window-snapshot",
       "url_template": "https://raw.githubusercontent.com/openai/codex/{revision}/codex-rs/codex-backend-openapi-models/src/models/rate_limit_window_snapshot.rs",
-      "pinned_revision": "2351d9e1b608e6f9d9a3699b71d7eb39ee41cfa4",
+      "pinned_revision": "52950c592404f11cc245a83a27fb02f2c23bc0c1",
       "full_document_sha256": "f667756c00e512c779cb0f593737094b1292990494624492f0c0bb48dcd6918b",
       "spdx_license": "Apache-2.0",
       "copyright_holder": "OpenAI",

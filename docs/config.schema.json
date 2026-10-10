@@ -378,6 +378,138 @@
           "maximum": 1000000
         }
       }
+    },
+    "release_watch": {
+      "type": "object",
+      "default": {
+        "state_dir": "",
+        "rate_limit_floor": 100,
+        "max_actions_per_run": 12,
+        "per_source_cap": 3,
+        "routes": []
+      },
+      "additionalProperties": false,
+      "properties": {
+        "state_dir": {
+          "type": "string",
+          "default": "",
+          "maxLength": 4096
+        },
+        "rate_limit_floor": {
+          "type": "integer",
+          "default": 100,
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "max_actions_per_run": {
+          "type": "integer",
+          "default": 12,
+          "minimum": 1,
+          "maximum": 100
+        },
+        "per_source_cap": {
+          "type": "integer",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 20
+        },
+        "routes": {
+          "type": "array",
+          "default": [],
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "sources",
+              "sinks"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "default": "",
+                "pattern": "^[a-z][a-z0-9-]{0,62}$"
+              },
+              "sources": {
+                "type": "array",
+                "default": [],
+                "minItems": 1,
+                "maxItems": 16,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "github": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+                    },
+                    "huggingface_org": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_.-]+$"
+                    }
+                  }
+                }
+              },
+              "sinks": {
+                "type": "array",
+                "default": [],
+                "minItems": 1,
+                "maxItems": 4,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "github_issue": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "repo"
+                      ],
+                      "properties": {
+                        "repo": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+                        },
+                        "labels": {
+                          "type": "array",
+                          "default": [],
+                          "maxItems": 8,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          }
+                        }
+                      }
+                    },
+                    "ntfy": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "topic"
+                      ],
+                      "properties": {
+                        "topic": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9_.-]+$"
+                        },
+                        "priority": {
+                          "type": "integer",
+                          "default": 3,
+                          "minimum": 1,
+                          "maximum": 5
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }
+

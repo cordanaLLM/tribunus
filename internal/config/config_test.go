@@ -531,3 +531,158 @@ func TestLoadSandboxFailsClosedWithoutExecutable(t *testing.T) {
 		t.Fatalf("Load(no executable path) = %v, want fail-closed error", err)
 	}
 }
+
+func TestReleaseWatchPositive(t *testing.T) {
+	body := `{
+		"release_watch": {
+			"state_dir": "/var/tmp/tribunus",
+			"rate_limit_floor": 150,
+			"max_actions_per_run": 25,
+			"per_source_cap": 5,
+			"routes": [{
+				"name": "route-one",
+				"sources": [
+					{"github": "test-org/test-upstream"},
+					{"huggingface_org": "TestHFOrg"}
+				],
+				"sinks": [
+					{"github_issue": {"repo": "test-org/test-consumer", "labels": ["bug", "release"]}},
+					{"ntfy": {"topic": "my-topic", "priority": 4}}
+				]
+			}]
+		}
+	}`
+	cfg, err := Load(testContext(t), writeConfig(t, body))
+	if err != nil {
+		t.Fatalf("Load() = %v, want nil", err)
+	}
+	rw := cfg.ReleaseWatch
+	if rw.StateDir != "/var/tmp/tribunus" || rw.RateLimitFloor != 150 || rw.MaxActionsPerRun != 25 || rw.PerSourceCap != 5 {
+		t.Fatalf("ReleaseWatch = %+v, want configured values", rw)
+	}
+	if len(rw.Routes) != 1 || rw.Routes[0].Name != "route-one" {
+		t.Fatalf("Routes = %+v, want route-one", rw.Routes)
+	}
+	if len(rw.Routes[0].Sources) != 2 || len(rw.Routes[0].Sinks) != 2 {
+		t.Fatalf("Route sources/sinks len mismatch: %+v", rw.Routes[0])
+	}
+}
+
+func TestReleaseWatchNegative(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{
+			name:    "route with empty sinks",
+			body:    `{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "route-a", "sources": [{"github": "owner/repo"}], "sinks": []}]}}`,
+			wantErr: "sinks",
+		},
+		{
+			name:    "github_issue without repo",
+			body:    `{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "route-a", "sources": [{"github": "owner/repo"}], "sinks": [{"github_issue": {"repo": ""}}]}]}}`,
+			wantErr: "repo",
+		},
+		{
+			name:    "repo not owner/name",
+			body:    `{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "route-a", "sources": [{"github": "owner/repo"}], "sinks": [{"github_issue": {"repo": "no-slash-here"}}]}]}}`,
+			wantErr: "pattern",
+		},
+		{
+			name:    "sink repo of dot segments",
+			body:    `{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "route-a", "sources": [{"github": "owner/repo"}], "sinks": [{"github_issue": {"repo": "../.."}}]}]}}`,
+			wantErr: "invalid repository",
+		},
+		{
+			name:    "source repo name ..",
+			body:    `{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "route-a", "sources": [{"github": "owner/.."}], "sinks": [{"github_issue": {"repo": "owner/consumer"}}]}]}}`,
+			wantErr: "invalid repository",
+		},
+		{
+			name:    "source owner .",
+			body:    `{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "route-a", "sources": [{"github": "./repo"}], "sinks": [{"github_issue": {"repo": "owner/consumer"}}]}]}}`,
+			wantErr: "invalid repository",
+		},
+		{
+			name:    "huggingface org ..",
+			body:    `{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "route-a", "sources": [{"huggingface_org": ".."}], "sinks": [{"github_issue": {"repo": "owner/consumer"}}]}]}}`,
+			wantErr: "invalid org",
+		},
+		{
+			name:    "source with zero kinds",
+			body:    `{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "route-a", "sources": [{}], "sinks": [{"github_issue": {"repo": "owner/consumer"}}]}]}}`,
+			wantErr: "exactly one of github or huggingface_org",
+		},
+		{
+			name:    "source with two kinds",
+			body:    `{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "route-a", "sources": [{"github": "owner/repo", "huggingface_org": "SomeOrg"}], "sinks": [{"github_issue": {"repo": "owner/consumer"}}]}]}}`,
+			wantErr: "exactly one of github or huggingface_org",
+		},
+		{
+			name: "duplicate route names",
+			body: `{"release_watch": {"state_dir": "/tmp", "routes": [
+				{"name": "route-dup", "sources": [{"github": "owner/repo"}], "sinks": [{"github_issue": {"repo": "owner/consumer"}}]},
+				{"name": "route-dup", "sources": [{"github": "owner/other"}], "sinks": [{"github_issue": {"repo": "owner/consumer"}}]}
+			]}}`,
+			wantErr: "duplicate route name",
+		},
+		{
+			name:    "state_dir relative when routes non-empty",
+			body:    `{"release_watch": {"state_dir": "relative/state", "routes": [{"name": "route-a", "sources": [{"github": "owner/repo"}], "sinks": [{"github_issue": {"repo": "owner/consumer"}}]}]}}`,
+			wantErr: "state_dir",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(testContext(t), writeConfig(t, tc.body))
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Load(%s) = %v, want error containing %q", tc.name, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestReleaseWatchBoundaryNumericCaps(t *testing.T) {
+	for _, maxActions := range []int{1, 100} {
+		body := fmt.Sprintf(`{"release_watch": {"state_dir": "/tmp", "max_actions_per_run": %d, "routes": [{"name": "r", "sources": [{"github": "a/b"}], "sinks": [{"github_issue": {"repo": "c/d"}}]}]}}`, maxActions)
+		if _, err := Load(testContext(t), writeConfig(t, body)); err != nil {
+			t.Fatalf("Load(max_actions_per_run=%d) = %v, want nil", maxActions, err)
+		}
+	}
+	for _, maxActions := range []int{0, 101} {
+		body := fmt.Sprintf(`{"release_watch": {"state_dir": "/tmp", "max_actions_per_run": %d, "routes": [{"name": "r", "sources": [{"github": "a/b"}], "sinks": [{"github_issue": {"repo": "c/d"}}]}]}}`, maxActions)
+		if _, err := Load(testContext(t), writeConfig(t, body)); err == nil {
+			t.Fatalf("Load(max_actions_per_run=%d) = nil, want boundary error", maxActions)
+		}
+	}
+	for _, perSource := range []int{1, 20} {
+		body := fmt.Sprintf(`{"release_watch": {"state_dir": "/tmp", "per_source_cap": %d, "routes": [{"name": "r", "sources": [{"github": "a/b"}], "sinks": [{"github_issue": {"repo": "c/d"}}]}]}}`, perSource)
+		if _, err := Load(testContext(t), writeConfig(t, body)); err != nil {
+			t.Fatalf("Load(per_source_cap=%d) = %v, want nil", perSource, err)
+		}
+	}
+	for _, perSource := range []int{0, 21} {
+		body := fmt.Sprintf(`{"release_watch": {"state_dir": "/tmp", "per_source_cap": %d, "routes": [{"name": "r", "sources": [{"github": "a/b"}], "sinks": [{"github_issue": {"repo": "c/d"}}]}]}}`, perSource)
+		if _, err := Load(testContext(t), writeConfig(t, body)); err == nil {
+			t.Fatalf("Load(per_source_cap=%d) = nil, want boundary error", perSource)
+		}
+	}
+}
+
+func TestReleaseWatchBoundaryArrayCaps(t *testing.T) {
+	labels8 := `["l1","l2","l3","l4","l5","l6","l7","l8"]`
+	body8 := fmt.Sprintf(`{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "r", "sources": [{"github": "a/b"}], "sinks": [{"github_issue": {"repo": "c/d", "labels": %s}}]}]}}`, labels8)
+	if _, err := Load(testContext(t), writeConfig(t, body8)); err != nil {
+		t.Fatalf("Load(labels=8) = %v, want nil", err)
+	}
+	labels9 := `["l1","l2","l3","l4","l5","l6","l7","l8","l9"]`
+	body9 := fmt.Sprintf(`{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "r", "sources": [{"github": "a/b"}], "sinks": [{"github_issue": {"repo": "c/d", "labels": %s}}]}]}}`, labels9)
+	if _, err := Load(testContext(t), writeConfig(t, body9)); err == nil {
+		t.Fatal("Load(labels=9) = nil error, want error")
+	}
+	emptyRoutes := `{"release_watch": {"state_dir": "", "routes": []}}`
+	if _, err := Load(testContext(t), writeConfig(t, emptyRoutes)); err != nil {
+		t.Fatalf("Load(empty routes and empty state_dir) = %v, want nil", err)
+	}
+}

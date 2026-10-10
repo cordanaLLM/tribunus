@@ -17,50 +17,68 @@ import (
 )
 
 const (
-	MaxGraphDepth       = 64
-	MaxJobs             = 64
-	MaxJobArgs          = 32
-	MaxWatches          = 64
-	MaxRouterAliases    = 32
-	MaxReplayRecords    = 1000000
-	MaxJobRestarts      = 32
-	MaxRestartBackoff   = 3600
-	MaxStopGraceSeconds = 300
-	MaxSandboxInputs    = 32
-	MaxSandboxEnvAllow  = 64
-	maxConfigKeyDepth   = 8
-	disabledEnvPrefix   = "\x00TRIBUNUS_CONFIG_ENV_DISABLED_"
-	schemaResourceID    = "config.schema.json"
-	defaultGraphDepth   = 12
-	defaultTokens       = 200000
-	defaultWallClockSec = 3600
-	defaultAlias        = "cordana/auto"
-	defaultTimeoutSec   = 30
-	defaultIntervalSec  = 5
-	defaultReadyCount   = 2
-	defaultEventLogDir  = ".tribunus"
-	defaultLockSeconds  = 5
-	defaultReplayMax    = 100000
-	defaultJobSchedule  = "always"
-	defaultRestart      = "never"
-	defaultStopSignal   = "TERM"
-	defaultSandboxMode  = "enforce"
-	defaultSandboxNet   = "none"
-	defaultMemoryMax    = "2G"
-	defaultCPUWeight    = 100
-	defaultTasksMax     = 512
-	minMemoryMaxBytes   = 64 * 1024 * 1024
-	maxMemoryMaxBytes   = 64 * 1024 * 1024 * 1024
-	minCPUWeight        = 1
-	maxCPUWeight        = 10000
-	minTasksMax         = 16
-	maxTasksMax         = 32768
+	MaxGraphDepth           = 64
+	MaxJobs                 = 64
+	MaxJobArgs              = 32
+	MaxWatches              = 64
+	MaxRouterAliases        = 32
+	MaxReplayRecords        = 1000000
+	MaxJobRestarts          = 32
+	MaxRestartBackoff       = 3600
+	MaxStopGraceSeconds     = 300
+	MaxSandboxInputs        = 32
+	MaxSandboxEnvAllow      = 64
+	MaxReleaseWatchRoutes   = 32
+	MaxReleaseWatchSources  = 16
+	MaxReleaseWatchSinks    = 4
+	MaxReleaseWatchLabels   = 8
+	MinMaxActionsPerRun     = 1
+	MaxMaxActionsPerRun     = 100
+	MinPerSourceCap         = 1
+	MaxPerSourceCap         = 20
+	DefaultRateLimitFloor   = 100
+	DefaultMaxActionsPerRun = 12
+	DefaultPerSourceCap     = 3
+	DefaultNtfyPriority     = 3
+	maxConfigKeyDepth       = 8
+	disabledEnvPrefix       = "\x00TRIBUNUS_CONFIG_ENV_DISABLED_"
+	schemaResourceID        = "config.schema.json"
+	defaultGraphDepth       = 12
+	defaultTokens           = 200000
+	defaultWallClockSec     = 3600
+	defaultAlias            = "cordana/auto"
+	defaultTimeoutSec       = 30
+	defaultIntervalSec      = 5
+	defaultReadyCount       = 2
+	defaultEventLogDir      = ".tribunus"
+	defaultLockSeconds      = 5
+	defaultReplayMax        = 100000
+	defaultJobSchedule      = "always"
+	defaultRestart          = "never"
+	defaultStopSignal       = "TERM"
+	defaultSandboxMode      = "enforce"
+	defaultSandboxNet       = "none"
+	defaultMemoryMax        = "2G"
+	defaultCPUWeight        = 100
+	defaultTasksMax         = 512
+	minMemoryMaxBytes       = 64 * 1024 * 1024
+	maxMemoryMaxBytes       = 64 * 1024 * 1024 * 1024
+	minCPUWeight            = 1
+	maxCPUWeight            = 10000
+	minTasksMax             = 16
+	maxTasksMax             = 32768
 )
 
 //go:embed config.schema.json
 var schemaJSON []byte
 
-var sandboxEnvName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+var (
+	sandboxEnvName   = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+	repoPattern      = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+	routeNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
+	hfOrgPattern     = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+	ntfyTopicPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+)
 
 // reservedSandboxEnv are names the sandbox sets (PATH, HOME, TMPDIR) or removes before the
 // job starts (the systemd bus variables and INVOCATION_ID); allowlisting one would be
@@ -70,13 +88,48 @@ var reservedSandboxEnv = []string{"PATH", "HOME", "TMPDIR", "XDG_RUNTIME_DIR", "
 // Config is the Tribunus process configuration loaded from a schema-checked
 // file.
 type Config struct {
-	Graph     GraphConfig     `koanf:"graph" json:"graph"`
-	Budgets   BudgetsConfig   `koanf:"budgets" json:"budgets"`
-	Jobs      []JobConfig     `koanf:"jobs" json:"jobs"`
-	Watches   []WatchConfig   `koanf:"watches" json:"watches"`
-	Router    RouterConfig    `koanf:"router" json:"router"`
-	Admission AdmissionConfig `koanf:"admission" json:"admission"`
-	EventLog  EventLogConfig  `koanf:"event_log" json:"event_log"`
+	Graph        GraphConfig        `koanf:"graph" json:"graph"`
+	Budgets      BudgetsConfig      `koanf:"budgets" json:"budgets"`
+	Jobs         []JobConfig        `koanf:"jobs" json:"jobs"`
+	Watches      []WatchConfig      `koanf:"watches" json:"watches"`
+	Router       RouterConfig       `koanf:"router" json:"router"`
+	Admission    AdmissionConfig    `koanf:"admission" json:"admission"`
+	EventLog     EventLogConfig     `koanf:"event_log" json:"event_log"`
+	ReleaseWatch ReleaseWatchConfig `koanf:"release_watch" json:"release_watch"`
+}
+
+type ReleaseWatchConfig struct {
+	StateDir         string              `koanf:"state_dir" json:"state_dir"`
+	RateLimitFloor   int                 `koanf:"rate_limit_floor" json:"rate_limit_floor"`
+	MaxActionsPerRun int                 `koanf:"max_actions_per_run" json:"max_actions_per_run"`
+	PerSourceCap     int                 `koanf:"per_source_cap" json:"per_source_cap"`
+	Routes           []ReleaseWatchRoute `koanf:"routes" json:"routes"`
+}
+
+type ReleaseWatchRoute struct {
+	Name    string               `koanf:"name" json:"name"`
+	Sources []ReleaseWatchSource `koanf:"sources" json:"sources"`
+	Sinks   []ReleaseWatchSink   `koanf:"sinks" json:"sinks"`
+}
+
+type ReleaseWatchSource struct {
+	GitHub         string `koanf:"github" json:"github,omitempty"`
+	HuggingFaceOrg string `koanf:"huggingface_org" json:"huggingface_org,omitempty"`
+}
+
+type ReleaseWatchSink struct {
+	GitHubIssue *GitHubIssueSink `koanf:"github_issue" json:"github_issue,omitempty"`
+	Ntfy        *NtfySink        `koanf:"ntfy" json:"ntfy,omitempty"`
+}
+
+type GitHubIssueSink struct {
+	Repo   string   `koanf:"repo" json:"repo"`
+	Labels []string `koanf:"labels" json:"labels"`
+}
+
+type NtfySink struct {
+	Topic    string `koanf:"topic" json:"topic"`
+	Priority int    `koanf:"priority" json:"priority"`
 }
 
 type GraphConfig struct {
@@ -182,6 +235,13 @@ func Default() Config {
 			LockTimeoutSeconds: defaultLockSeconds,
 			MaxReplayRecords:   defaultReplayMax,
 		},
+		ReleaseWatch: ReleaseWatchConfig{
+			StateDir:         "",
+			RateLimitFloor:   DefaultRateLimitFloor,
+			MaxActionsPerRun: DefaultMaxActionsPerRun,
+			PerSourceCap:     DefaultPerSourceCap,
+			Routes:           []ReleaseWatchRoute{},
+		},
 	}
 }
 
@@ -219,7 +279,11 @@ func Load(ctx context.Context, path string) (Config, error) {
 		return Config{}, err
 	}
 	applyJobDefaults(cfg.Jobs)
+	applyReleaseWatchDefaults(&cfg.ReleaseWatch)
 	if err = validateNames(cfg); err != nil {
+		return Config{}, err
+	}
+	if err = validateReleaseWatch(&cfg); err != nil {
 		return Config{}, err
 	}
 	if err = validateJobSandboxes(&cfg, path); err != nil {
@@ -670,4 +734,160 @@ func validationPath(err error) string {
 		return rest
 	}
 	return rest[:end]
+}
+
+func applyReleaseWatchDefaults(rw *ReleaseWatchConfig) {
+	if rw.RateLimitFloor == 0 {
+		rw.RateLimitFloor = DefaultRateLimitFloor
+	}
+	if rw.MaxActionsPerRun == 0 {
+		rw.MaxActionsPerRun = DefaultMaxActionsPerRun
+	}
+	if rw.PerSourceCap == 0 {
+		rw.PerSourceCap = DefaultPerSourceCap
+	}
+	for i := 0; i < len(rw.Routes); i++ {
+		for j := 0; j < len(rw.Routes[i].Sinks); j++ {
+			if rw.Routes[i].Sinks[j].Ntfy != nil && rw.Routes[i].Sinks[j].Ntfy.Priority == 0 {
+				rw.Routes[i].Sinks[j].Ntfy.Priority = DefaultNtfyPriority
+			}
+		}
+	}
+}
+
+func validateReleaseWatch(cfg *Config) error {
+	rw := &cfg.ReleaseWatch
+	applyReleaseWatchDefaults(rw)
+	if len(rw.Routes) == 0 {
+		return nil
+	}
+	if rw.StateDir == "" || !filepath.IsAbs(rw.StateDir) {
+		return fmt.Errorf("config: release_watch/state_dir: must be an absolute path: %q", rw.StateDir)
+	}
+	if rw.MaxActionsPerRun < MinMaxActionsPerRun || rw.MaxActionsPerRun > MaxMaxActionsPerRun {
+		return fmt.Errorf("config: release_watch/max_actions_per_run: must be %d..%d", MinMaxActionsPerRun, MaxMaxActionsPerRun)
+	}
+	if rw.PerSourceCap < MinPerSourceCap || rw.PerSourceCap > MaxPerSourceCap {
+		return fmt.Errorf("config: release_watch/per_source_cap: must be %d..%d", MinPerSourceCap, MaxPerSourceCap)
+	}
+	if rw.RateLimitFloor < 0 {
+		return fmt.Errorf("config: release_watch/rate_limit_floor: must be non-negative")
+	}
+	if len(rw.Routes) > MaxReleaseWatchRoutes {
+		return fmt.Errorf("config: release_watch/routes: exceeds %d", MaxReleaseWatchRoutes)
+	}
+	return validateReleaseWatchRoutes(rw.Routes)
+}
+
+func validateReleaseWatchRoutes(routes []ReleaseWatchRoute) error {
+	seenRoutes := make(map[string]struct{}, len(routes))
+	for i := 0; i < len(routes); i++ {
+		route := &routes[i]
+		if !routeNamePattern.MatchString(route.Name) {
+			return fmt.Errorf("config: release_watch/routes/%d/name: invalid name %q", i, route.Name)
+		}
+		if _, ok := seenRoutes[route.Name]; ok {
+			return fmt.Errorf("config: release_watch/routes/%d/name: duplicate route name %q", i, route.Name)
+		}
+		seenRoutes[route.Name] = struct{}{}
+		if err := validateRouteSources(route.Name, route.Sources); err != nil {
+			return err
+		}
+		if err := validateRouteSinks(route.Name, route.Sinks); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateRouteSources(routeName string, sources []ReleaseWatchSource) error {
+	if len(sources) == 0 {
+		return fmt.Errorf("config: release_watch route %q sources: must not be empty", routeName)
+	}
+	if len(sources) > MaxReleaseWatchSources {
+		return fmt.Errorf("config: release_watch route %q sources: exceeds %d", routeName, MaxReleaseWatchSources)
+	}
+	for i := 0; i < len(sources); i++ {
+		src := sources[i]
+		hasGitHub := src.GitHub != ""
+		hasHF := src.HuggingFaceOrg != ""
+		if (!hasGitHub && !hasHF) || (hasGitHub && hasHF) {
+			return fmt.Errorf("config: release_watch route %q sources/%d: must specify exactly one of github or huggingface_org", routeName, i)
+		}
+		if hasGitHub && !validRepository(src.GitHub) {
+			return fmt.Errorf("config: release_watch route %q sources/%d/github: invalid repository %q (must be owner/name)", routeName, i, src.GitHub)
+		}
+		if hasHF && (!hfOrgPattern.MatchString(src.HuggingFaceOrg) || isDotSegment(src.HuggingFaceOrg)) {
+			return fmt.Errorf("config: release_watch route %q sources/%d/huggingface_org: invalid org %q", routeName, i, src.HuggingFaceOrg)
+		}
+	}
+	return nil
+}
+
+// validRepository accepts owner/name. "." and ".." match the character class but would
+// turn the API path the token is sent to into a different endpoint.
+func validRepository(repo string) bool {
+	if !repoPattern.MatchString(repo) {
+		return false
+	}
+	owner, name, _ := strings.Cut(repo, "/")
+	return !isDotSegment(owner) && !isDotSegment(name)
+}
+
+func isDotSegment(part string) bool {
+	return part == "." || part == ".."
+}
+
+func validateRouteSinks(routeName string, sinks []ReleaseWatchSink) error {
+	if len(sinks) == 0 {
+		return fmt.Errorf("config: release_watch route %q sinks: must not be empty", routeName)
+	}
+	if len(sinks) > MaxReleaseWatchSinks {
+		return fmt.Errorf("config: release_watch route %q sinks: exceeds %d", routeName, MaxReleaseWatchSinks)
+	}
+	for i := 0; i < len(sinks); i++ {
+		sink := sinks[i]
+		hasGH := sink.GitHubIssue != nil
+		hasNtfy := sink.Ntfy != nil
+		if (!hasGH && !hasNtfy) || (hasGH && hasNtfy) {
+			return fmt.Errorf("config: release_watch route %q sinks/%d: must specify exactly one of github_issue or ntfy", routeName, i)
+		}
+		if hasGH {
+			if err := validateGitHubIssueSink(routeName, i, sink.GitHubIssue); err != nil {
+				return err
+			}
+		}
+		if hasNtfy {
+			if err := validateNtfySink(routeName, i, sink.Ntfy); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateGitHubIssueSink(routeName string, index int, sink *GitHubIssueSink) error {
+	if strings.TrimSpace(sink.Repo) == "" {
+		return fmt.Errorf("config: release_watch route %q sinks/%d/github_issue/repo: required", routeName, index)
+	}
+	if !validRepository(sink.Repo) {
+		return fmt.Errorf("config: release_watch route %q sinks/%d/github_issue/repo: invalid repository %q (must be owner/name)", routeName, index, sink.Repo)
+	}
+	if len(sink.Labels) > MaxReleaseWatchLabels {
+		return fmt.Errorf("config: release_watch route %q sinks/%d/github_issue/labels: exceeds %d", routeName, index, MaxReleaseWatchLabels)
+	}
+	return nil
+}
+
+func validateNtfySink(routeName string, index int, sink *NtfySink) error {
+	if strings.TrimSpace(sink.Topic) == "" {
+		return fmt.Errorf("config: release_watch route %q sinks/%d/ntfy/topic: required", routeName, index)
+	}
+	if !ntfyTopicPattern.MatchString(sink.Topic) {
+		return fmt.Errorf("config: release_watch route %q sinks/%d/ntfy/topic: invalid topic %q", routeName, index, sink.Topic)
+	}
+	if sink.Priority < 1 || sink.Priority > 5 {
+		return fmt.Errorf("config: release_watch route %q sinks/%d/ntfy/priority: must be 1..5", routeName, index)
+	}
+	return nil
 }

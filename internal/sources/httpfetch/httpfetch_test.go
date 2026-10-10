@@ -139,3 +139,85 @@ func TestGetWithHeader(t *testing.T) {
 		}
 	})
 }
+
+func TestDo(t *testing.T) {
+	t.Run("returns status headers and body for non-200 without error", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Custom-Header", "test-val")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte("not found body")) //nolint:errcheck // test httptest server response
+		}))
+		defer server.Close()
+
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+		if err != nil {
+			t.Fatalf("NewRequest: %v", err)
+		}
+		status, header, body, err := Do(context.Background(), nil, req, time.Second, 1024)
+		if err != nil {
+			t.Fatalf("Do() = %v, want nil error", err)
+		}
+		if status != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404", status)
+		}
+		if header.Get("X-Custom-Header") != "test-val" {
+			t.Fatalf("header = %q, want test-val", header.Get("X-Custom-Header"))
+		}
+		if string(body) != "not found body" {
+			t.Fatalf("body = %q, want 'not found body'", string(body))
+		}
+	})
+
+	t.Run("boundary byte cap", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("12345678901")) //nolint:errcheck // test httptest server response
+		}))
+		defer server.Close()
+
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+		if err != nil {
+			t.Fatalf("NewRequest: %v", err)
+		}
+		_, _, _, err = Do(context.Background(), nil, req, time.Second, 10)
+		if err == nil || !errors.Is(err, client.ErrBodyTooLarge) {
+			t.Fatalf("Do() = %v, want ErrBodyTooLarge", err)
+		}
+	})
+
+	t.Run("non-positive maxBytes and nil request refused", func(t *testing.T) {
+		if _, _, _, err := Do(context.Background(), nil, nil, time.Second, 0); err == nil {
+			t.Fatal("Do(maxBytes=0) = nil error, want error")
+		}
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://127.0.0.1", nil)
+		if err != nil {
+			t.Fatalf("NewRequest: %v", err)
+		}
+		//nolint:staticcheck // testing defensive check against nil ctx
+		if _, _, _, err := Do(nil, nil, req, time.Second, 100); err == nil {
+			t.Fatal("Do(ctx=nil) = nil error, want error")
+		}
+	})
+}
+
+func TestDoAppliesCallTimeoutUnderCallerDeadline(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(2 * time.Second):
+		}
+	}))
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	began := time.Now()
+	if _, _, _, err = Do(ctx, &http.Client{}, req, 100*time.Millisecond, 1024); err == nil {
+		t.Fatal("Do(slow server, 100ms call timeout) = nil error, want deadline")
+	}
+	if took := time.Since(began); took > time.Second {
+		t.Fatalf("Do took %v, want the 100ms call timeout to apply under the 30s caller deadline", took)
+	}
+}

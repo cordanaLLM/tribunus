@@ -135,10 +135,10 @@ func runShim(cfg shimConfig) error {
 	}
 	writer, err := shimWriter(cfg)
 	if err != nil {
-		return killAfterShimError(cmd.Process.Pid, err)
+		return killAndCollect(cmd, err)
 	}
 	if err = appendStarted(writer, cfg, cmd.Process.Pid, started); err != nil {
-		return killAfterShimError(cmd.Process.Pid, err)
+		return killAndCollect(cmd, err)
 	}
 	return waitAndRecordExit(runCtx, writer, cfg, cmd)
 }
@@ -185,12 +185,12 @@ func startConfirmedJob(ctx context.Context, cfg shimConfig, logFile *os.File) (*
 	}
 	started := time.Now().UTC().Format(time.RFC3339Nano)
 	if err = writeRecord(cfg, cmd.Process.Pid, started); err != nil {
-		return nil, "", killAfterShimError(cmd.Process.Pid, err)
+		return nil, "", killAndCollect(cmd, err)
 	}
 	// The record comes first so that a stop during the wait can reach the job; job.started
 	// is appended only for a job confirmed inside its scope.
 	if err = confirmJobScope(cmd.Process.Pid, command.Scope, command.Argv[0]); err != nil {
-		return nil, "", killAfterShimError(cmd.Process.Pid, err)
+		return nil, "", killAndCollect(cmd, err)
 	}
 	return cmd, started, nil
 }
@@ -340,9 +340,18 @@ func appendRefused(cfg shimConfig, cause error) error {
 	return err
 }
 
-func killAfterShimError(pid int, cause error) error {
-	if err := killStartedProcessGroup(pid); err != nil {
+// killAndCollect ends a job the shim started and will not run: the job's process group is
+// killed and the job is collected. Collecting also ends the watcher of the job's context,
+// which would otherwise outlive this call and stop the job once more when the context ends.
+// A job that could not be killed is not waited for.
+func killAndCollect(cmd *exec.Cmd, cause error) error {
+	if err := killStartedProcessGroup(cmd.Process.Pid); err != nil {
 		return errors.Join(cause, err)
+	}
+	// The exit status of a job that was just killed says nothing; Wait is called to collect.
+	var exit *exec.ExitError
+	if err := cmd.Wait(); err != nil && !errors.As(err, &exit) {
+		return errors.Join(cause, fmt.Errorf("job-shim: collect the killed job: %w", err))
 	}
 	return cause
 }

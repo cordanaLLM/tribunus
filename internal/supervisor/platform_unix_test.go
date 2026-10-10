@@ -10,7 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -406,7 +408,7 @@ func TestSignalAndKillReturnUnexpectedSignallerError(t *testing.T) {
 	}
 }
 
-func TestKillAfterShimErrorJoinsKillFailure(t *testing.T) {
+func TestKillAndCollectJoinsKillFailure(t *testing.T) {
 	cmd := startSleep(t, true)
 	cause := errors.New("write failed")
 	old := processSignaller
@@ -417,9 +419,42 @@ func TestKillAfterShimErrorJoinsKillFailure(t *testing.T) {
 		return unix.EPERM
 	}
 	t.Cleanup(func() { processSignaller = old })
-	err := killAfterShimError(cmd.Process.Pid, cause)
+	err := killAndCollect(cmd, cause)
 	if err == nil || !strings.Contains(err.Error(), "write failed") || !strings.Contains(err.Error(), "operation not permitted") {
-		t.Fatalf("killAfterShimError(EPERM) = %v, want joined cause and kill error", err)
+		t.Fatalf("killAndCollect(EPERM) = %v, want joined cause and kill error", err)
+	}
+	if cmd.ProcessState != nil {
+		t.Fatalf("killAndCollect(EPERM) waited for a job it could not kill, want no wait")
+	}
+}
+
+// TestKillAndCollectLeavesNoZombie: a job the shim started and then gives up is killed with
+// its group and collected, so that nothing of it is left, not even its exit status. The job
+// here would exit with status 0 by itself after a second: only a kill ends it by a signal.
+func TestKillAndCollectLeavesNoZombie(t *testing.T) {
+	cmd := exec.CommandContext(t.Context(), "/bin/sh", "-c", "sleep 1")
+	cmd.SysProcAttr = &unix.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("Start(sh) = %v, want nil", err)
+	}
+	cause := errors.New("record failed")
+	if err := killAndCollect(cmd, cause); !errors.Is(err, cause) || err.Error() != cause.Error() {
+		t.Fatalf("killAndCollect() = %v, want the cause and nothing added", err)
+	}
+	if cmd.ProcessState == nil {
+		t.Fatalf("killAndCollect() did not collect the job, want its exit status taken")
+	}
+	if status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); !ok || !status.Signaled() || status.Signal() != syscall.SIGKILL {
+		t.Fatalf("job ended as %v, want it killed, not left to finish", cmd.ProcessState)
+	}
+	if _, err := os.Stat(filepath.Join("/proc", strconv.Itoa(cmd.Process.Pid))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("/proc entry of the killed job: %v, want it gone", err)
+	}
+	// A job that was collected already cannot be collected again: that is reported, joined
+	// with the cause.
+	err := killAndCollect(cmd, cause)
+	if !errors.Is(err, cause) || !strings.Contains(err.Error(), "job-shim: collect the killed job: ") {
+		t.Fatalf("killAndCollect(collected job) = %v, want the cause joined with the wait error", err)
 	}
 }
 

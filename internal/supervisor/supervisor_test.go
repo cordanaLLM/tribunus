@@ -346,6 +346,7 @@ func TestCheckJobRejectsRequiredFields(t *testing.T) {
 		{name: "command", job: config.JobConfig{Name: "daemon", LogPath: "/tmp/job.log"}, want: "command must have"},
 		{name: "too many args", job: config.JobConfig{Name: "daemon", Command: manyArgs(config.MaxJobArgs + 1), LogPath: "/tmp/job.log"}, want: "command must have"},
 		{name: "log path", job: config.JobConfig{Name: "daemon", Command: []string{"/bin/true"}}, want: "log_path is required"},
+		{name: "sandbox", job: withJobSandbox(testJob("daemon", []string{"/bin/true"}), config.SandboxConfig{Mode: "off"}), want: "sandbox.reason: required when mode=off"},
 	}
 	for i := 0; i < len(tests); i++ {
 		t.Run(tests[i].name, func(t *testing.T) {
@@ -418,7 +419,7 @@ func TestNormalizeConfigAppliesSupervisorJobDefaults(t *testing.T) {
 }
 
 func TestCheckShimConfigRejectsRequiredFields(t *testing.T) {
-	base := shimConfig{EventLogDir: "/state", SigningKey: "/key", Name: "job", LockPath: "/lock", RecordPath: "/record", LogPath: "/log", Command: []string{"/bin/true"}}
+	base := shimConfig{EventLogDir: "/state", SigningKey: "/key", Name: "job", LockPath: "/lock", RecordPath: "/record", LogPath: "/log", Command: []string{"/bin/true"}, Sandbox: config.SandboxConfig{Mode: "off", Reason: "unit test"}}
 	tests := []struct {
 		name string
 		cfg  shimConfig
@@ -428,6 +429,7 @@ func TestCheckShimConfigRejectsRequiredFields(t *testing.T) {
 		{name: "paths", cfg: withShimLock(base, ""), want: "lock, record and log paths are required"},
 		{name: "command", cfg: withShimCommand(base, nil), want: "command must have"},
 		{name: "too many args", cfg: withShimCommand(base, manyArgs(config.MaxJobArgs+1)), want: "command must have"},
+		{name: "sandbox", cfg: withShimSandbox(base, config.SandboxConfig{Mode: "off"}), want: "sandbox.reason: required when mode=off"},
 	}
 	for i := 0; i < len(tests); i++ {
 		t.Run(tests[i].name, func(t *testing.T) {
@@ -610,6 +612,7 @@ func TestRunShimReturnCodes(t *testing.T) {
 		RecordPath:  filepath.Join(t.TempDir(), "daemon.json"),
 		LogPath:     filepath.Join(t.TempDir(), "daemon.log"),
 		Command:     []string{"/bin/true"},
+		Sandbox:     config.SandboxConfig{Mode: "off", Reason: "unit test"},
 	})
 	if code := RunShim(cfg); code != 1 {
 		t.Fatalf("RunShim(run error) = %d, want 1", code)
@@ -625,6 +628,7 @@ func TestParseShimArgsStripsSentinelsAndRejectsFields(t *testing.T) {
 		RecordPath:  "/record",
 		LogPath:     "/log",
 		Command:     []string{"/bin/true"},
+		Sandbox:     config.SandboxConfig{Mode: "off", Reason: "unit test"},
 	}
 	cfg, err := parseShimArgs(shimArgs(t, base))
 	if err != nil || len(cfg.Command) != 1 || cfg.Command[0] != "/bin/true" {
@@ -1359,6 +1363,7 @@ func testJob(name string, command []string) config.JobConfig {
 		Schedule: "always",
 		Restart:  config.JobRestartConfig{Policy: "never"},
 		Stop:     config.JobStopConfig{Signal: "TERM", GraceSeconds: 1},
+		Sandbox:  config.SandboxConfig{Mode: "off", Reason: "supervisor unit test"},
 	}
 }
 
@@ -1397,8 +1402,9 @@ func shimArgs(t *testing.T, cfg shimConfig) []string {
 		"--lock", cfg.LockPath,
 		"--record", cfg.RecordPath,
 		"--log", cfg.LogPath,
-		"--",
 	}
+	args = append(args, sandboxFlagArgs(cfg.Sandbox)...)
+	args = append(args, "--")
 	return append(args, cfg.Command...)
 }
 
@@ -1516,6 +1522,7 @@ func validShimConfig(t *testing.T, name string) shimConfig {
 		RecordPath:  filepath.Join(rt.EventLogDir, "jobs", name+".json"),
 		LogPath:     filepath.Join(t.TempDir(), name+".log"),
 		Command:     []string{"/bin/true"},
+		Sandbox:     config.SandboxConfig{Mode: "off", Reason: "unit test"},
 	}
 }
 
@@ -1792,4 +1799,45 @@ func argsAfterDash(args []string) []string {
 		}
 	}
 	return nil
+}
+
+func TestStatusReportsSandboxTheJobStartedUnder(t *testing.T) {
+	job := testJob("sandbox-status", []string{"/bin/sh", "-c", "while true; do sleep 1; done"})
+	sup := testSupervisor(t, job)
+	if err := sup.Start(testContext(t), job.Name); err != nil {
+		t.Fatalf("Start() = %v, want nil", err)
+	}
+	sup.cfg.Jobs[0].Sandbox.Reason = "changed after start"
+	if got := statusOne(t, sup, job.Name).Sandbox; got != "off: supervisor unit test" {
+		t.Fatalf("running Sandbox = %q, want the mode recorded at start", got)
+	}
+	if err := sup.Stop(testContext(t), job.Name); err != nil {
+		t.Fatalf("Stop() = %v, want nil", err)
+	}
+	if got := statusOne(t, sup, job.Name).Sandbox; got != "off: changed after start" {
+		t.Fatalf("stopped Sandbox = %q, want the configured mode", got)
+	}
+}
+
+func TestRunningSandboxIsUnknownUntilThisStartIsReplayed(t *testing.T) {
+	rec := jobRecord{StartedAt: "2026-10-10T08:00:00Z"}
+	if got := runningSandbox(rec, eventlog.Job{Since: "2026-10-10T07:00:00Z", Sandbox: "enforce/none"}); got != "unknown" {
+		t.Fatalf("runningSandbox(previous start) = %q, want unknown", got)
+	}
+	if got := runningSandbox(rec, eventlog.Job{Since: rec.StartedAt}); got != "unknown" {
+		t.Fatalf("runningSandbox(no recorded mode) = %q, want unknown", got)
+	}
+	if got := runningSandbox(rec, eventlog.Job{Since: rec.StartedAt, Sandbox: "enforce/egress"}); got != "enforce/egress" {
+		t.Fatalf("runningSandbox(this start) = %q, want enforce/egress", got)
+	}
+}
+
+func withJobSandbox(job config.JobConfig, sandbox config.SandboxConfig) config.JobConfig {
+	job.Sandbox = sandbox
+	return job
+}
+
+func withShimSandbox(cfg shimConfig, sandbox config.SandboxConfig) shimConfig {
+	cfg.Sandbox = sandbox
+	return cfg
 }

@@ -89,7 +89,7 @@ func printJobsStatus(ctx context.Context, sup *supervisor.Supervisor, name strin
 	}
 	for i := 0; i < len(statuses); i++ {
 		st := statuses[i]
-		fmt.Println(st.Name + "\t" + string(st.State) + "\t" + strconv.Itoa(st.PID) + "\t" + st.Since + "\t" + strconv.Itoa(st.Restarts))
+		fmt.Println(st.Name + "\t" + string(st.State) + "\t" + strconv.Itoa(st.PID) + "\t" + st.Since + "\t" + strconv.Itoa(st.Restarts) + "\t" + st.Sandbox)
 	}
 	return nil
 }

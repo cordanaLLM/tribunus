@@ -5,7 +5,11 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"math"
 	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 
 	coreconfig "github.com/golusoris/golusoris/core/config"
@@ -22,6 +26,8 @@ const (
 	MaxJobRestarts      = 32
 	MaxRestartBackoff   = 3600
 	MaxStopGraceSeconds = 300
+	MaxSandboxInputs    = 32
+	MaxSandboxEnvAllow  = 64
 	maxConfigKeyDepth   = 8
 	disabledEnvPrefix   = "\x00TRIBUNUS_CONFIG_ENV_DISABLED_"
 	schemaResourceID    = "config.schema.json"
@@ -38,10 +44,28 @@ const (
 	defaultJobSchedule  = "always"
 	defaultRestart      = "never"
 	defaultStopSignal   = "TERM"
+	defaultSandboxMode  = "enforce"
+	defaultSandboxNet   = "none"
+	defaultMemoryMax    = "2G"
+	defaultCPUWeight    = 100
+	defaultTasksMax     = 512
+	minMemoryMaxBytes   = 64 * 1024 * 1024
+	maxMemoryMaxBytes   = 64 * 1024 * 1024 * 1024
+	minCPUWeight        = 1
+	maxCPUWeight        = 10000
+	minTasksMax         = 16
+	maxTasksMax         = 32768
 )
 
 //go:embed config.schema.json
 var schemaJSON []byte
+
+var sandboxEnvName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+
+// reservedSandboxEnv are names the sandbox sets (PATH, HOME, TMPDIR) or removes before the
+// job starts (the systemd bus variables and INVOCATION_ID); allowlisting one would be
+// overridden silently, so config refuses it.
+var reservedSandboxEnv = []string{"PATH", "HOME", "TMPDIR", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "INVOCATION_ID"}
 
 // Config is the Tribunus process configuration loaded from a schema-checked
 // file.
@@ -76,6 +100,7 @@ type JobConfig struct {
 	RouterAlias string           `koanf:"router_alias" json:"router_alias"`
 	Restart     JobRestartConfig `koanf:"restart" json:"restart"`
 	Stop        JobStopConfig    `koanf:"stop" json:"stop"`
+	Sandbox     SandboxConfig    `koanf:"sandbox" json:"sandbox"`
 }
 
 type JobRestartConfig struct {
@@ -87,6 +112,18 @@ type JobRestartConfig struct {
 type JobStopConfig struct {
 	Signal       string `koanf:"signal" json:"signal"`
 	GraceSeconds int    `koanf:"grace_seconds" json:"grace_seconds"`
+}
+
+type SandboxConfig struct {
+	Mode      string   `koanf:"mode" json:"mode"`
+	Reason    string   `koanf:"reason" json:"reason"`
+	Workspace string   `koanf:"workspace" json:"workspace"`
+	Inputs    []string `koanf:"inputs" json:"inputs"`
+	EnvAllow  []string `koanf:"env_allow" json:"env_allow"`
+	Network   string   `koanf:"network" json:"network"`
+	MemoryMax string   `koanf:"memory_max" json:"memory_max"`
+	CPUWeight int      `koanf:"cpu_weight" json:"cpu_weight"`
+	TasksMax  int      `koanf:"tasks_max" json:"tasks_max"`
 }
 
 type WatchConfig struct {
@@ -185,6 +222,9 @@ func Load(ctx context.Context, path string) (Config, error) {
 	if err = validateNames(cfg); err != nil {
 		return Config{}, err
 	}
+	if err = validateJobSandboxes(&cfg, path); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
 }
 
@@ -202,7 +242,42 @@ func applyJobDefaults(jobs []JobConfig) {
 		if jobs[i].Stop.Signal == "" {
 			jobs[i].Stop.Signal = defaultStopSignal
 		}
+		applySandboxDefaults(&jobs[i].Sandbox)
 	}
+}
+
+func applySandboxDefaults(sandbox *SandboxConfig) {
+	if sandbox.Mode == "" {
+		sandbox.Mode = defaultSandboxMode
+	}
+	if sandbox.Network == "" {
+		sandbox.Network = defaultSandboxNet
+	}
+	if sandbox.MemoryMax == "" {
+		sandbox.MemoryMax = defaultMemoryMax
+	}
+	if sandbox.CPUWeight == 0 {
+		sandbox.CPUWeight = defaultCPUWeight
+	}
+	if sandbox.TasksMax == 0 {
+		sandbox.TasksMax = defaultTasksMax
+	}
+}
+
+func NormalizeSandbox(sandbox SandboxConfig) SandboxConfig {
+	applySandboxDefaults(&sandbox)
+	return sandbox
+}
+
+func ValidateSandbox(sandbox SandboxConfig) error {
+	applySandboxDefaults(&sandbox)
+	if err := validateSandboxMode(sandbox); err != nil {
+		return err
+	}
+	if err := validateSandboxLimits(sandbox); err != nil {
+		return err
+	}
+	return validateSandboxEnv(sandbox.EnvAllow)
 }
 
 func readyContext(ctx context.Context) error {
@@ -276,6 +351,289 @@ func validateNames(cfg Config) error {
 		return err
 	}
 	return validateWatchNames(cfg.Watches)
+}
+
+func validateJobSandboxes(cfg *Config, configPath string) error {
+	if !anySandboxEnforced(cfg.Jobs) {
+		for i := 0; i < len(cfg.Jobs); i++ {
+			if err := validateJobSandbox(&cfg.Jobs[i], protectedPaths{}); err != nil {
+				return fmt.Errorf("config: job %q sandbox.%w", cfg.Jobs[i].Name, err)
+			}
+		}
+		return nil
+	}
+	guard, err := sandboxPathGuard(*cfg, configPath)
+	if err != nil {
+		return err
+	}
+	for i := 0; i < len(cfg.Jobs); i++ {
+		if err = validateJobSandbox(&cfg.Jobs[i], guard); err != nil {
+			return fmt.Errorf("config: job %q sandbox.%w", cfg.Jobs[i].Name, err)
+		}
+	}
+	return nil
+}
+
+func validateJobSandbox(job *JobConfig, guard protectedPaths) error {
+	applySandboxDefaults(&job.Sandbox)
+	if err := validateSandboxMode(job.Sandbox); err != nil {
+		return err
+	}
+	if err := validateSandboxLimits(job.Sandbox); err != nil {
+		return err
+	}
+	if err := validateSandboxEnv(job.Sandbox.EnvAllow); err != nil {
+		return err
+	}
+	if job.Sandbox.Mode == "off" {
+		return nil
+	}
+	workspace, err := resolveSandboxWorkspace(job.Sandbox.Workspace)
+	if err != nil {
+		return err
+	}
+	if err = guard.check("workspace", workspace); err != nil {
+		return err
+	}
+	inputs, err := resolveSandboxInputs(job.Sandbox.Inputs, guard)
+	if err != nil {
+		return err
+	}
+	job.Sandbox.Workspace, job.Sandbox.Inputs = workspace, inputs
+	return nil
+}
+
+func validateSandboxMode(sandbox SandboxConfig) error {
+	switch sandbox.Mode {
+	case "enforce":
+		if sandbox.Reason != "" {
+			return fmt.Errorf("reason: forbidden unless mode=off")
+		}
+	case "off":
+		if strings.TrimSpace(sandbox.Reason) == "" {
+			return fmt.Errorf("reason: required when mode=off")
+		}
+	default:
+		return fmt.Errorf("mode: unknown value %q", sandbox.Mode)
+	}
+	if sandbox.Network != "none" && sandbox.Network != "egress" {
+		return fmt.Errorf("network: unknown value %q", sandbox.Network)
+	}
+	return nil
+}
+
+func validateSandboxLimits(sandbox SandboxConfig) error {
+	bytes, err := parseMemoryMax(sandbox.MemoryMax)
+	if err != nil {
+		return fmt.Errorf("memory_max: %w", err)
+	}
+	if bytes < minMemoryMaxBytes || bytes > maxMemoryMaxBytes {
+		return fmt.Errorf("memory_max: must be 64M..64G")
+	}
+	if sandbox.CPUWeight < minCPUWeight || sandbox.CPUWeight > maxCPUWeight {
+		return fmt.Errorf("cpu_weight: must be 1..10000")
+	}
+	if sandbox.TasksMax < minTasksMax || sandbox.TasksMax > maxTasksMax {
+		return fmt.Errorf("tasks_max: must be 16..32768")
+	}
+	return nil
+}
+
+func validateSandboxEnv(names []string) error {
+	if len(names) > MaxSandboxEnvAllow {
+		return fmt.Errorf("env_allow: exceeds %d", MaxSandboxEnvAllow)
+	}
+	for i := 0; i < len(names); i++ {
+		if !sandboxEnvName.MatchString(names[i]) {
+			return fmt.Errorf("env_allow/%d: invalid name %q", i, names[i])
+		}
+		for j := 0; j < len(reservedSandboxEnv); j++ {
+			if names[i] == reservedSandboxEnv[j] {
+				return fmt.Errorf("env_allow/%d: %s is reserved by the sandbox", i, names[i])
+			}
+		}
+	}
+	return nil
+}
+
+func resolveSandboxWorkspace(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("workspace: required when mode=enforce")
+	}
+	resolved, err := resolveExistingAbs(path)
+	if err != nil {
+		return "", fmt.Errorf("workspace: %w", err)
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", fmt.Errorf("workspace: stat %s: %w", resolved, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("workspace: %s is not a directory", resolved)
+	}
+	return resolved, nil
+}
+
+func resolveSandboxInputs(paths []string, guard protectedPaths) ([]string, error) {
+	if len(paths) > MaxSandboxInputs {
+		return nil, fmt.Errorf("inputs: exceeds %d", MaxSandboxInputs)
+	}
+	out := make([]string, 0, len(paths))
+	for i := 0; i < len(paths); i++ {
+		resolved, err := resolveExistingAbs(paths[i])
+		if err != nil {
+			return nil, fmt.Errorf("inputs/%d: %w", i, err)
+		}
+		if err = guard.check(fmt.Sprintf("inputs/%d", i), resolved); err != nil {
+			return nil, err
+		}
+		out = append(out, resolved)
+	}
+	return out, nil
+}
+
+type protectedPaths struct {
+	paths []string
+	home  string
+}
+
+func anySandboxEnforced(jobs []JobConfig) bool {
+	for i := 0; i < len(jobs); i++ {
+		if jobs[i].Sandbox.Mode != "off" {
+			return true
+		}
+	}
+	return false
+}
+
+// sandboxPathGuard fails closed when HOME cannot be resolved: without it the guard could
+// not refuse $HOME as a workspace.
+func sandboxPathGuard(cfg Config, configPath string) (protectedPaths, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return protectedPaths{}, fmt.Errorf("config: sandbox needs HOME to guard it: %w", err)
+	}
+	if home, err = filepath.EvalSymlinks(home); err != nil {
+		return protectedPaths{}, fmt.Errorf("config: sandbox resolve HOME: %w", err)
+	}
+	paths, err := protectedPathList(cfg, configPath)
+	if err != nil {
+		return protectedPaths{}, err
+	}
+	return protectedPaths{paths: paths, home: home}, nil
+}
+
+// sandboxExecutable finds the running Tribunus binary. The supervisor re-executes it as
+// each job's shim, so a job that could write it would run its own code outside the sandbox
+// at the next start.
+var sandboxExecutable = os.Executable
+
+func protectedPathList(cfg Config, configPath string) ([]string, error) {
+	executable, err := sandboxExecutable()
+	if err != nil {
+		return nil, fmt.Errorf("config: sandbox needs the executable path to guard it: %w", err)
+	}
+	candidates := []string{cfg.EventLog.Dir, cfg.EventLog.SigningKeyPath, configPath, executable}
+	out := make([]string, 0, len(candidates))
+	for i := 0; i < len(candidates); i++ {
+		if candidates[i] == "" {
+			continue
+		}
+		resolved, err := resolvePossiblyMissingAbs(candidates[i])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, resolved)
+	}
+	return out, nil
+}
+
+func (guard protectedPaths) check(field string, path string) error {
+	if path == "/" {
+		return fmt.Errorf("%s: refuse /", field)
+	}
+	// A directory containing HOME would hand the job the user's whole home directory.
+	if guard.home != "" && pathContains(path, guard.home) {
+		return fmt.Errorf("%s: refuse HOME %s or a directory containing it", field, guard.home)
+	}
+	for i := 0; i < len(guard.paths); i++ {
+		if pathOverlaps(path, guard.paths[i]) {
+			return fmt.Errorf("%s: overlaps protected path %s", field, guard.paths[i])
+		}
+	}
+	return nil
+}
+
+func resolveExistingAbs(path string) (string, error) {
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("%s is not absolute", path)
+	}
+	return filepath.EvalSymlinks(path)
+}
+
+func resolvePossiblyMissingAbs(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("config: abs %s: %w", path, err)
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err == nil {
+		return resolved, nil
+	}
+	return filepath.Clean(abs), nil
+}
+
+func pathOverlaps(a string, b string) bool {
+	return samePath(a, b) || pathContains(a, b) || pathContains(b, a)
+}
+
+func samePath(a string, b string) bool {
+	return filepath.Clean(a) == filepath.Clean(b)
+}
+
+func pathContains(parent string, child string) bool {
+	parent = filepath.Clean(parent)
+	child = filepath.Clean(child)
+	if parent == child || parent == "/" {
+		return true
+	}
+	return strings.HasPrefix(child, parent+string(os.PathSeparator))
+}
+
+func parseMemoryMax(value string) (int64, error) {
+	if value == "" {
+		return 0, fmt.Errorf("is required")
+	}
+	unit := value[len(value)-1:]
+	digits := value
+	multiplier := int64(1)
+	switch unit {
+	case "K", "M", "G", "T":
+		digits = value[:len(value)-1]
+		multiplier = memoryUnitMultiplier(unit)
+	}
+	number, err := strconv.ParseInt(digits, 10, 64)
+	if err != nil || number <= 0 {
+		return 0, fmt.Errorf("must be positive systemd size")
+	}
+	if number > math.MaxInt64/multiplier {
+		return 0, fmt.Errorf("is too large")
+	}
+	return number * multiplier, nil
+}
+
+func memoryUnitMultiplier(unit string) int64 {
+	switch unit {
+	case "K":
+		return 1024
+	case "M":
+		return 1024 * 1024
+	case "G":
+		return 1024 * 1024 * 1024
+	case "T":
+		return 1024 * 1024 * 1024 * 1024
+	}
+	return 1
 }
 
 func validateJobNames(jobs []JobConfig) error {

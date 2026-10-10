@@ -1,0 +1,1 @@
+{"id":"rt03-paths-event-log-write","boundary":"paths","direction":"violation","task":{"network":"none","env_allow":["EVENT_LOG_DIR"]},"attempt":{"kind":"write_event_log"},"expect":{"result":"refused","event":{"type":"rt03.violation","boundary":"paths","task_id":"rt03-paths-event-log-write"}}}

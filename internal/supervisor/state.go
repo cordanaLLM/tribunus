@@ -76,6 +76,7 @@ func reduceJobStarted(st eventlog.State, rec eventlog.Record) (eventlog.State, e
 		PID     int    `json:"pid"`
 		ShimPID int    `json:"shim_pid"`
 		Since   string `json:"since"`
+		Sandbox string `json:"sandbox"`
 	}
 	if err := json.Unmarshal(rec.Payload, &payload); err != nil {
 		return eventlog.State{}, fmt.Errorf("job payload: %w", err)
@@ -83,6 +84,7 @@ func reduceJobStarted(st eventlog.State, rec eventlog.Record) (eventlog.State, e
 	job := st.Jobs[rec.TaskID]
 	job.Name, job.State, job.PID = rec.TaskID, payload.State, payload.PID
 	job.ShimPID, job.Since, job.LastEvent = payload.ShimPID, payload.Since, rec.Type
+	job.Sandbox = payload.Sandbox
 	st.Jobs[rec.TaskID] = job
 	return st, nil
 }
@@ -125,12 +127,22 @@ func (s *Supervisor) statusFor(job config.JobConfig, replayed eventlog.Job) JobS
 		running = err == nil && held
 	}
 	if running {
-		return JobStatus{Name: job.Name, State: StateRunning, PID: rec.PID, ShimPID: rec.ShimPID, Since: rec.StartedAt, Restarts: replayed.Restarts}
+		return JobStatus{Name: job.Name, State: StateRunning, PID: rec.PID, ShimPID: rec.ShimPID, Since: rec.StartedAt, Restarts: replayed.Restarts, Sandbox: runningSandbox(rec, replayed)}
 	}
 	if replayed.State == string(StateStopped) {
-		return JobStatus{Name: job.Name, State: StateStopped, Restarts: replayed.Restarts}
+		return JobStatus{Name: job.Name, State: StateStopped, Restarts: replayed.Restarts, Sandbox: sandboxStatus(job.Sandbox)}
 	}
-	return JobStatus{Name: job.Name, State: StateDead, Restarts: replayed.Restarts}
+	return JobStatus{Name: job.Name, State: StateDead, Restarts: replayed.Restarts, Sandbox: sandboxStatus(job.Sandbox)}
+}
+
+// runningSandbox names the sandbox a running job was started under, as its shim recorded
+// it in job.started, never the current config, which may have changed since. Until the
+// shim's event for this start is replayed, the answer is unknown.
+func runningSandbox(rec jobRecord, replayed eventlog.Job) string {
+	if replayed.Since != rec.StartedAt || replayed.Sandbox == "" {
+		return "unknown"
+	}
+	return replayed.Sandbox
 }
 
 func readJobRecord(path string) (jobRecord, bool) {
@@ -182,7 +194,7 @@ func (s *Supervisor) adoptIfFreshStart(ctx context.Context, job config.JobConfig
 	if st.LastEvent != "job.started" {
 		return nil
 	}
-	payload := map[string]any{"state": string(StateRunning), "pid": status.PID, "shim_pid": status.ShimPID, "since": status.Since}
+	payload := map[string]any{"state": string(StateRunning), "pid": status.PID, "shim_pid": status.ShimPID, "since": status.Since, "sandbox": status.Sandbox}
 	return s.appendJobEvent(ctx, "job.adopted", job.Name, payload)
 }
 

@@ -19,8 +19,9 @@ func (s *Supervisor) shimCmd(ctx context.Context, job config.JobConfig) *exec.Cm
 		"--lock", s.lockPath(job.Name),
 		"--record", s.recordPath(job.Name),
 		"--log", job.LogPath,
-		"--",
 	)
+	args = append(args, sandboxFlagArgs(job.Sandbox)...)
+	args = append(args, "--")
 	args = append(args, job.Command...)
 	// #nosec G204 -- the shim path is this executable by default, and job
 	// command arguments are passed as argv after "--"; no shell is invoked.

@@ -63,6 +63,7 @@ type Job struct {
 	LastExitCode *int   `json:"last_exit_code,omitempty"`
 	LastReason   string `json:"last_reason,omitempty"`
 	LastEvent    string `json:"last_event"`
+	Sandbox      string `json:"sandbox,omitempty"`
 }
 
 type Reducer func(State, Record) (State, error)

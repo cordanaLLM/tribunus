@@ -9,3 +9,4 @@ record that supersedes it.
 | :--- | :--- | :--- | :--- |
 | [0000](0000-template.md) | 2026-09-11 | ADR template | Accepted |
 | [0004](0004-golusoris-pinned-base.md) | 2026-10-09 | Base the control plane on golusoris, pinned | Proposed |
+| [0005](0005-sandboxed-job-runner.md) | 2026-10-10 | Sandbox job execution with a systemd scope, bubblewrap and pasta | Proposed |

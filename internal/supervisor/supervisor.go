@@ -39,6 +39,7 @@ type JobStatus struct {
 	ShimPID  int
 	Since    string
 	Restarts int
+	Sandbox  string
 }
 
 type jobSignalTarget struct {

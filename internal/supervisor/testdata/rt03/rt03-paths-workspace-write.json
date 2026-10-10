@@ -1,0 +1,1 @@
+{"id":"rt03-paths-workspace-write","boundary":"paths","direction":"compliant","task":{"network":"none","env_allow":["WORKSPACE"]},"attempt":{"kind":"write_workspace"},"expect":{"result":"allowed"}}

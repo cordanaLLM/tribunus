@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/cordanaLLM/tribunus/internal/config"
@@ -26,6 +27,7 @@ type shimConfig struct {
 	RecordPath  string
 	LogPath     string
 	Command     []string
+	Sandbox     config.SandboxConfig
 }
 
 func RunShim(args []string) int {
@@ -54,6 +56,15 @@ func parseShimArgs(args []string) (shimConfig, error) {
 	fs.StringVar(&cfg.LockPath, "lock", "", "")
 	fs.StringVar(&cfg.RecordPath, "record", "", "")
 	fs.StringVar(&cfg.LogPath, "log", "", "")
+	fs.StringVar(&cfg.Sandbox.Mode, "sandbox-mode", "", "")
+	fs.StringVar(&cfg.Sandbox.Reason, "sandbox-reason", "", "")
+	fs.StringVar(&cfg.Sandbox.Workspace, "sandbox-workspace", "", "")
+	fs.Var((*stringListFlag)(&cfg.Sandbox.Inputs), "sandbox-input", "")
+	fs.Var((*stringListFlag)(&cfg.Sandbox.EnvAllow), "sandbox-env-allow", "")
+	fs.StringVar(&cfg.Sandbox.Network, "sandbox-network", "", "")
+	fs.StringVar(&cfg.Sandbox.MemoryMax, "sandbox-memory-max", "", "")
+	fs.IntVar(&cfg.Sandbox.CPUWeight, "sandbox-cpu-weight", 0, "")
+	fs.IntVar(&cfg.Sandbox.TasksMax, "sandbox-tasks-max", 0, "")
 	if err := fs.Parse(args); err != nil {
 		return shimConfig{}, fmt.Errorf("job-shim: parse: %w", err)
 	}
@@ -77,6 +88,10 @@ func checkShimConfig(cfg shimConfig) error {
 	if len(cfg.Command) == 0 || len(cfg.Command) > config.MaxJobArgs {
 		return fmt.Errorf("job-shim: command must have 1..%d args", config.MaxJobArgs)
 	}
+	cfg.Sandbox = config.NormalizeSandbox(cfg.Sandbox)
+	if err := config.ValidateSandbox(cfg.Sandbox); err != nil {
+		return fmt.Errorf("job-shim: sandbox.%w", err)
+	}
 	return nil
 }
 
@@ -97,9 +112,17 @@ func runShim(cfg shimConfig) error {
 	defer runtime.UnlockOSThread()
 	runCtx, cancel := context.WithTimeout(context.Background(), maxJobRuntime)
 	defer cancel()
+	command, err := buildJobCommand(cfg.Command, cfg.Sandbox, sandboxBuildOptions{
+		Paths: sandboxPaths{EventLogDir: cfg.EventLogDir, SigningKey: cfg.SigningKey},
+		Env:   os.LookupEnv,
+	})
+	if err != nil {
+		return fmt.Errorf("job-shim: sandbox %s: %w", cfg.Name, err)
+	}
 	// #nosec G204 -- job command comes from validated operator config and is
 	// executed as argv without a shell.
-	cmd := exec.CommandContext(runCtx, cfg.Command[0], cfg.Command[1:]...)
+	cmd := exec.CommandContext(runCtx, command.Argv[0], command.Argv[1:]...)
+	cmd.Env = command.Env
 	cmd.Stdout, cmd.Stderr = logFile, logFile
 	prepareProcess(cmd)
 	if err = cmd.Start(); err != nil {
@@ -156,7 +179,7 @@ func shimWriter(cfg shimConfig) (*eventlog.Writer, error) {
 }
 
 func appendStarted(writer *eventlog.Writer, cfg shimConfig, pid int, started string) error {
-	payload := map[string]any{"state": string(StateRunning), "pid": pid, "shim_pid": os.Getpid(), "since": started}
+	payload := map[string]any{"state": string(StateRunning), "pid": pid, "shim_pid": os.Getpid(), "since": started, "sandbox": sandboxStatus(cfg.Sandbox)}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("job-shim: marshal started: %w", err)
@@ -165,6 +188,17 @@ func appendStarted(writer *eventlog.Writer, cfg shimConfig, pid int, started str
 	defer cancel()
 	_, err = writer.Append(ctx, eventlog.Event{Type: "job.started", TaskID: cfg.Name, Payload: body})
 	return err
+}
+
+type stringListFlag []string
+
+func (flag *stringListFlag) String() string {
+	return strings.Join(*flag, ",")
+}
+
+func (flag *stringListFlag) Set(value string) error {
+	*flag = append(*flag, value)
+	return nil
 }
 
 func waitAndRecordExit(writer *eventlog.Writer, cfg shimConfig, cmd *exec.Cmd) error {

@@ -1,0 +1,1 @@
+{"id":"rt03-network-egress-loopback","boundary":"network","direction":"violation","task":{"network":"egress","env_allow":["TARGET_HOST","TARGET_PORT"]},"attempt":{"kind":"tcp_connect_loopback"},"expect":{"result":"refused","event":{"type":"rt03.violation","boundary":"network","task_id":"rt03-network-egress-loopback"}}}

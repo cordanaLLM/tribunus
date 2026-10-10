@@ -423,6 +423,54 @@ func TestWaitStartedEndsWhenTheShimHasExited(t *testing.T) {
 	}
 }
 
+// TestWaitStartedKeepsTheReplayErrorWhenTheContextEnds: while the shim is alive the wait goes
+// on, whatever the replay returns. When the caller's context ends it, the error names both
+// the deadline and the replay that was still failing.
+func TestWaitStartedKeepsTheReplayErrorWhenTheContextEnds(t *testing.T) {
+	sup := testSupervisor(t, testJob("probe", []string{"/bin/true"}))
+	if err := sup.appendJobEvent(testContext(t), "job.stopped", "probe", map[string]any{"state": "stopped"}); err != nil {
+		t.Fatalf("append seed = %v, want nil", err)
+	}
+	corruptEventLog(t, sup.cfg.EventLog.Dir)
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	err := sup.waitStarted(ctx, "probe", eventlog.Job{}, os.Getpid())
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("waitStarted(corrupt log, live shim) = %v, want the deadline: a live shim is waited for", err)
+	}
+	if !strings.Contains(err.Error(), "probe did not start: ") || !strings.Contains(err.Error(), "last replay: ") || !strings.Contains(err.Error(), "eventlog: seq 1 file ") {
+		t.Fatalf("waitStarted(corrupt log, live shim) = %v, want did-not-start with the last replay error", err)
+	}
+	var both interface{ Unwrap() []error }
+	if !errors.As(err, &both) || len(both.Unwrap()) != 2 {
+		t.Fatalf("waitStarted(corrupt log, live shim) = %v, want it to wrap the deadline and the replay error", err)
+	}
+}
+
+// TestWaitStartedNamesOnlyTheContextWhenReplaysWork: with nothing wrong in the log, the
+// error of an ended wait is the context's alone.
+func TestWaitStartedNamesOnlyTheContextWhenReplaysWork(t *testing.T) {
+	sup := testSupervisor(t, testJob("probe", []string{"/bin/true"}))
+	// One record, so that every replay reads the log and checks its context.
+	if err := sup.appendJobEvent(testContext(t), "job.stopped", "probe", map[string]any{"state": "stopped"}); err != nil {
+		t.Fatalf("append seed = %v, want nil", err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	err := sup.waitStarted(ctx, "probe", eventlog.Job{}, os.Getpid())
+	if !errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "last replay") {
+		t.Fatalf("waitStarted(clean log, live shim) = %v, want did-not-start with the deadline only", err)
+	}
+	if got, want := err.Error(), "supervisor: probe did not start: context deadline exceeded"; got != want {
+		t.Fatalf("waitStarted(clean log, live shim) = %q, want %q", got, want)
+	}
+	// A replay that failed only because the context had ended adds nothing to say.
+	err = sup.waitStarted(canceledContext(t), "probe", eventlog.Job{}, os.Getpid())
+	if got, want := fmt.Sprint(err), "supervisor: probe did not start: context canceled"; got != want {
+		t.Fatalf("waitStarted(canceled context, live shim) = %q, want %q", got, want)
+	}
+}
+
 // TestWaitStartedReplaysOnceMoreAfterTheShimExited: a shim can record its start and exit
 // between a replay and the check that finds it gone. That start must still count.
 func TestWaitStartedReplaysOnceMoreAfterTheShimExited(t *testing.T) {

@@ -264,7 +264,7 @@ func (s *Supervisor) waitStarted(ctx context.Context, name string, before eventl
 		}
 		shimGone = shimExited(shimPID)
 		if !shimGone && !sleepContext(ctx, 10*time.Millisecond) {
-			return ctx.Err()
+			return startWaitEnded(name, ctx.Err(), lastErr)
 		}
 	}
 	if lastErr != nil {
@@ -274,6 +274,15 @@ func (s *Supervisor) waitStarted(ctx context.Context, name string, before eventl
 		return fmt.Errorf("supervisor: %s did not start: its shim exited without recording a start; a refused job's log names the reason", name)
 	}
 	return fmt.Errorf("supervisor: %s did not start", name)
+}
+
+// startWaitEnded is the error of a wait the caller's context ended. A replay that was still
+// failing then is part of the answer: without it the caller sees only a deadline.
+func startWaitEnded(name string, ctxErr error, lastErr error) error {
+	if lastErr == nil || errors.Is(lastErr, ctxErr) {
+		return fmt.Errorf("supervisor: %s did not start: %w", name, ctxErr)
+	}
+	return fmt.Errorf("supervisor: %s did not start: %w; last replay: %w", name, ctxErr, lastErr)
 }
 
 // shimExited reports whether the shim has exited. A shim whose state cannot be read is

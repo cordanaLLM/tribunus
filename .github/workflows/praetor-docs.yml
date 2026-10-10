@@ -6,6 +6,7 @@ name: Praetor Documentation Governance
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: ['main']
+  merge_group:
 
 permissions:
   contents: read

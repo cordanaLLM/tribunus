@@ -4,7 +4,7 @@
       "id": "openai-openapi",
       "url_template": "https://raw.githubusercontent.com/openai/openai-openapi/{revision}/openapi.yaml",
       "pinned_revision": "e95c0fe615f45a19e8878af923a729948445a6bd",
-      "full_document_sha256": "06d914881ac7e73185739ce80bc3ad84bfcd5df022e6bab5527b87d938f67506",
+      "full_document_sha256": "8f037f570565278e84c57ef1f1777c1c8ede954da7b428d70ec93dc294781ba7",
       "spdx_license": "MIT",
       "copyright_holder": "OpenAI",
       "fragments": [

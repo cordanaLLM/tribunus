@@ -700,7 +700,7 @@ func TestShimEventAppendAndCleanupErrors(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("Start(true) = %v, want nil", err)
 	}
-	err := waitAndRecordExit(writer, cfg, cmd)
+	err := waitAndRecordExit(testContext(t), writer, cfg, cmd)
 	if err == nil {
 		t.Fatal("waitAndRecordExit(failing writer) = nil, want append error")
 	}
@@ -1762,7 +1762,9 @@ func processExists(pid int) bool {
 		return false
 	}
 	status := string(body)
-	return !strings.Contains(status, "\nState:\tZ") && !strings.Contains(status, "\nState:\tX")
+	dead := strings.Contains(status, "\nState:\tZ") || strings.Contains(status, "\nState:\tX")
+	// A zombie line with threads left is a running process: see processGone.
+	return !dead || !strings.Contains(status, "\nThreads:\t1\n")
 }
 
 func processParent(pid int) (int, error) {

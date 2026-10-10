@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -39,6 +40,16 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// The stand-in keeps its main goroutine on the process's first thread, so that the exec
+// below always comes from another thread. The kernel then ends the first thread before the
+// new program takes over its process id, and for that moment /proc shows the process as a
+// zombie: the case that once made the scope check take a live job for an exited one.
+func init() {
+	if os.Getenv(fakeScopeEnv) == "1" {
+		runtime.LockOSThread()
+	}
+}
+
 func runFakeScopeCommand(args []string) int {
 	// The first "--" ends systemd-run's own arguments; pasta and bwrap carry later ones.
 	sep := 0
@@ -55,9 +66,12 @@ func runFakeScopeCommand(args []string) int {
 		return 2
 	}
 	command := args[sep+1:]
-	// #nosec G204 -- test stand-in for systemd-run; the argv comes from the sandbox builder.
-	err := syscall.Exec(command[0], command, os.Environ())
-	fmt.Fprintf(os.Stderr, "fake scope command: exec %s: %v\n", command[0], err)
+	failed := make(chan error, 1)
+	go func() {
+		// #nosec G204 -- test stand-in for systemd-run; the argv comes from the sandbox builder.
+		failed <- syscall.Exec(command[0], command, os.Environ())
+	}()
+	fmt.Fprintf(os.Stderr, "fake scope command: exec %s: %v\n", command[0], <-failed)
 	return 127
 }
 
@@ -145,18 +159,28 @@ func pick(values []string, i int) string {
 	return values[i]
 }
 
+// notAChild makes the process under test one that is not a child of the test process, so
+// that a made-up process id never reaches the kernel's wait interface.
+func notAChild(t *testing.T) {
+	t.Helper()
+	old := childExitProbe
+	t.Cleanup(func() { childExitProbe = old })
+	childExitProbe = func(int) (bool, bool, error) { return false, false, nil }
+}
+
 func (w *scopeWorld) install(t *testing.T) {
 	t.Helper()
 	oldCgroup, oldStatus, oldExe, oldSleep := procCgroupReadFile, procStatusReadFile, procExeReadlink, scopeConfirmSleep
 	t.Cleanup(func() {
 		procCgroupReadFile, procStatusReadFile, procExeReadlink, scopeConfirmSleep = oldCgroup, oldStatus, oldExe, oldSleep
 	})
+	notAChild(t)
 	procStatusReadFile = func(string) ([]byte, error) {
 		state := pick(w.states, w.sleeps)
 		if state == "missing" {
 			return nil, fs.ErrNotExist
 		}
-		return []byte("Name:\tjob\nState:\t" + state + "\nPPid:\t7\n"), nil
+		return []byte("Name:\tjob\nState:\t" + state + "\nPPid:\t7\nThreads:\t1\n"), nil
 	}
 	procExeReadlink = func(string) (string, error) {
 		image := pick(w.images, w.sleeps)
@@ -279,8 +303,9 @@ func TestProcessGoneCountsAZombie(t *testing.T) {
 	if processExists(pid) {
 		t.Fatalf("processExists(zombie) = true, want false")
 	}
-	if err := cmd.Wait(); err == nil {
-		t.Fatalf("Wait(killed child) = nil, want its kill status")
+	var killed *exec.ExitError
+	if err := cmd.Wait(); !errors.As(err, &killed) {
+		t.Fatalf("Wait(killed child) = %v, want its kill status: processGone must not collect the child", err)
 	}
 	if gone, err := processGone(pid); err != nil || !gone {
 		t.Fatalf("processGone(collected child) = %v, %v, want true", gone, err)
@@ -290,6 +315,7 @@ func TestProcessGoneCountsAZombie(t *testing.T) {
 func TestProcessGoneReportsUnreadableState(t *testing.T) {
 	old := procStatusReadFile
 	t.Cleanup(func() { procStatusReadFile = old })
+	notAChild(t)
 	procStatusReadFile = func(string) ([]byte, error) { return nil, fs.ErrPermission }
 	if gone, err := processGone(4242); gone || !errors.Is(err, fs.ErrPermission) {
 		t.Fatalf("processGone(unreadable) = %v, %v, want false and the read error", gone, err)
@@ -301,9 +327,87 @@ func TestProcessGoneReportsUnreadableState(t *testing.T) {
 	if gone, err := processGone(4242); !gone || err != nil {
 		t.Fatalf("processGone(ESRCH) = %v, %v, want true", gone, err)
 	}
-	procStatusReadFile = func(string) ([]byte, error) { return []byte("Name:\tx\nState:\tX (dead)\n"), nil }
+	procStatusReadFile = func(string) ([]byte, error) { return []byte("Name:\tx\nState:\tX (dead)\nThreads:\t1\n"), nil }
 	if gone, err := processGone(4242); !gone || err != nil {
 		t.Fatalf("processGone(dead) = %v, %v, want true", gone, err)
+	}
+	// A zombie line with threads left is a process that still runs: one that execs from a
+	// thread other than its first, or whose first thread has ended.
+	for _, status := range []string{"State:\tZ (zombie)\nThreads:\t3\n", "State:\tZ (zombie)\nThreads:\t0\n", "State:\tZ (zombie)\n", "State:\tX (dead)\nThreads:\t2\n"} {
+		procStatusReadFile = func(string) ([]byte, error) { return []byte("Name:\tx\n" + status), nil }
+		if gone, err := processGone(4242); gone || err != nil {
+			t.Fatalf("processGone(%q) = %v, %v, want false: threads are left", status, gone, err)
+		}
+	}
+	// What the kernel says about a child is final, whatever /proc shows.
+	procStatusReadFile = func(string) ([]byte, error) { return []byte("Name:\tx\nState:\tZ (zombie)\nThreads:\t1\n"), nil }
+	childExitProbe = func(int) (bool, bool, error) { return false, true, nil }
+	if gone, err := processGone(4242); gone || err != nil {
+		t.Fatalf("processGone(child the kernel calls running) = %v, %v, want false", gone, err)
+	}
+	childExitProbe = func(int) (bool, bool, error) { return true, true, nil }
+	procStatusReadFile = func(string) ([]byte, error) { return []byte("Name:\tx\nState:\tS (sleeping)\nThreads:\t4\n"), nil }
+	if gone, err := processGone(4242); !gone || err != nil {
+		t.Fatalf("processGone(child the kernel calls exited) = %v, %v, want true", gone, err)
+	}
+	childExitProbe = func(int) (bool, bool, error) { return false, false, fs.ErrPermission }
+	if gone, err := processGone(4242); gone || !errors.Is(err, fs.ErrPermission) {
+		t.Fatalf("processGone(wait state unreadable) = %v, %v, want false and the error", gone, err)
+	}
+}
+
+// TestProcessGoneIsNotFooledByAnExecWithThreads: a child with several threads that execs
+// from a thread other than its first is shown as a zombie by /proc for a moment. It has not
+// exited, and processGone must not say so at any point.
+func TestProcessGoneIsNotFooledByAnExecWithThreads(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("Executable() = %v, want nil", err)
+	}
+	sawZombieLine := 0
+	for run := 0; run < 5; run++ {
+		cmd := exec.CommandContext(t.Context(), self, "--user", "--", "/usr/bin/sleep", "30") // #nosec G204 -- the test binary as the stand-in scope command.
+		cmd.Env = append(os.Environ(), fakeScopeEnv+"=1")
+		if err = cmd.Start(); err != nil {
+			t.Fatalf("Start(stand-in) = %v, want nil", err)
+		}
+		pid := cmd.Process.Pid
+		status := filepath.Join("/proc", strconv.Itoa(pid), "status")
+		execed := time.Time{}
+		for i := 0; i < 2_000_000 && (execed.IsZero() || time.Since(execed) < 20*time.Millisecond); i++ {
+			gone, goneErr := processGone(pid)
+			if gone || goneErr != nil {
+				t.Fatalf("processGone(child that only execs) = %v, %v on poll %d, want false: it never exited", gone, goneErr, i)
+			}
+			if body, readErr := os.ReadFile(status); readErr == nil && strings.HasPrefix(procStatusField(string(body), "State:"), "Z") {
+				sawZombieLine++
+			}
+			if execed.IsZero() && strings.HasSuffix(processImage(pid), "sleep") {
+				execed = time.Now()
+			}
+		}
+		if execed.IsZero() {
+			t.Fatalf("stand-in %d never became sleep", pid)
+		}
+		if err = cmd.Process.Kill(); err != nil {
+			t.Fatalf("Kill(stand-in) = %v, want nil", err)
+		}
+		if err = awaitExitUncollected(pid); err != nil {
+			t.Fatalf("awaitExitUncollected(killed stand-in) = %v, want nil", err)
+		}
+		if gone, goneErr := processGone(pid); !gone || goneErr != nil {
+			t.Fatalf("processGone(killed, uncollected child) = %v, %v, want true", gone, goneErr)
+		}
+		// The check must leave the child for its parent to collect: a kill status, not "no child".
+		var killed *exec.ExitError
+		if err = cmd.Wait(); !errors.As(err, &killed) {
+			t.Fatalf("Wait(killed stand-in) = %v, want its kill status: processGone must not collect the child", err)
+		}
+	}
+	// Without this the test would prove nothing on a machine where the moment is never seen.
+	t.Logf("/proc showed the running child as a zombie on %d polls over 5 runs", sawZombieLine)
+	if sawZombieLine == 0 {
+		t.Skipf("/proc never showed the zombie line during the exec; the case was not exercised here")
 	}
 }
 
@@ -465,6 +569,7 @@ func TestWaitStartedKeepsTheReplayErrorWhenTheContextEnds(t *testing.T) {
 	defer cancel()
 	old := procStatusReadFile
 	t.Cleanup(func() { procStatusReadFile = old })
+	notAChild(t)
 	checks := 0
 	procStatusReadFile = func(string) ([]byte, error) {
 		checks++
@@ -542,6 +647,7 @@ func TestWaitStartedReplaysOnceMoreAfterTheShimExited(t *testing.T) {
 	ctx := testContext(t)
 	old := procStatusReadFile
 	t.Cleanup(func() { procStatusReadFile = old })
+	notAChild(t)
 	checks := 0
 	procStatusReadFile = func(string) ([]byte, error) {
 		checks++

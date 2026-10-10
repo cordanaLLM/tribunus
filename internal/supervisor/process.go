@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"os/exec"
+	"strconv"
 	"time"
 
 	"github.com/cordanaLLM/tribunus/internal/config"
@@ -19,6 +20,9 @@ func (s *Supervisor) shimCmd(ctx context.Context, job config.JobConfig) *exec.Cm
 		"--lock", s.lockPath(job.Name),
 		"--record", s.recordPath(job.Name),
 		"--log", job.LogPath,
+		"--max-runtime-seconds", strconv.Itoa(job.MaxRuntimeSeconds),
+		"--stop-signal", job.Stop.Signal,
+		"--stop-grace-seconds", strconv.Itoa(job.Stop.GraceSeconds),
 	)
 	args = append(args, sandboxFlagArgs(job.Sandbox)...)
 	args = append(args, "--")

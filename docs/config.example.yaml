@@ -12,6 +12,8 @@ jobs:
     log_path: /var/log/tribunus/daily-catalog-sync.log
     schedule: "0 2 * * *"
     router_alias: cordana/auto
+    # Stop the job when it has run this long; 0 (the default) sets no deadline of its own.
+    max_runtime_seconds: 0
     restart:
       policy: on-failure
       max_restarts: 3

@@ -115,9 +115,19 @@ func processImage(pid int) string {
 	return image
 }
 
-// processGone reports whether pid has exited. A zombie has: it is an exit status waiting for
-// its parent to collect it, and nothing runs in it any more.
+// processGone reports whether pid has exited. For a child of this process the kernel's wait
+// interface answers exactly. The State line of /proc does not: it shows a zombie also while a
+// process with several threads execs, and when its first thread has ended while others run.
+// For any other process only its absence counts as an exit, and a zombie with one thread
+// left, which is a process its parent has not collected yet.
 func processGone(pid int) (bool, error) {
+	exited, child, err := childExitProbe(pid)
+	if err != nil {
+		return false, err
+	}
+	if child {
+		return exited, nil
+	}
 	body, err := procStatusReadFile(filepath.Join("/proc", strconv.Itoa(pid), "status"))
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, unix.ESRCH) {
 		return true, nil
@@ -125,8 +135,10 @@ func processGone(pid int) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("read status of pid %d: %w", pid, err)
 	}
-	state := procStatusField(string(body), "State:")
-	return strings.HasPrefix(state, "Z") || strings.HasPrefix(state, "X"), nil
+	status := string(body)
+	state := procStatusField(status, "State:")
+	dead := strings.HasPrefix(state, "Z") || strings.HasPrefix(state, "X")
+	return dead && procStatusField(status, "Threads:") == "1", nil
 }
 
 // procStatusField returns the value of one line of /proc/<pid>/status, or "".

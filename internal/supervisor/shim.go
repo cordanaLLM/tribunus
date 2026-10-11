@@ -21,13 +21,16 @@ import (
 
 type shimConfig struct {
 	EventLogDir string
-	SigningKey  string
-	Name        string
-	LockPath    string
-	RecordPath  string
-	LogPath     string
-	Command     []string
-	Sandbox     config.SandboxConfig
+	// EventLogLockTimeoutSeconds is the configured wait for the event log's lock, 0 for the
+	// log's own default.
+	EventLogLockTimeoutSeconds int
+	SigningKey                 string
+	Name                       string
+	LockPath                   string
+	RecordPath                 string
+	LogPath                    string
+	Command                    []string
+	Sandbox                    config.SandboxConfig
 	// MaxRuntimeSeconds is the job's deadline, 0 for the longest any job may run. At the
 	// deadline the job gets StopSignal, then StopGraceSeconds to exit, then the kill.
 	MaxRuntimeSeconds int
@@ -56,6 +59,7 @@ func parseShimArgs(args []string) (shimConfig, error) {
 	fs := flag.NewFlagSet("job-shim", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&cfg.EventLogDir, "event-log-dir", "", "")
+	fs.IntVar(&cfg.EventLogLockTimeoutSeconds, "event-log-lock-timeout-seconds", 0, "")
 	fs.StringVar(&cfg.SigningKey, "signing-key", "", "")
 	fs.StringVar(&cfg.Name, "name", "", "")
 	fs.StringVar(&cfg.LockPath, "lock", "", "")
@@ -229,7 +233,13 @@ func shimWriter(cfg shimConfig) (*eventlog.Writer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return eventlog.Open(cfg.EventLogDir, signer, eventlog.Limits{Clock: clk})
+	return eventlog.Open(cfg.EventLogDir, signer, shimEventLogLimits(cfg, clk))
+}
+
+// shimEventLogLimits are the limits under which the shim appends its job's events: the lock
+// timeout its supervisor was configured with.
+func shimEventLogLimits(cfg shimConfig, clk clockwork.Clock) eventlog.Limits {
+	return eventlog.Limits{Clock: clk, LockTimeout: time.Duration(cfg.EventLogLockTimeoutSeconds) * time.Second}
 }
 
 func appendStarted(writer *eventlog.Writer, cfg shimConfig, pid int, started string) error {

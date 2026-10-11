@@ -51,6 +51,8 @@ event_log:
   dir: .tribunus
   signing_key_path: /run/secrets/tribunus-eventlog-seed
   public_key: ""
+  # How long a writer waits for the log's lock (1 to 300). Writers queue: the last of n
+  # waits for n-1 appends of four syncs each. Raise it on a slow disk.
   lock_timeout_seconds: 5
   max_replay_records: 100000
 # The release watch runs as its own supervised, sandboxed job, for example:

@@ -32,6 +32,25 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: 'go.mod'
+      - name: Commit messages and the pull request text name no model or coding tool as an author
+        # On a pull request: the commits it adds and its text. On a push: the commits the push
+        # brought, so the text a squash merge was given is read as well.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_HEAD: ${{ github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            git log -z --format='%H%n%B' "$PR_BASE..$PR_HEAD" > "$RUNNER_TEMP/commit-messages"
+            printf '%s\n' "$PR_BODY" > "$RUNNER_TEMP/pr-text.txt"
+            go run ./tools/commitmsg -messages="$RUNNER_TEMP/commit-messages" -text="$RUNNER_TEMP/pr-text.txt"
+          else
+            git log -z --format='%H%n%B' "$PUSH_BEFORE..$PUSH_HEAD" > "$RUNNER_TEMP/commit-messages"
+            go run ./tools/commitmsg -messages="$RUNNER_TEMP/commit-messages"
+          fi
       - name: Sandbox runner dependencies
         # Ubuntu restricts unprivileged user namespaces, which bwrap needs, through AppArmor.
         run: |

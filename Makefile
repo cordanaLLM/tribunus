@@ -46,3 +46,10 @@ schemas-repin:
 
 schemas-check:
 	@go run -tags schemasrefresh ./tools/schemas -mode=check -root=.
+
+# The messages of the commits this branch adds to origin/main name no model or coding tool
+# as an author. CI runs the same check on every pull request and on every push to main.
+.PHONY: commit-messages
+commit-messages:
+	@f=$$(mktemp) && git log -z --format='%H%n%B' origin/main..HEAD > "$$f" \
+		&& go run ./tools/commitmsg -messages="$$f"; rc=$$?; rm -f "$$f"; exit $$rc

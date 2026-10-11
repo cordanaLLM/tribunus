@@ -1,0 +1,1 @@
+{"id":"rt01-schema-empty","rule":"rt01","direction":"violation","call":{"temperature":0,"output_schema":{},"output":"anything at all"},"expect":{"result":"refused","reason":"schema"}}

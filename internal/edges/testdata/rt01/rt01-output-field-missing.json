@@ -1,0 +1,1 @@
+{"id":"rt01-output-field-missing","rule":"rt01","direction":"violation","call":{"temperature":0,"output_schema":{"type":"object","required":["verdict","score"],"additionalProperties":false,"properties":{"verdict":{"enum":["pass","fail"]},"score":{"type":"integer","minimum":0,"maximum":100}}},"output":"{\"verdict\":\"pass\"}"},"expect":{"result":"refused","reason":"output"}}

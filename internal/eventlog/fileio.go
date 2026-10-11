@@ -7,6 +7,11 @@ import (
 	"path/filepath"
 )
 
+// syncFile writes a file's or a directory's data to disk. An append calls it four times,
+// twice for the record and twice for HEAD, and that is what an append costs on a slow disk.
+// The tests replace it to make a disk slow.
+var syncFile = func(f *os.File) error { return f.Sync() }
+
 func atomicReplace(dir string, name string, body []byte, mode os.FileMode) error {
 	tmp, err := os.CreateTemp(dir, "."+name+".tmp-*")
 	if err != nil {
@@ -31,7 +36,7 @@ func writeTempFile(tmp *os.File, body []byte, mode os.FileMode) error {
 	if err := tmp.Chmod(mode); err != nil {
 		return closeWithCause(tmp, fmt.Errorf("eventlog: chmod %s: %w", tmp.Name(), err))
 	}
-	if err := tmp.Sync(); err != nil {
+	if err := syncFile(tmp); err != nil {
 		return closeWithCause(tmp, fmt.Errorf("eventlog: fsync %s: %w", tmp.Name(), err))
 	}
 	if err := tmp.Close(); err != nil {
@@ -47,7 +52,7 @@ func syncDir(dir string) error {
 	if err != nil {
 		return fmt.Errorf("eventlog: open dir %s: %w", dir, err)
 	}
-	if err = f.Sync(); err != nil {
+	if err = syncFile(f); err != nil {
 		return closeWithCause(f, fmt.Errorf("eventlog: fsync dir %s: %w", dir, err))
 	}
 	if err = f.Close(); err != nil {

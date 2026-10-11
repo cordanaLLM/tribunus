@@ -155,9 +155,26 @@ func TestLockTimeoutFailsClosed(t *testing.T) {
 	}
 }
 
-func TestConcurrentAppendersContiguous(t *testing.T) {
-	dir, signer, limits := testLog(t)
-	const total = 16
+// testQueueLockTimeout is the lock timeout of the tests that queue writers. It only ends a
+// failing run: the last of n queued writers waits for n-1 appends of four syncs each, and one
+// second was not enough for sixteen of them on a disk under write load (#83).
+const testQueueLockTimeout = time.Minute
+
+// slowSync makes every sync of a file or directory take at least d, as a disk under write
+// load does. The real sync is back when the test ends.
+func slowSync(t *testing.T, d time.Duration) {
+	t.Helper()
+	real := syncFile
+	syncFile = func(f *os.File) error {
+		time.Sleep(d)
+		return real(f)
+	}
+	t.Cleanup(func() { syncFile = real })
+}
+
+// appendConcurrently starts total writers at once, one record each, and returns their results.
+func appendConcurrently(t *testing.T, dir string, signer *corereceipt.Signer, limits Limits, total int) []error {
+	t.Helper()
 	var wg sync.WaitGroup
 	errs := make(chan error, total)
 	for i := 0; i < total; i++ {
@@ -171,20 +188,110 @@ func TestConcurrentAppendersContiguous(t *testing.T) {
 	}
 	wg.Wait()
 	close(errs)
+	out := make([]error, 0, total)
 	for err := range errs {
-		if err != nil {
-			t.Fatalf("concurrent Append() = %v, want nil", err)
-		}
+		out = append(out, err)
 	}
+	return out
+}
+
+// requireContiguous fails unless the log holds exactly the records 1 to want.
+func requireContiguous(t *testing.T, dir string, want int) {
+	t.Helper()
 	seqs := eventSeqs(t, eventsDir(dir))
-	if len(seqs) != total {
-		t.Fatalf("records = %v, want %d", seqs, total)
+	if len(seqs) != want {
+		t.Fatalf("records = %v, want %d", seqs, want)
 	}
 	for i, seq := range seqs {
 		if seq != uint64(i+1) {
-			t.Fatalf("seqs = %v, want contiguous", seqs)
+			t.Fatalf("records = %v, want 1 to %d without a gap", seqs, want)
 		}
 	}
+}
+
+func TestConcurrentAppendersContiguous(t *testing.T) {
+	dir, signer, limits := testLog(t)
+	limits.LockTimeout = testQueueLockTimeout
+	const total = 16
+	errs := appendConcurrently(t, dir, signer, limits, total)
+	for i := 0; i < len(errs); i++ {
+		if errs[i] != nil {
+			t.Fatalf("concurrent Append() = %v, want nil", errs[i])
+		}
+	}
+	requireContiguous(t, dir, total)
+}
+
+// On a disk where a sync is slow, a lock timeout that covers the queue lets every writer
+// through. Eight writers at four syncs of 10 ms each: the last one waits about 280 ms.
+func TestQueuedAppendersPassWhenTheLockTimeoutCoversTheQueue(t *testing.T) {
+	dir, signer, limits := testLog(t)
+	slowSync(t, 10*time.Millisecond)
+	limits.LockTimeout = testQueueLockTimeout
+	const total = 8
+	errs := appendConcurrently(t, dir, signer, limits, total)
+	for i := 0; i < len(errs); i++ {
+		if errs[i] != nil {
+			t.Fatalf("queued Append() = %v, want nil", errs[i])
+		}
+	}
+	requireContiguous(t, dir, total)
+}
+
+// The same queue against a lock timeout of 100 ms: at 40 ms an append, the writers behind
+// the first few wait longer than that. They fail closed with the lock timeout, and what the
+// others appended is whole and without a gap.
+func TestQueuedAppendersFailClosedWhenTheLockTimeoutIsShorterThanTheQueue(t *testing.T) {
+	dir, signer, limits := testLog(t)
+	slowSync(t, 10*time.Millisecond)
+	limits.LockTimeout = 100 * time.Millisecond
+	const total = 8
+	errs := appendConcurrently(t, dir, signer, limits, total)
+	timedOut := 0
+	for i := 0; i < len(errs); i++ {
+		switch {
+		case errors.Is(errs[i], ErrLockTimeout):
+			timedOut++
+		case errs[i] != nil:
+			t.Fatalf("queued Append() = %v, want nil or a lock timeout", errs[i])
+		}
+	}
+	if timedOut == 0 {
+		t.Fatalf("no writer timed out, want at least one: %d writers at 40 ms each cannot all wait less than 100 ms", total)
+	}
+	requireContiguous(t, dir, total-timedOut)
+}
+
+// An append costs four syncs: the record's file and its directory, then HEAD's file and the
+// directory again. The cost of queued writers in the docs is counted from this number, and
+// the slow-disk tests slow down exactly these calls.
+func TestAnAppendSyncsFourTimes(t *testing.T) {
+	dir, signer, limits := testLog(t)
+	calls := 0
+	real := syncFile
+	syncFile = func(f *os.File) error {
+		calls++
+		return real(f)
+	}
+	t.Cleanup(func() { syncFile = real })
+	if _, err := openWriter(t, dir, signer, limits).Append(testContext(t), Event{Type: "task.created", TaskID: "task-1", Payload: raw(`{"state":"open"}`)}); err != nil {
+		t.Fatalf("Append() = %v, want nil", err)
+	}
+	if calls != 4 {
+		t.Fatalf("one append synced %d times, want 4", calls)
+	}
+}
+
+// The lock timeout bounds the wait for the lock, not the append: a lone writer never waits,
+// so the shortest timeout is enough for it however slow the disk is.
+func TestLoneAppenderNeedsNoLockWaitOnASlowDisk(t *testing.T) {
+	dir, signer, limits := testLog(t)
+	slowSync(t, 10*time.Millisecond)
+	limits.LockTimeout = time.Millisecond
+	if _, err := openWriter(t, dir, signer, limits).Append(testContext(t), Event{Type: "task.created", TaskID: "task-1", Payload: raw(`{"state":"open"}`)}); err != nil {
+		t.Fatalf("lone Append() = %v, want nil", err)
+	}
+	requireContiguous(t, dir, 1)
 }
 
 func TestKeyInRepoTreeRefused(t *testing.T) {

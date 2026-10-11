@@ -1,0 +1,1 @@
+{"id":"result-question-not-a-line","rule":"slot-result","direction":"violation","document":"{\"unit\":\"epitrop:unit-1\",\"outcome\":\"blocked\",\"summary\":\"x\",\"questions\":[\"please decide the port\"]}","files":{},"expect":{"result":"refused","says":"questions"}}

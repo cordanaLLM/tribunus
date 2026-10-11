@@ -1,0 +1,1 @@
+{"id":"result-not-json","rule":"slot-result","direction":"violation","document":"the work is done, trust me","files":{},"expect":{"result":"refused","says":""}}

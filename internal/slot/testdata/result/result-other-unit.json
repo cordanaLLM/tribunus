@@ -1,0 +1,1 @@
+{"id":"result-other-unit","rule":"slot-result","direction":"violation","document":"{\"unit\":\"epitrop:unit-2\",\"outcome\":\"failed\",\"summary\":\"x\"}","files":{},"expect":{"result":"refused","says":"the run was started for"}}

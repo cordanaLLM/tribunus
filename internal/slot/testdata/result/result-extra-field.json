@@ -1,0 +1,1 @@
+{"id":"result-extra-field","rule":"slot-result","direction":"violation","document":"{\"unit\":\"epitrop:unit-1\",\"outcome\":\"failed\",\"summary\":\"x\",\"merged\":true}","files":{},"expect":{"result":"refused","says":"merged"}}

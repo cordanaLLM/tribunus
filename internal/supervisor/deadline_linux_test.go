@@ -37,24 +37,23 @@ func deadlineJob(t *testing.T, name string, trap bool) (config.JobConfig, string
 func waitForExited(t *testing.T, sup *Supervisor, name string) eventlog.Job {
 	t.Helper()
 	var job eventlog.Job
-	for i := 0; i < 2000; i++ {
+	exited := waitUntil(func() bool {
 		job = eventlogJob(t, sup, name)
-		if job.LastEvent == "job.exited" {
-			return job
-		}
-		time.Sleep(10 * time.Millisecond)
+		return job.LastEvent == "job.exited"
+	})
+	if !exited {
+		t.Fatalf("no job.exited for %s after %s; last event %q", name, testWaitBound, job.LastEvent)
 	}
-	t.Fatalf("no job.exited for %s after 20 s; last event %q", name, job.LastEvent)
 	return job
 }
 
 func assertGroupGone(t *testing.T, marker string) {
 	t.Helper()
-	alive := liveProcessesWithArg(t, marker)
-	for i := 0; i < 100 && len(alive) > 0; i++ {
-		time.Sleep(10 * time.Millisecond)
+	var alive []int
+	waitUntil(func() bool {
 		alive = liveProcessesWithArg(t, marker)
-	}
+		return len(alive) == 0
+	})
 	if len(alive) > 0 {
 		t.Fatalf("processes %v of the job still run after its deadline, want the whole group gone", alive)
 	}
@@ -77,7 +76,7 @@ func TestJobIsKilledAtItsDeadline(t *testing.T) {
 		t.Fatalf("job was stopped after %s, want it to run its full second", ran)
 	}
 	assertGroupGone(t, marker)
-	waitForUnlockWithin(t, sup, job, 30*time.Second)
+	waitForUnlock(t, sup, job)
 	if sent := exited.LastExitCode; *sent != -1 {
 		t.Fatalf("exit code = %d, want -1: with no grace period the job is killed, not asked", *sent)
 	}
@@ -222,18 +221,4 @@ func TestShimGetsTheJobsDeadlineAndStopPolicy(t *testing.T) {
 	if cfg.MaxRuntimeSeconds != 120 || cfg.StopSignal != "INT" || cfg.StopGraceSeconds != 7 {
 		t.Fatalf("shim config = runtime %d signal %q grace %d, want 120 INT 7", cfg.MaxRuntimeSeconds, cfg.StopSignal, cfg.StopGraceSeconds)
 	}
-}
-
-// waitForUnlockWithin waits for the job's lock to be free, for as long as the shim's last
-// append may take.
-func waitForUnlockWithin(t *testing.T, sup *Supervisor, job config.JobConfig, bound time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(bound)
-	for time.Now().Before(deadline) {
-		if running, err := sup.isRunning(job); err == nil && !running {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("lock for %s stayed held for %s", job.Name, bound)
 }

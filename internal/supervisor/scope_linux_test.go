@@ -37,7 +37,9 @@ func TestMain(m *testing.M) {
 	if os.Getenv(fakeScopeEnv) == "1" && len(os.Args) > 1 && os.Args[1] == "--user" {
 		os.Exit(runFakeScopeCommand(os.Args))
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	removeTestScratch()
+	os.Exit(code)
 }
 
 // The stand-in keeps its main goroutine on the process's first thread, so that the exec
@@ -455,7 +457,7 @@ func TestMissingScopeFailsUnderCIAndSkipsElsewhere(t *testing.T) {
 // started from. The shim must kill it, record no start and say why in the job log.
 func TestSandboxedJobOutsideItsScopeIsRefused(t *testing.T) {
 	plantFakeScopeCommand(t)
-	job := sandboxedSupervisorJob(t, "sandbox-noscope", `while true; do printf . >> "$PWD/beat"; sleep 0.05; done`)
+	job := sandboxedSupervisorJob(t, "sandbox-noscope", untilStopped(`printf . >> "$PWD/beat";`, 50*time.Millisecond))
 	stragglerFile := filepath.Join(t.TempDir(), "straggler.pid")
 	t.Setenv(fakeStragglerEnv, stragglerFile)
 	job.Sandbox.EnvAllow = []string{fakeScopeEnv, fakeStragglerEnv}

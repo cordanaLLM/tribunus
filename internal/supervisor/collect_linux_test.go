@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 )
 
 // zombieChildOfThisProcess reports whether pid is a zombie whose parent is the test process:
@@ -42,17 +41,15 @@ func TestSupervisorCollectsItsShims(t *testing.T) {
 	}
 	// The bound only ends a run in which a shim is never collected.
 	left := len(shims)
-	for i := 0; i < 500 && left > 0; i++ {
+	waitUntil(func() bool {
 		left = 0
 		for j := 0; j < len(shims); j++ {
 			if zombieChildOfThisProcess(shims[j]) {
 				left++
 			}
 		}
-		if left > 0 {
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
+		return left == 0
+	})
 	if left > 0 {
 		t.Fatalf("%d of %d shims %v are zombies of the supervisor, want every shim collected", left, starts, shims)
 	}
@@ -61,14 +58,11 @@ func TestSupervisorCollectsItsShims(t *testing.T) {
 
 // waitForShimWaiters waits until the supervisor has collected its shims down to want. A shim
 // that has recorded its start still appends job.exited, with a sync to disk, before it
-// exits; the bound here is the 30 s that append may take, not a guess at a fast disk.
+// exits, so the wait is as long as that append may take, not a guess at a fast disk.
 func waitForShimWaiters(t *testing.T, sup *Supervisor, want int32) {
 	t.Helper()
-	for i := 0; i < 3000 && sup.shimWaiters.Load() != want; i++ {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if waiting := sup.shimWaiters.Load(); waiting != want {
-		t.Fatalf("shim waiters = %d after 30 s, want %d: a shim was not collected", waiting, want)
+	if !waitUntil(func() bool { return sup.shimWaiters.Load() == want }) {
+		t.Fatalf("shim waiters = %d after %s, want %d: a shim was not collected", sup.shimWaiters.Load(), testWaitBound, want)
 	}
 }
 

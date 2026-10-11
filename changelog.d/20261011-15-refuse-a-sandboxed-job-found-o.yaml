@@ -1,3 +1,0 @@
-type: fixed
-title: Refuse a sandboxed job found outside its systemd scope
-issue: "87"

@@ -1,3 +1,0 @@
-type: added
-title: Give a sandboxed job an optional soft memory limit with memory_high
-issue: "98"

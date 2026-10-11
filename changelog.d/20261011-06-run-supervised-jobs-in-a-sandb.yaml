@@ -1,3 +1,0 @@
-type: added
-title: Run supervised jobs in a sandbox with cgroup limits, a restricted filesystem view and a chosen network mode
-issue: "25"

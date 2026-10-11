@@ -1,3 +1,0 @@
-type: changed
-title: 'Rename Tribunus to Epitrop: the module is github.com/tekmora/epitrop, the command is epitropctl, the default event log directory is .epitrop and job scopes are named epitrop-job-<id>.scope'
-breaking: true

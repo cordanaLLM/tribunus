@@ -1,3 +1,0 @@
-type: added
-title: 'Run one work unit in a slot: slot run prepares a fresh clone, starts a sandboxed job from a one-job template, checks the result and the branch the run left, and records the unit with an evidence pointer'
-issue: "25"

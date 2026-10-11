@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -33,8 +34,13 @@ const (
 
 // TestMain lets the test binary be the scope command of the negative scope tests. Started
 // with systemd-run's arguments and fakeScopeEnv set, it does what a systemd-run that reports
-// success does, waits a moment and execs the command in place, but creates no scope.
+// success does, waits a moment and execs the command in place, but creates no scope. Asked by
+// the preflight whether it knows scopeNoExpand, it answers as a current systemd-run does.
 func TestMain(m *testing.M) {
+	if os.Getenv(fakeScopeEnv) == "1" && slices.Equal(os.Args[1:], []string{scopeNoExpand, "--version"}) {
+		fmt.Println("systemd 262 (stand-in)")
+		os.Exit(0)
+	}
 	if os.Getenv(fakeScopeEnv) == "1" && len(os.Args) > 1 && os.Args[1] == "--user" {
 		os.Exit(runFakeScopeCommand(os.Args))
 	}

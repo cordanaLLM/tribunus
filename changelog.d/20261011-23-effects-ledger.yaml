@@ -1,3 +1,0 @@
-type: added
-title: 'Run each outbound side effect at most once: a ledger in the event log keyed by task and action type, with effects list and effects resolve'
-issue: "7"

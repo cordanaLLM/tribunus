@@ -1,3 +1,0 @@
-type: added
-title: Supervise declared jobs with a per-job shim, restart and a validated stop path
-issue: "21"

@@ -12,7 +12,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/cordanaLLM/tribunus/internal/config"
 	"github.com/cordanaLLM/tribunus/internal/eventlog"
@@ -215,11 +214,11 @@ func TestRefusedJobThatHadStartedIsKilled(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "norecord refused: ") || !strings.Contains(err.Error(), "mkdir state dir") {
 		t.Fatalf("runShim(record unwritable) = %v, want the refusal naming the record error", err)
 	}
-	alive := liveProcessesWithArg(t, marker)
-	for i := 0; i < 100 && len(alive) > 0; i++ {
-		time.Sleep(10 * time.Millisecond)
+	var alive []int
+	waitUntil(func() bool {
 		alive = liveProcessesWithArg(t, marker)
-	}
+		return len(alive) == 0
+	})
 	if len(alive) > 0 {
 		for i := 0; i < len(alive); i++ {
 			assertSafeSignalPID(t, alive[i])

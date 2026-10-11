@@ -26,7 +26,8 @@ const (
 	maxStatusPolls      = 100
 	// A start is awaited for 15 s (10 ms apart), longer than the shim may wait for the
 	// job's scope, so a slow start is never reported as failed while it can still succeed.
-	maxStartPolls = 1500
+	maxStartPolls     = 1500
+	startPollInterval = 10 * time.Millisecond
 	// Shims this supervisor started and has not collected yet. A job's lock allows one live
 	// shim per job, so twice the number of jobs a config may hold is never reached in order.
 	maxShimWaiters    = 2 * config.MaxJobs
@@ -296,7 +297,7 @@ func (s *Supervisor) waitStarted(ctx context.Context, name string, before eventl
 			break
 		}
 		shimGone = shimExited(shimPID)
-		if !shimGone && !sleepContext(ctx, 10*time.Millisecond) {
+		if !shimGone && !sleepContext(ctx, startPollInterval) {
 			return startWaitEnded(name, ctx.Err(), lastErr)
 		}
 	}

@@ -12,10 +12,12 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -1231,11 +1233,74 @@ func TestStartAndStopOperationalErrors(t *testing.T) {
 	}
 }
 
+// testWaitBound ends a wait in a run that fails; it is no claim about speed. It is twice what
+// the code allows one start, 15 s for the record and 10 s for the scope, so a host that is
+// slow but inside the code's own bounds does not fail a test.
+const (
+	testWaitBound    = 2 * (maxStartPolls*startPollInterval + scopeConfirmPolls*scopeConfirmInterval)
+	testPollInterval = 10 * time.Millisecond
+)
+
 func testContext(t *testing.T) context.Context {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), testWaitBound)
 	t.Cleanup(cancel)
 	return ctx
+}
+
+// waitUntil polls cond until it holds, for at most testWaitBound, and reports whether it held.
+func waitUntil(cond func() bool) bool {
+	for i := 0; i < int(testWaitBound/testPollInterval); i++ {
+		if cond() {
+			return true
+		}
+		time.Sleep(testPollInterval)
+	}
+	return cond()
+}
+
+var (
+	testScratchOnce sync.Once
+	testScratchDir  string
+)
+
+// testScratch is one directory per test process for the paths that helpers hand out without a
+// *testing.T: the default log of a test job, and the lock and record of a signal target. A
+// fixed path under the system's temp directory is shared by every test run on the machine,
+// so two runs at once probe the same lock file. TestMain removes the directory.
+func testScratch() string {
+	testScratchOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "tribunus-supervisor-scratch-")
+		if err != nil {
+			panic(fmt.Sprintf("supervisor tests: scratch directory: %v", err))
+		}
+		testScratchDir = dir
+	})
+	return testScratchDir
+}
+
+// removeTestScratch removes the scratch directory if this process made one.
+func removeTestScratch() {
+	if testScratchDir == "" {
+		return
+	}
+	if err := os.RemoveAll(testScratchDir); err != nil {
+		fmt.Fprintf(os.Stderr, "supervisor tests: remove %s: %v\n", testScratchDir, err)
+	}
+}
+
+// untilStopped is the script of a test job that runs until its test stops it: body, a pause,
+// and again. It still ends by itself after about ten minutes, the default timeout of go test.
+// A test binary that is killed runs no cleanup, and a job whose shim a test killed has nobody
+// left to end it; a loop without an end then stays behind for good.
+func untilStopped(body string, pause time.Duration) string {
+	return boundedLoop(body, pause, int(10*time.Minute/pause))
+}
+
+// boundedLoop is a shell loop that runs body and a pause for a number of rounds.
+func boundedLoop(body string, pause time.Duration, rounds int) string {
+	seconds := strconv.FormatFloat(pause.Seconds(), 'f', -1, 64)
+	return fmt.Sprintf(`i=0; while [ "$i" -lt %d ]; do %s sleep %s; i=$((i+1)); done`, rounds, body, seconds)
 }
 
 func canceledContext(t *testing.T) context.Context {
@@ -1270,13 +1335,58 @@ func testSupervisorAt(t *testing.T, rt testRuntimeConfig, jobs ...config.JobConf
 	}
 	t.Setenv("TRIBUNUS_TEST_SHIM", "1")
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		// The test's own context has ended by now.
+		ctx, cancel := context.WithTimeout(context.Background(), testWaitBound)
 		defer cancel()
 		if err := sup.Stop(ctx, ""); err != nil {
 			t.Logf("cleanup Stop(all) = %v", err)
 		}
+		endLeftoverSandboxedJobs(ctx, t, sup)
 	})
 	return sup
+}
+
+// endLeftoverSandboxedJobs kills a sandboxed job that is still alive when its test ends: one
+// whose shim the test killed on purpose, or one that Stop could not reach. The jobs come from
+// the test's own event log.
+func endLeftoverSandboxedJobs(ctx context.Context, t *testing.T, sup *Supervisor) {
+	t.Helper()
+	state, err := sup.replayState(ctx)
+	if err != nil {
+		// A test that broke its own event log has no record to go by.
+		return
+	}
+	jobs := sup.cfg.Jobs
+	for i := 0; i < len(jobs); i++ {
+		pid := state.Jobs[jobs[i].Name].PID
+		if !leftoverJob(pid) {
+			continue
+		}
+		// The job may end between the check and the signal; that is no failure of the test.
+		if err := killStartedProcessGroup(pid); err != nil {
+			t.Logf("cleanup kill leftover job %s (group %d) = %v", jobs[i].Name, pid, err)
+		}
+	}
+}
+
+// leftoverJob reports whether pid is a sandboxed job that may be killed with its group: a
+// process that leads a group other than the test's own and sits in a job scope, a cgroup
+// only a shim asks for. A process id alone proves nothing: the job may have ended and its
+// id may belong to something else by now.
+func leftoverJob(pid int) bool {
+	if pid <= 1 || pid == os.Getpid() {
+		return false
+	}
+	pgid, err := unix.Getpgid(pid)
+	if err != nil || pgid != pid || pgid == unix.Getpgrp() {
+		return false
+	}
+	cgroup, err := processCgroup(pid)
+	if err != nil {
+		return false
+	}
+	unit := path.Base(strings.TrimSuffix(cgroup, " (deleted)"))
+	return strings.HasPrefix(unit, scopeNamePrefix) && strings.HasSuffix(unit, ".scope")
 }
 
 func countingShimSupervisor(t *testing.T, name string) (*Supervisor, testRuntimeConfig, string) {
@@ -1364,7 +1474,7 @@ func testJob(name string, command []string) config.JobConfig {
 	return config.JobConfig{
 		Name:     name,
 		Command:  command,
-		LogPath:  filepath.Join(os.TempDir(), name+".log"),
+		LogPath:  filepath.Join(testScratch(), name+".log"),
 		Schedule: "always",
 		Restart:  config.JobRestartConfig{Policy: "never"},
 		Stop:     config.JobStopConfig{Signal: "TERM", GraceSeconds: 1},
@@ -1640,29 +1750,22 @@ func eventlogJob(t *testing.T, sup *Supervisor, name string) eventlog.Job {
 
 func waitForState(t *testing.T, sup *Supervisor, name string, want JobRunState) {
 	t.Helper()
-	for i := 0; i < 100; i++ {
-		if statusOne(t, sup, name).State == want {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	if !waitUntil(func() bool { return statusOne(t, sup, name).State == want }) {
+		t.Fatalf("state for %s did not become %s within %s", name, want, testWaitBound)
 	}
-	t.Fatalf("state for %s did not become %s", name, want)
 }
 
 func waitForProcessGone(t *testing.T, pid int) {
 	t.Helper()
-	for i := 0; i < 100; i++ {
-		if !processExists(pid) {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	if waitUntil(func() bool { return !processExists(pid) }) {
+		return
 	}
 	status, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "status"))
 	if err != nil {
 		status = []byte(err.Error())
 	}
 	exe, exeErr := os.Readlink(filepath.Join("/proc", strconv.Itoa(pid), "exe"))
-	t.Fatalf("pid %d still exists: exe=%q (%v) status=%q", pid, exe, exeErr, firstLines(string(status), 8))
+	t.Fatalf("pid %d still exists after %s: exe=%q (%v) status=%q", pid, testWaitBound, exe, exeErr, firstLines(string(status), 8))
 }
 
 func firstLines(text string, n int) string {
@@ -1675,18 +1778,20 @@ func firstLines(text string, n int) string {
 
 func waitForChildPIDInLog(t *testing.T, path string) int {
 	t.Helper()
-	for i := 0; i < 100; i++ {
+	pid := 0
+	found := waitUntil(func() bool {
 		body, err := os.ReadFile(path)
-		if err == nil {
-			pid, ok := childPIDFromLog(string(body))
-			if ok {
-				return pid
-			}
+		if err != nil {
+			return false
 		}
-		time.Sleep(10 * time.Millisecond)
+		var ok bool
+		pid, ok = childPIDFromLog(string(body))
+		return ok
+	})
+	if !found {
+		t.Fatalf("child pid did not appear in %s within %s", path, testWaitBound)
 	}
-	t.Fatalf("child pid did not appear in %s", path)
-	return 0
+	return pid
 }
 
 func childPIDFromLog(body string) (int, bool) {
@@ -1700,16 +1805,17 @@ func childPIDFromLog(body string) (int, bool) {
 	return 0, false
 }
 
+// waitForUnlock waits for the job's lock to be free. The shim holds it until its last append
+// to the event log is on disk.
 func waitForUnlock(t *testing.T, sup *Supervisor, job config.JobConfig) {
 	t.Helper()
-	for i := 0; i < 100; i++ {
+	free := waitUntil(func() bool {
 		running, err := sup.isRunning(job)
-		if err == nil && !running {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+		return err == nil && !running
+	})
+	if !free {
+		t.Fatalf("lock for %s stayed held for %s", job.Name, testWaitBound)
 	}
-	t.Fatalf("lock for %s stayed held", job.Name)
 }
 
 func countEvents(t *testing.T, dir string, typ string) int {
@@ -1828,7 +1934,7 @@ func argsAfterDash(args []string) []string {
 }
 
 func TestStatusReportsSandboxTheJobStartedUnder(t *testing.T) {
-	job := testJob("sandbox-status", []string{"/bin/sh", "-c", "while true; do sleep 1; done"})
+	job := testJob("sandbox-status", []string{"/bin/sh", "-c", untilStopped("", time.Second)})
 	sup := testSupervisor(t, job)
 	if err := sup.Start(testContext(t), job.Name); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)

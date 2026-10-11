@@ -568,8 +568,8 @@ func testSignalTarget(pid int, shimPID int) jobSignalTarget {
 		Name:       "daemon",
 		PID:        pid,
 		ShimPID:    shimPID,
-		RecordPath: fmt.Sprintf("/tmp/daemon-%d.json", pid),
-		LockPath:   fmt.Sprintf("/tmp/daemon-%d.lock", pid),
+		RecordPath: filepath.Join(testScratch(), fmt.Sprintf("daemon-%d.json", pid)),
+		LockPath:   filepath.Join(testScratch(), fmt.Sprintf("daemon-%d.lock", pid)),
 	}
 }
 

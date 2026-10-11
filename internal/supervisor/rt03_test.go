@@ -437,7 +437,7 @@ func TestSandboxedJobKilledShimReleasesLock(t *testing.T) {
 		t.Skip("linux parent-death signal required")
 	}
 	requireSystemdUserScope(t)
-	job := sandboxedSupervisorJob(t, "sandbox-kill", `trap : TERM; while true; do sleep 1; done`)
+	job := sandboxedSupervisorJob(t, "sandbox-kill", "trap : TERM; "+untilStopped("", time.Second))
 	sup := testSupervisor(t, job)
 	if err := sup.Start(testContext(t), job.Name); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
@@ -457,7 +457,7 @@ func TestSandboxedJobStopGraceReachesChild(t *testing.T) {
 	// A TERM that lands before the trap is installed either kills the job at its default
 	// action or, before the inner env restores the default, is ignored and escalated after
 	// the grace period. Stop only once the job reports its trap installed.
-	script := `trap 'printf term > "$MARKER"; exit 0' TERM; printf ready > "$PWD/ready"; while true; do sleep 1; done`
+	script := `trap 'printf term > "$MARKER"; exit 0' TERM; printf ready > "$PWD/ready"; ` + untilStopped("", time.Second)
 	job := sandboxedSupervisorJob(t, "sandbox-term", script)
 	marker := filepath.Join(job.Sandbox.Workspace, "term-marker")
 	ready := filepath.Join(job.Sandbox.Workspace, "ready")
@@ -467,10 +467,7 @@ func TestSandboxedJobStopGraceReachesChild(t *testing.T) {
 	if err := sup.Start(testContext(t), job.Name); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
 	}
-	for i := 0; i < 250 && fileSize(ready) == 0; i++ {
-		time.Sleep(20 * time.Millisecond)
-	}
-	if fileSize(ready) == 0 {
+	if !waitUntil(func() bool { return fileSize(ready) != 0 }) {
 		t.Fatalf("job never reported its TERM trap installed (%s missing)", ready)
 	}
 	if err := sup.Stop(testContext(t), job.Name); err != nil {
@@ -487,7 +484,7 @@ func TestSandboxedJobStopGraceReachesChild(t *testing.T) {
 
 func TestSandboxedJobCgroupMemoryMax(t *testing.T) {
 	requireSystemdUserScope(t)
-	job := sandboxedSupervisorJob(t, "sandbox-cgroup", `while true; do sleep 1; done`)
+	job := sandboxedSupervisorJob(t, "sandbox-cgroup", untilStopped("", time.Second))
 	sup := testSupervisor(t, job)
 	if err := sup.Start(testContext(t), job.Name); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
@@ -512,7 +509,7 @@ func TestSandboxedJobCgroupMemoryMax(t *testing.T) {
 // the job's own scope.
 func TestSandboxedJobCgroupMemoryHigh(t *testing.T) {
 	requireSystemdUserScope(t)
-	job := sandboxedSupervisorJob(t, "sandbox-soft", `while true; do sleep 1; done`)
+	job := sandboxedSupervisorJob(t, "sandbox-soft", untilStopped("", time.Second))
 	job.Sandbox.MemoryHigh = "128M"
 	sup := testSupervisor(t, job)
 	if err := sup.Start(testContext(t), job.Name); err != nil {
@@ -660,8 +657,8 @@ func sandboxedSupervisorJob(t *testing.T, name string, script string) config.Job
 	t.Helper()
 	workspace := t.TempDir()
 	job := testJob(name, []string{"/usr/bin/bash", "-c", script})
-	// testJob's log lives in the shared temp dir and accumulates across runs; a sandbox
-	// failure message must show this run's output only.
+	// testJob's log is one file per job name for the whole test process; a sandbox failure
+	// message must show this test's output only.
 	job.LogPath = filepath.Join(t.TempDir(), name+".log")
 	job.Sandbox = config.SandboxConfig{Mode: "enforce", Workspace: workspace, Network: "none", MemoryMax: "256M", CPUWeight: 100, TasksMax: 128}
 	job.Stop.GraceSeconds = 2
@@ -756,16 +753,13 @@ func TestSandboxRuntimeRefusesWorkspaceChangedSinceLoad(t *testing.T) {
 // with a killed shim: the job's heartbeat file stops growing.
 func TestSandboxedJobDiesWithItsShim(t *testing.T) {
 	requireSystemdUserScope(t)
-	job := sandboxedSupervisorJob(t, "sandbox-orphan", `while true; do printf . >> "$PWD/beat"; sleep 0.05; done`)
+	job := sandboxedSupervisorJob(t, "sandbox-orphan", untilStopped(`printf . >> "$PWD/beat";`, 50*time.Millisecond))
 	beat := filepath.Join(job.Sandbox.Workspace, "beat")
 	sup := testSupervisor(t, job)
 	if err := sup.Start(testContext(t), job.Name); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
 	}
-	for i := 0; i < 100 && fileSize(beat) == 0; i++ {
-		time.Sleep(20 * time.Millisecond)
-	}
-	if fileSize(beat) == 0 {
+	if !waitUntil(func() bool { return fileSize(beat) != 0 }) {
 		t.Fatalf("heartbeat %s never started", beat)
 	}
 	before := statusOne(t, sup, job.Name)

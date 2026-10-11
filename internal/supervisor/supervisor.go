@@ -39,9 +39,14 @@ var (
 	// ErrRefused marks a start the shim refused; the error text carries the job and the reason.
 	ErrRefused      = errors.New("supervisor: job refused")
 	ErrNotSupported = errors.New("supervisor: not-supported")
+	// ErrRunning marks a StartOnce of a job that runs already.
+	ErrRunning = errors.New("supervisor: job is running")
 )
 
 type JobRunState string
+
+// RecordedJob is a job as the event log tells it.
+type RecordedJob = eventlog.Job
 
 type JobStatus struct {
 	Name     string
@@ -129,6 +134,61 @@ func (s *Supervisor) Start(ctx context.Context, name string) error {
 		return nil
 	}
 	return s.startOne(ctx, name)
+}
+
+// StartOnce starts one job like Start, with one difference: a job that runs already is an
+// error wrapping ErrRunning. Start leaves a running job alone and reports success, which is
+// what a daemon wants. A caller that needs a run of its own has to learn that it got none.
+//
+// Two callers that start the same idle job at the same moment both spawn a shim; the job's
+// lock lets one of them run, and the other caller gets the shim's refusal (ErrRefused).
+func (s *Supervisor) StartOnce(ctx context.Context, name string) error {
+	if err := readyContext(ctx, "start"); err != nil {
+		return err
+	}
+	job, err := s.job(name)
+	if err != nil {
+		return err
+	}
+	running, err := s.isRunning(job)
+	if err != nil {
+		return err
+	}
+	if running {
+		return fmt.Errorf("%w: %s", ErrRunning, job.Name)
+	}
+	return s.startOne(ctx, name)
+}
+
+// Recorded returns the named job as the event log tells it: its last start, and the exit or
+// the refusal that followed. Status says whether a job runs now; this says how it ended.
+func (s *Supervisor) Recorded(ctx context.Context, name string) (RecordedJob, error) {
+	if err := readyContext(ctx, "recorded"); err != nil {
+		return eventlog.Job{}, err
+	}
+	job, err := s.job(name)
+	if err != nil {
+		return eventlog.Job{}, err
+	}
+	state, err := s.replayState(ctx)
+	if err != nil {
+		return eventlog.Job{}, err
+	}
+	return state.Jobs[job.Name], nil
+}
+
+// Preflight reports whether this host can start the named job's sandbox at all: the tools
+// the shim would look for are looked for here. A job that runs without a sandbox needs none.
+// It starts nothing; a job that passes can still be refused when it starts.
+func (s *Supervisor) Preflight(name string) error {
+	job, err := s.job(name)
+	if err != nil {
+		return err
+	}
+	if job.Sandbox.Mode == "off" {
+		return nil
+	}
+	return sandboxPreflight(job.Sandbox)
 }
 
 func (s *Supervisor) startOne(ctx context.Context, name string) error {

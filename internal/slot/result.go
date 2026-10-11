@@ -81,27 +81,34 @@ type Evidence struct {
 // symlink or a dot-dot, of at most MaxEvidenceBytes, with the digest and the line count the
 // result claims: what the runner records is then what the run wrote.
 func ReadResult(workspace string, unit string) (Result, error) {
+	result, _, err := readResult(workspace, unit)
+	return result, err
+}
+
+// readResult is ReadResult, and also returns the bytes that were checked: the runner copies
+// those, not what a second read of the file would give.
+func readResult(workspace string, unit string) (Result, []byte, error) {
 	if !units.IsValidID(unit) {
-		return Result{}, fmt.Errorf("%w: invalid unit id %q", ErrResult, unit)
+		return Result{}, nil, fmt.Errorf("%w: invalid unit id %q", ErrResult, unit)
 	}
 	body, err := readRegular(filepath.Join(workspace, filepath.FromSlash(ResultFile)), MaxResultBytes)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResult, err)
+		return Result{}, nil, fmt.Errorf("%w: %w", ErrResult, err)
 	}
 	result, err := decodeResult(body)
 	if err != nil {
-		return Result{}, err
+		return Result{}, nil, err
 	}
 	if result.Unit != unit {
-		return Result{}, fmt.Errorf("%w: it is for unit %q, the run was started for %q", ErrResult, result.Unit, unit)
+		return Result{}, nil, fmt.Errorf("%w: it is for unit %q, the run was started for %q", ErrResult, result.Unit, unit)
 	}
 	if result.Outcome == OutcomeDone && result.Head == "" {
-		return Result{}, fmt.Errorf("%w: outcome done needs the head commit", ErrResult)
+		return Result{}, nil, fmt.Errorf("%w: outcome done needs the head commit", ErrResult)
 	}
 	if err = checkEvidence(workspace, result.Evidence); err != nil {
-		return Result{}, err
+		return Result{}, nil, err
 	}
-	return result, nil
+	return result, body, nil
 }
 
 // decodeResult validates the document against the schema and decodes it.

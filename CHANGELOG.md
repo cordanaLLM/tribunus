@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 
+## [0.1.0-rc.3] - 2026-10-11
+
+### Fixed
+
+- List the snapshot schema in checksums.txt, so a release signs and attests it with the archives, and take the release notes from the changelog section of the tag (#29)
+- Stopping a job whose process ends while its status is read now reports the job as gone and not as an error (#21)
+
+
 ## [0.1.0-rc.2] - 2026-10-11
 
 ### Added

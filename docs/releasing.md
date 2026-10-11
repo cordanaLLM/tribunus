@@ -6,20 +6,24 @@ The flow follows Praetor's: the same GoReleaser layout, `changelog.d/` fragments
 
 ## What a tag publishes
 
-`release.yml` calls the reusable `.github/workflows/release-binaries.yml`. That workflow runs `goreleaser check`, builds `./cmd/epitropctl` into a draft release (`.goreleaser.yaml`), signs `checksums.txt` with keyless cosign, verifies that signature against its own workflow identity, attests every checksummed artefact with `actions/attest-build-provenance`, and only then publishes the release. `praetorctl audit` measures this as SLSA Build Level 3 with cosign signing and an SBOM, so `.standards.yaml` declares no HISS-11 exception.
+`release.yml` calls the reusable `.github/workflows/release-binaries.yml`. That workflow runs `goreleaser check`, takes the release notes from the changelog, builds `./cmd/epitropctl` into a draft release (`.goreleaser.yaml`), signs `checksums.txt` with keyless cosign, verifies that signature against its own workflow identity, attests every checksummed artefact with `actions/attest-build-provenance`, and only then publishes the release. `praetorctl audit` measures this as SLSA Build Level 3 with cosign signing and an SBOM, so `.standards.yaml` declares no HISS-11 exception.
 
 | Asset | Content |
 | --- | --- |
 | `epitropctl_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows) | the binary for linux, darwin and windows on amd64 and arm64, with `README.md` and the licences |
 | `<archive>.cyclonedx.json` | a CycloneDX SBOM for each archive (syft) |
-| `checksums.txt`, `checksums.txt.sigstore.json` | SHA-256 of every artefact and its keyless cosign bundle |
+| `checksums.txt`, `checksums.txt.sigstore.json` | SHA-256 of every archive, every SBOM and the snapshot schema, and the keyless cosign bundle of that list |
 | `snapshot.schema.json` | the snapshot contract this release writes (`catalog/snapshot.schema.json`, `schema_version` 1) |
+
+The signature covers `checksums.txt`, and the build provenance names every file that `checksums.txt` lists. A file is covered by both only when it is listed there. The schema is uploaded by `release.extra_files` and listed by `checksum.extra_files` in `.goreleaser.yaml`; the two entries must name the same file. Up to v0.1.0-rc.2 only the first entry existed, so that release's schema carries neither a signature nor provenance.
+
+The release notes are the tag's section of `CHANGELOG.md`. `tools/releasenotes` writes that section to a file, and GoReleaser takes it with `--release-notes` in place of a list of commit subjects. A tag whose version has no section, two sections or an empty one stops the run before anything is built (`go test ./tools/releasenotes`).
 
 `epitropctl version` prints the version the release build injected (`-X main.version`); a build from source prints `dev`.
 
 ## The dry run
 
-`.github/workflows/release-dry-run.yml` builds the same archives and SBOMs on pull requests and on `main`, with the tool versions of `release-binaries.yml`: `goreleaser check`, then `goreleaser release --snapshot --clean --skip=sign`. It signs nothing and publishes nothing. It then checks that the snapshot holds six archives and six SBOMs, that `checksums.txt` matches them, and that the linux/amd64 binary reports a version ending in `-snapshot`. It runs when Go sources, `go.mod`, `.goreleaser.yaml`, the files packed into the archives or a release workflow change, so a broken release build shows on the change that broke it and not on the day of a release. It is not a required check.
+`.github/workflows/release-dry-run.yml` builds the same archives and SBOMs on pull requests and on `main`, with the tool versions of `release-binaries.yml`: `goreleaser check`, then `goreleaser release --snapshot --clean --skip=sign`. It signs nothing and publishes nothing. It then checks that the snapshot holds six archives and six SBOMs, that `checksums.txt` lists exactly those twelve files and the snapshot schema with matching digests, and that the linux/amd64 binary reports a version ending in `-snapshot`. A snapshot builds no release notes, so the dry run also runs `tools/releasenotes` on the newest released section of the changelog. It runs when Go sources, `go.mod`, `.goreleaser.yaml`, `CHANGELOG.md`, the files packed into the archives or a release workflow change, so a broken release build shows on the change that broke it and not on the day of a release. It is not a required check.
 
 ## Verifying a release
 
@@ -30,6 +34,19 @@ cosign verify-blob \
   --bundle checksums.txt.sigstore.json checksums.txt
 sha256sum --check --ignore-missing checksums.txt
 gh attestation verify epitropctl_<version>_linux_amd64.tar.gz --repo tekmora/epitrop
+gh attestation verify snapshot.schema.json --repo tekmora/epitrop
+```
+
+`gh attestation verify` needs a logged-in `gh` (2.102.0 refuses without one). Without an account, fetch the provenance bundle and verify it with cosign. One bundle names every file in `checksums.txt`, so the bundle of one file verifies the others too:
+
+```bash
+digest=$(sha256sum snapshot.schema.json | cut -d' ' -f1)
+curl -fsS "https://api.github.com/repos/tekmora/epitrop/attestations/sha256:$digest" \
+  | jq -c '.attestations[0].bundle' > provenance.json
+cosign verify-blob-attestation --new-bundle-format --bundle provenance.json --type slsaprovenance1 \
+  --certificate-identity "https://github.com/tekmora/epitrop/.github/workflows/release-binaries.yml@refs/tags/<tag>" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  snapshot.schema.json
 ```
 
 ## How Praetor pins Epitrop
@@ -45,7 +62,7 @@ Praetor reads snapshots through the catalog package, pinned as a Go module: `git
    praetorctl release --version=<tag> --date=<YYYY-MM-DD>
    ```
 
-3. Merge that change through a pull request.
+3. Merge that change through a pull request. The section it adds to `CHANGELOG.md` becomes the release notes.
 4. Tag the merged commit and push only the tag:
 
    ```bash

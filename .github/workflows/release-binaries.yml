@@ -45,12 +45,21 @@ jobs:
           version: v2.18.3
           args: check
 
+      # The notes of a release are the tag's section of CHANGELOG.md, the text
+      # that was reviewed and merged. Without that section the run stops here,
+      # before anything is built. The file lies outside the checkout, which
+      # GoReleaser requires to be unchanged.
+      - name: Take The Release Notes From The Changelog
+        env:
+          TAG: ${{ github.ref_name }}
+        run: go run ./tools/releasenotes -changelog=CHANGELOG.md -version="$TAG" -out="$RUNNER_TEMP/release-notes.md"
+
       - name: Build Archives, SBOMs And Signed Checksums Into A Draft Release
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
         with:
           distribution: goreleaser
           version: v2.18.3
-          args: release --clean
+          args: release --clean --release-notes=${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

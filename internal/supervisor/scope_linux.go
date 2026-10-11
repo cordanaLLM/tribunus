@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	scopeNamePrefix = "tribunus-job-"
+	scopeNamePrefix = "epitrop-job-"
 
 	// The shim waits this long for systemd-run to place the job: 400 polls, 25 ms apart.
 	// Measured, a job is in its scope 26 ms after systemd-run starts, one poll, both on a

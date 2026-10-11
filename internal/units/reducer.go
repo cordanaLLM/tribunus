@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cordanaLLM/tribunus/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/eventlog"
 )
 
 // UnitReducer rebuilds the run record from the shared log. It skips the other known

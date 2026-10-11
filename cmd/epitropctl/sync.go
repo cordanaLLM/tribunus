@@ -9,15 +9,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/catalog"
-	"github.com/cordanaLLM/tribunus/internal/sources/codexlocal"
-	"github.com/cordanaLLM/tribunus/internal/sources/litellmgateway"
-	"github.com/cordanaLLM/tribunus/internal/sources/ollamalocal"
-	"github.com/cordanaLLM/tribunus/internal/sources/publiccatalog"
+	"github.com/tekmora/epitrop/catalog"
+	"github.com/tekmora/epitrop/internal/sources/codexlocal"
+	"github.com/tekmora/epitrop/internal/sources/litellmgateway"
+	"github.com/tekmora/epitrop/internal/sources/ollamalocal"
+	"github.com/tekmora/epitrop/internal/sources/publiccatalog"
 )
 
 // defaultSnapshotPath is where sync writes when --out is not given.
-const defaultSnapshotPath = "tribunus-snapshot.json"
+const defaultSnapshotPath = "epitrop-snapshot.json"
 
 // defaultOllamaEndpoint is Ollama's standard local daemon address.
 const defaultOllamaEndpoint = "http://localhost:11434"
@@ -68,7 +68,7 @@ func parseSyncFlags(args []string) (syncFlags, error) {
 	return f, nil
 }
 
-// runSync is tribunusctl's "sync" subcommand: it runs every selected
+// runSync is epitropctl's "sync" subcommand: it runs every selected
 // source, prints one ok/skip/fail line per source, and writes the combined
 // snapshot to --out. Individual source failures are reported on their own
 // lines, but the command fails when every selected source fails.

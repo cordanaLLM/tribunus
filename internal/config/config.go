@@ -42,7 +42,7 @@ const (
 	DefaultPerSourceCap     = 3
 	DefaultNtfyPriority     = 3
 	maxConfigKeyDepth       = 8
-	disabledEnvPrefix       = "\x00TRIBUNUS_CONFIG_ENV_DISABLED_"
+	disabledEnvPrefix       = "\x00EPITROP_CONFIG_ENV_DISABLED_"
 	schemaResourceID        = "config.schema.json"
 	defaultGraphDepth       = 12
 	defaultTokens           = 200000
@@ -51,7 +51,7 @@ const (
 	defaultTimeoutSec       = 30
 	defaultIntervalSec      = 5
 	defaultReadyCount       = 2
-	defaultEventLogDir      = ".tribunus"
+	defaultEventLogDir      = ".epitrop"
 	defaultLockSeconds      = 5
 	defaultReplayMax        = 100000
 	defaultJobSchedule      = "always"
@@ -86,7 +86,7 @@ var (
 // overridden silently, so config refuses it.
 var reservedSandboxEnv = []string{"PATH", "HOME", "TMPDIR", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "INVOCATION_ID"}
 
-// Config is the Tribunus process configuration loaded from a schema-checked
+// Config is the Epitrop process configuration loaded from a schema-checked
 // file.
 type Config struct {
 	Graph        GraphConfig        `koanf:"graph" json:"graph"`
@@ -614,7 +614,7 @@ func sandboxPathGuard(cfg Config, configPath string) (protectedPaths, error) {
 	return protectedPaths{paths: paths, home: home}, nil
 }
 
-// sandboxExecutable finds the running Tribunus binary. The supervisor re-executes it as
+// sandboxExecutable finds the running Epitrop binary. The supervisor re-executes it as
 // each job's shim, so a job that could write it would run its own code outside the sandbox
 // at the next start.
 var sandboxExecutable = os.Executable

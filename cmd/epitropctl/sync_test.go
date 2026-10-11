@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/catalog"
+	"github.com/tekmora/epitrop/catalog"
 )
 
 func TestSelectSources_Positive(t *testing.T) {

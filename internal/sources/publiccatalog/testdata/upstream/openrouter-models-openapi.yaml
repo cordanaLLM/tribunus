@@ -5,7 +5,7 @@
 # Extraction date: 2026-10-09
 # SPDX licence: MIT
 # Copyright holder: OpenRouter
-# Changes: provenance header added by Tribunus; extracted getModels path and model schema blocks
+# Changes: provenance header added by Epitrop; extracted getModels path and model schema blocks
 
 openapi: 3.1.0
 paths:

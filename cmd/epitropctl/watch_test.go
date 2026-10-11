@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
-	"github.com/cordanaLLM/tribunus/internal/releasewatch"
+	"github.com/tekmora/epitrop/internal/config"
+	"github.com/tekmora/epitrop/internal/releasewatch"
 )
 
 func TestRunWatchRejectsMissingAndUnknownCommand(t *testing.T) {
@@ -54,10 +54,10 @@ func TestCLIWatchBadFlagsExit2Subprocess(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
-	bin := filepath.Join(t.TempDir(), "tribunusctl")
+	bin := filepath.Join(t.TempDir(), "epitropctl")
 	buildCmd := exec.CommandContext(ctx, "go", "build", "-o", bin, ".")
 	if out, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("build tribunusctl: %v\n%s", err, out)
+		t.Fatalf("build epitropctl: %v\n%s", err, out)
 	}
 
 	cmd := exec.CommandContext(ctx, bin, "watch", "run", "--bad-flag")
@@ -66,7 +66,7 @@ func TestCLIWatchBadFlagsExit2Subprocess(t *testing.T) {
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	if err == nil {
-		t.Fatal("tribunusctl watch run --bad-flag = nil error, want exit 2")
+		t.Fatal("epitropctl watch run --bad-flag = nil error, want exit 2")
 	}
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 2 {

@@ -10,11 +10,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
-	"github.com/cordanaLLM/tribunus/internal/eventlog"
-	"github.com/cordanaLLM/tribunus/internal/graph"
-	"github.com/cordanaLLM/tribunus/internal/graphlog"
 	"github.com/jonboulle/clockwork"
+	"github.com/tekmora/epitrop/internal/config"
+	"github.com/tekmora/epitrop/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/graph"
+	"github.com/tekmora/epitrop/internal/graphlog"
 )
 
 var newGraphService = func(cfg config.Config) (*graphlog.Service, error) {

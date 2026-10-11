@@ -1,5 +1,5 @@
 <!-- markdownlint-disable MD013 -->
-# cordanaLLM/tribunus Agent Operating Harness
+# tekmora/epitrop Agent Operating Harness
 
 <!-- praetor:head -->
 

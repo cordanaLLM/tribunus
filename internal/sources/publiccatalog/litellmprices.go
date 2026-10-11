@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/catalog"
-	"github.com/cordanaLLM/tribunus/internal/sources/httpfetch"
+	"github.com/tekmora/epitrop/catalog"
+	"github.com/tekmora/epitrop/internal/sources/httpfetch"
 )
 
 // renovate: datasource=git-refs depName=https://github.com/BerriAI/litellm branch=main

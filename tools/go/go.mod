@@ -1,4 +1,4 @@
-module github.com/cordanaLLM/tribunus/tools/go
+module github.com/tekmora/epitrop/tools/go
 
 go 1.27.1
 

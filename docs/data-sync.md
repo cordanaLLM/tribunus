@@ -1,6 +1,6 @@
 # Catalog data sync
 
-`tribunusctl sync` collects what Tribunus needs to know about models from a handful of sources and writes it to one JSON snapshot file: what each model costs, how much context it takes, which access path reaches it, and how much of a provider's limit is already spent. `tribunusctl show` renders a snapshot as a table. The routing that reads these snapshots comes later (milestone 0.5); this page covers the sync.
+`epitropctl sync` collects what Epitrop needs to know about models from a handful of sources and writes it to one JSON snapshot file: what each model costs, how much context it takes, which access path reaches it, and how much of a provider's limit is already spent. `epitropctl show` renders a snapshot as a table. The routing that reads these snapshots comes later (milestone 0.5); this page covers the sync.
 
 ## Install
 
@@ -8,54 +8,54 @@ Releases are tagged `v*` and carry signed binaries ([Releasing](releasing.md)). 
 
 ```bash
 cosign verify-blob \
-  --certificate-identity "https://github.com/cordanaLLM/tribunus/.github/workflows/release-binaries.yml@refs/tags/<tag>" \
+  --certificate-identity "https://github.com/tekmora/epitrop/.github/workflows/release-binaries.yml@refs/tags/<tag>" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --bundle checksums.txt.sigstore.json checksums.txt
 sha256sum --check --ignore-missing checksums.txt
-gh attestation verify tribunusctl_<version>_linux_amd64.tar.gz --repo cordanaLLM/tribunus
+gh attestation verify epitropctl_<version>_linux_amd64.tar.gz --repo tekmora/epitrop
 ```
 
 To build from source instead, pin the version:
 
 ```bash
-go install github.com/cordanaLLM/tribunus/cmd/tribunusctl@<tag>
+go install github.com/tekmora/epitrop/cmd/epitropctl@<tag>
 ```
 
-`tribunusctl version` prints the release version; a source build prints `dev`.
+`epitropctl version` prints the release version; a source build prints `dev`.
 
 ## Running it
 
 ```bash
-# every source, written to ./tribunus-snapshot.json
-tribunusctl sync
+# every source, written to ./epitrop-snapshot.json
+epitropctl sync
 
 # a subset, explicit output path
-tribunusctl sync --sources=codex-local,ollama-local --out=/tmp/snapshot.json
+epitropctl sync --sources=codex-local,ollama-local --out=/tmp/snapshot.json
 
 # litellm-gateway needs both flags, or it reports a skip
-tribunusctl sync --sources=litellm-gateway \
+epitropctl sync --sources=litellm-gateway \
   --litellm-base=https://litellm.example.com \
   --litellm-token-file="$HOME/.config/<gateway>/agent-token"
 
 # render a snapshot; print the snapshot's JSON Schema
-tribunusctl show --in=/tmp/snapshot.json
-tribunusctl schema
+epitropctl show --in=/tmp/snapshot.json
+epitropctl schema
 ```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--sources` | all four, in the order of the table below | comma-separated; an empty, duplicate or unknown entry is an error |
-| `--out` | `tribunus-snapshot.json` | where the snapshot is written |
+| `--out` | `epitrop-snapshot.json` | where the snapshot is written |
 | `--litellm-base`, `--litellm-token-file` | none | required together for `litellm-gateway`; the token is read from the file and never printed |
 | `--ollama` | `http://localhost:11434` | Ollama daemon endpoint |
 | `--sessions-dir` | `~/.codex/sessions` | Codex CLI session logs |
 | `--openrouter-url`, `--litellm-prices-url` | the public OpenRouter API; the LiteLLM price map at a pinned commit | override only to test against a local fixture |
 
-`sync` prints one `<source> <status> count=<n> [detail]` line per source. Sources run independently: one failing never discards another's records. The status is `ok`, `skip` (the source cannot run here, such as missing flags or no session logs), `fail`, or `degraded` (records were produced but upstream data was lost, such as rejected entries or one of the two public catalogs failing). `sync` exits non-zero when every selected source fails, after printing every line. The whole command times out after 3 minutes (`syncTimeout` in `cmd/tribunusctl/sync.go`).
+`sync` prints one `<source> <status> count=<n> [detail]` line per source. Sources run independently: one failing never discards another's records. The status is `ok`, `skip` (the source cannot run here, such as missing flags or no session logs), `fail`, or `degraded` (records were produced but upstream data was lost, such as rejected entries or one of the two public catalogs failing). `sync` exits non-zero when every selected source fails, after printing every line. The whole command times out after 3 minutes (`syncTimeout` in `cmd/epitropctl/sync.go`).
 
 ## The snapshot
 
-A snapshot is `catalog.Snapshot` with `schema_version: 1`. Its JSON Schema is `catalog/snapshot.schema.json`, printed by `tribunusctl schema` and shipped with every release. `tribunusctl show` refuses a snapshot without a supported `schema_version` and asks for a new `sync`. A snapshot is exactly what one sync produced: nothing is merged across runs or sources.
+A snapshot is `catalog.Snapshot` with `schema_version: 1`. Its JSON Schema is `catalog/snapshot.schema.json`, printed by `epitropctl schema` and shipped with every release. `epitropctl show` refuses a snapshot without a supported `schema_version` and asks for a new `sync`. A snapshot is exactly what one sync produced: nothing is merged across runs or sources.
 
 Each record (`catalog.Record`) carries a model id, provider, access path (`api`, `subscription_cli`, `gateway` or `local`), context window, price per million tokens in and out, capabilities, rate limits and a usage window. Only the model id, access path and provenance are required. Provenance is `{source, fetched_at, kind}`: `measured` means read live from a real system, and `declared` means copied from a published catalog. A value a source does not report stays empty, and `Record.Absent` names it with a reason; nothing is guessed. A record that fails `Record.Validate` is rejected and counted in its source's line, and the rest of the snapshot is still written.
 

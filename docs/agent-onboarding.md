@@ -1,18 +1,18 @@
 # Agent onboarding
 
-Read this first when you work in `cordanaLLM/tribunus`.
+Read this first when you work in `tekmora/epitrop`.
 
-## What Tribunus is
+## What Epitrop is
 
-An agent runtime and task-graph engine for the cordanaLLM ecosystem. It reads its organisation (agents, routines, budgets) from files in Git, not from a database wizard.
+An agent runtime and task-graph engine for the Tekmora ecosystem. It reads its organisation (agents, routines, budgets) from files in Git, not from a database wizard.
 
 Planned stack:
 
 - Control plane: Go 1.27.2+ (`cmd/`, `internal/`), built on pinned golusoris modules ([ADR-0004](adr/0004-golusoris-pinned-base.md)).
-- Vector kernel: Rust (`crates/tribunus-graph`), SIMD skill matching.
+- Vector kernel: Rust (`crates/epitrop-graph`), SIMD skill matching.
 - Operator UI: Svelte 5 (`ui/`).
 
-Today these parts exist: the model catalog (`catalog/`, `internal/sources/`), the config loader (`internal/config`), the signed event log (`internal/eventlog`), the in-memory task graph (`internal/graph`), job supervision with its sandbox (`internal/supervisor`), the release watch (`internal/releasewatch`) and the run record (`internal/units`), all driven through `cmd/tribunusctl`. The rest lands in milestones 0.2 to 0.6; see the [roadmap](roadmap.md). The catalog has no silent fallback. A value a source does not report is nil with an `Absent` reason, and a malformed upstream entry or invalid record is rejected and counted in the source line while the rest is kept. A source run is `degraded` when it still produced records but lost upstream data; the detail text keeps the rejected, malformed, or failed sub-feed count. Empty upstream model responses are failures because they usually mean a schema or authorization break, except `ollama-local` `/api/tags`, where an empty local daemon is real state and remains `skip`. `tribunusctl sync` exits non-zero when every selected source fails. Snapshots carry `schema_version: 1`; the matching JSON Schema is `catalog/snapshot.schema.json`, and `tribunusctl schema` prints the embedded copy so downstream consumers can compare their pinned contract. The rest lands per milestone 0.2 to 0.5.
+Today these parts exist: the model catalog (`catalog/`, `internal/sources/`), the config loader (`internal/config`), the signed event log (`internal/eventlog`), the in-memory task graph (`internal/graph`), job supervision with its sandbox (`internal/supervisor`), the release watch (`internal/releasewatch`) and the run record (`internal/units`), all driven through `cmd/epitropctl`. The rest lands in milestones 0.2 to 0.6; see the [roadmap](roadmap.md). The catalog has no silent fallback. A value a source does not report is nil with an `Absent` reason, and a malformed upstream entry or invalid record is rejected and counted in the source line while the rest is kept. A source run is `degraded` when it still produced records but lost upstream data; the detail text keeps the rejected, malformed, or failed sub-feed count. Empty upstream model responses are failures because they usually mean a schema or authorization break, except `ollama-local` `/api/tags`, where an empty local daemon is real state and remains `skip`. `epitropctl sync` exits non-zero when every selected source fails. Snapshots carry `schema_version: 1`; the matching JSON Schema is `catalog/snapshot.schema.json`, and `epitropctl schema` prints the embedded copy so downstream consumers can compare their pinned contract. The rest lands per milestone 0.2 to 0.5.
 
 The task graph status vocabulary is `proposed`, `ready`, `claimed`, `implementing`, `review`, `fix-round-N`, `blocked`, `queued`, `landing`, `landed` and `dropped`.
 
@@ -20,7 +20,7 @@ When Renovate moves a pin in `internal/sources/upstream-schemas.json`, its pull 
 
 ## Rules for source code
 
-Tribunus code follows the HISS code standards that Praetor enforces:
+Epitrop code follows the HISS code standards that Praetor enforces:
 
 | Rule | Limit |
 | --- | --- |
@@ -50,12 +50,12 @@ Call models only through router aliases such as `cordana/auto`, `cordana/light`,
 ## Files
 
 - `AGENTS.md`: canonical agent briefing, rendered by Praetor; the vendor files are compiled from it.
-- `docs/config.schema.json`: published Tribunus config schema; `internal/config.Load` validates files against the embedded byte-identical copy.
+- `docs/config.schema.json`: published Epitrop config schema; `internal/config.Load` validates files against the embedded byte-identical copy.
 - `internal/eventlog`: append-only signed event log; private signing key stays outside the Git working tree and must not be readable by group or others.
 - `internal/supervisor`: declared background jobs, RT-03 sandboxed runner, lock-backed liveness, Linux shim death orphan prevention and replay-based re-adoption.
-- `internal/releasewatch`: upstream release watch (`tribunusctl watch run|seed`), run as a sandboxed job; files one issue per new release in the consuming repository.
-- `internal/units`: the run record (`tribunusctl units set|resume|show|note|inbox`): one entry per work unit and status in the signed log, on the task graph's status vocabulary; a relaunch verdict after a crash; an inbox read at the next status record. `units set --evidence="<path> sha256:<hex> lines:<n>"` records where the proof of a unit's result lies; the pointer stays on the unit until a new one replaces it, and `units show` prints it.
-- `internal/graphlog`: the task graph in the signed log (`tribunusctl graph show|apply`). `graph apply --config=file --file=stage.json` commits one staged change, a document `{"ops": [...]}` of `graph.node_added`, `graph.edge_added`, `graph.node_removed`, `graph.edge_removed` and `graph.status_changed` operations, as one record; a stage the graph refuses (a cycle, a chain deeper than `graph.max_depth`, a status no node may take) changes nothing. `graph show --config=file` prints the graph rebuilt from the log alone.
+- `internal/releasewatch`: upstream release watch (`epitropctl watch run|seed`), run as a sandboxed job; files one issue per new release in the consuming repository.
+- `internal/units`: the run record (`epitropctl units set|resume|show|note|inbox`): one entry per work unit and status in the signed log, on the task graph's status vocabulary; a relaunch verdict after a crash; an inbox read at the next status record. `units set --evidence="<path> sha256:<hex> lines:<n>"` records where the proof of a unit's result lies; the pointer stays on the unit until a new one replaces it, and `units show` prints it.
+- `internal/graphlog`: the task graph in the signed log (`epitropctl graph show|apply`). `graph apply --config=file --file=stage.json` commits one staged change, a document `{"ops": [...]}` of `graph.node_added`, `graph.edge_added`, `graph.node_removed`, `graph.edge_removed` and `graph.status_changed` operations, as one record; a stage the graph refuses (a cycle, a chain deeper than `graph.max_depth`, a status no node may take) changes nothing. `graph show --config=file` prints the graph rebuilt from the log alone.
 - `REUSE.toml`, `LICENSES/`: licensing (EUPL-1.2).
 - `docs/`: these documents.
 

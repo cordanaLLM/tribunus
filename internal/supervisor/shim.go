@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
-	"github.com/cordanaLLM/tribunus/internal/eventlog"
 	"github.com/jonboulle/clockwork"
+	"github.com/tekmora/epitrop/internal/config"
+	"github.com/tekmora/epitrop/internal/eventlog"
 )
 
 type shimConfig struct {
@@ -322,7 +322,7 @@ const maxRefusalReasonBytes = 2048
 // caller can act on without reading a log. The shim's stderr is not kept.
 func refuseJob(cfg shimConfig, logFile io.Writer, cause error) error {
 	err := fmt.Errorf("job-shim: %s refused: %w", cfg.Name, cause)
-	if _, writeErr := fmt.Fprintf(logFile, "tribunus: %v\n", err); writeErr != nil {
+	if _, writeErr := fmt.Fprintf(logFile, "epitrop: %v\n", err); writeErr != nil {
 		err = errors.Join(err, fmt.Errorf("job-shim: write refusal to the job log: %w", writeErr))
 	}
 	if appendErr := appendRefused(cfg, cause); appendErr != nil {

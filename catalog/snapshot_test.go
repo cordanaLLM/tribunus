@@ -120,7 +120,7 @@ func TestSnapshotSchemaEmbeddedMatchesFile(t *testing.T) {
 
 func loadSnapshotSchemaForTest(t *testing.T) map[string]any {
 	t.Helper()
-	path := os.Getenv("TRIBUNUS_SNAPSHOT_SCHEMA")
+	path := os.Getenv("EPITROP_SNAPSHOT_SCHEMA")
 	if path == "" {
 		path = filepath.Join("snapshot.schema.json")
 	}

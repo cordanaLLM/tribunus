@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/sources/httpfetch"
+	"github.com/tekmora/epitrop/internal/sources/httpfetch"
 )
 
 type ClientOptions struct {

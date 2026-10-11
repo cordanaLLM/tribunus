@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://cordanallm.example/tribunus/config.schema.json",
-  "title": "Tribunus configuration",
+  "$id": "https://cordanallm.example/epitrop/config.schema.json",
+  "title": "Epitrop configuration",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -353,7 +353,7 @@
     "event_log": {
       "type": "object",
       "default": {
-        "dir": ".tribunus",
+        "dir": ".epitrop",
         "signing_key_path": "",
         "public_key": "",
         "lock_timeout_seconds": 5,
@@ -363,7 +363,7 @@
       "properties": {
         "dir": {
           "type": "string",
-          "default": ".tribunus",
+          "default": ".epitrop",
           "minLength": 1,
           "maxLength": 4096
         },

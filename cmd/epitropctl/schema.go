@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/cordanaLLM/tribunus/catalog"
+	"github.com/tekmora/epitrop/catalog"
 )
 
 func runSchema(w io.Writer) error {

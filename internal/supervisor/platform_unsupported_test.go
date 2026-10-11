@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
+	"github.com/tekmora/epitrop/internal/config"
 )
 
 func TestUnsupportedPlatformReportsNotSupported(t *testing.T) {

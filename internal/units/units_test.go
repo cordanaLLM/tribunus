@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/eventlog"
 	"github.com/golusoris/golusoris/core/clock"
 	corereceipt "github.com/golusoris/golusoris/core/crypto/receipt"
+	"github.com/tekmora/epitrop/internal/eventlog"
 )
 
 const (
-	unitA        = "cordanaLLM/tribunus#22"
-	unitB        = "cordanaLLM/tribunus:docs-sweep"
+	unitA        = "tekmora/epitrop#22"
+	unitB        = "tekmora/epitrop:docs-sweep"
 	goodIdentity = `{"physical_model":"model-x","harness":"harness-a","harness_version":"1.2.3","tool_count":3,"future_key":"kept"}`
 )
 
@@ -76,10 +76,10 @@ func TestResumeListsOnlyOpenUnitsSorted(t *testing.T) {
 	svc := testService(t)
 	mustRecord(t, svc, unitB, RecordPayload{Status: "ready"})
 	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing"})
-	mustRecord(t, svc, "cordanaLLM/tribunus#7", RecordPayload{Status: "review"})
-	mustRecord(t, svc, "cordanaLLM/tribunus#7", RecordPayload{Status: "landing"})
-	mustRecord(t, svc, "cordanaLLM/tribunus#7", RecordPayload{Status: "landed"})
-	mustRecord(t, svc, "cordanaLLM/tribunus#8", RecordPayload{Status: "dropped"})
+	mustRecord(t, svc, "tekmora/epitrop#7", RecordPayload{Status: "review"})
+	mustRecord(t, svc, "tekmora/epitrop#7", RecordPayload{Status: "landing"})
+	mustRecord(t, svc, "tekmora/epitrop#7", RecordPayload{Status: "landed"})
+	mustRecord(t, svc, "tekmora/epitrop#8", RecordPayload{Status: "dropped"})
 	rows, ignored, err := svc.Resume(testContext(t))
 	if err != nil || ignored != 0 {
 		t.Fatalf("Resume() = %v, ignored %d, want nil and 0", err, ignored)
@@ -167,14 +167,14 @@ func TestStatusMovesFollowTheTaskGraphTable(t *testing.T) {
 func TestStickyFieldsKeepTheirValue(t *testing.T) {
 	svc := testService(t)
 	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing", Worktree: strPtr("/wt/22"), Branch: strPtr("feat/22"),
-		PR: intPtr(5), Lane: strPtr("agy"), By: strPtr("tribunus-85"), Target: strPtr("cordana/coding"), ResolvedModel: strPtr("model-x")})
+		PR: intPtr(5), Lane: strPtr("agy"), By: strPtr("epitrop-85"), Target: strPtr("cordana/coding"), ResolvedModel: strPtr("model-x")})
 	mustRecord(t, svc, unitA, RecordPayload{Status: "review", Lane: strPtr("orchestrator")})
 	unit, err := testService2(t, svc).Show(testContext(t), unitA)
 	if err != nil {
 		t.Fatalf("Show after replay = %v, want nil", err)
 	}
 	want := eventlog.Unit{ID: unitA, Status: "review", Worktree: "/wt/22", Branch: "feat/22", PR: 5, Lane: "orchestrator",
-		By: "tribunus-85", Target: "cordana/coding", ResolvedModel: "model-x", UpdatedAt: unit.UpdatedAt}
+		By: "epitrop-85", Target: "cordana/coding", ResolvedModel: "model-x", UpdatedAt: unit.UpdatedAt}
 	if !reflect.DeepEqual(unit, want) {
 		t.Fatalf("unit after a second record = %+v, want %+v", unit, want)
 	}
@@ -392,8 +392,8 @@ func TestReducerSettlesRacesWithoutFailing(t *testing.T) {
 	mustRecord(t, svc, unitA, RecordPayload{Status: "landing"})
 	mustRecord(t, svc, unitA, RecordPayload{Status: "landed"})
 	rawAppend(t, svc, "unit.recorded", unitA, `{"status":"implementing","pr":9}`)
-	rawAppend(t, svc, "unit.note", "cordanaLLM/tribunus#404", `{"from":"peer","text":"nobody home"}`)
-	rawAppend(t, svc, "unit.note_read", "cordanaLLM/tribunus#404", `{"upto_seq":1}`)
+	rawAppend(t, svc, "unit.note", "tekmora/epitrop#404", `{"from":"peer","text":"nobody home"}`)
+	rawAppend(t, svc, "unit.note_read", "tekmora/epitrop#404", `{"upto_seq":1}`)
 	st, err := svc.Replay(ctx)
 	if err != nil {
 		t.Fatalf("Replay() = %v, want nil: one racing record must not stop every later replay", err)
@@ -494,7 +494,7 @@ func TestRecordAndNoteRefusals(t *testing.T) {
 	notes := []struct {
 		name, id, from, text, want string
 	}{
-		{"unknown unit", "cordanaLLM/tribunus#404", "peer", "x", "does not exist"},
+		{"unknown unit", "tekmora/epitrop#404", "peer", "x", "does not exist"},
 		{"bad id", "no-suffix", "peer", "x", "invalid unit id"},
 		{"no sender", unitA, "", "x", "invalid sender"},
 		{"sender with a space", unitA, "a b", "x", "invalid sender"},

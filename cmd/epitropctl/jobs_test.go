@@ -13,13 +13,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
-	"github.com/cordanaLLM/tribunus/internal/supervisor"
 	"github.com/golusoris/golusoris/core/clock"
+	"github.com/tekmora/epitrop/internal/config"
+	"github.com/tekmora/epitrop/internal/supervisor"
 )
 
 func TestHelperProcessShim(t *testing.T) {
-	if os.Getenv("TRIBUNUS_TEST_SHIM") != "1" {
+	if os.Getenv("EPITROP_TEST_SHIM") != "1" {
 		return
 	}
 	os.Exit(runJobShim(argsAfterDash(os.Args)))
@@ -230,7 +230,7 @@ func testJobsSupervisor(t *testing.T) *supervisor.Supervisor {
 	if err != nil {
 		t.Fatalf("New() = %v, want nil", err)
 	}
-	t.Setenv("TRIBUNUS_TEST_SHIM", "1")
+	t.Setenv("EPITROP_TEST_SHIM", "1")
 	return sup
 }
 
@@ -262,7 +262,7 @@ func jobsTempDir(t *testing.T) string {
 	if root == "" {
 		root = t.TempDir()
 	}
-	base, err := os.MkdirTemp(root, "tribunus-jobs-test-*")
+	base, err := os.MkdirTemp(root, "epitrop-jobs-test-*")
 	if err != nil {
 		t.Fatalf("MkdirTemp(%s) = %v, want nil", root, err)
 	}

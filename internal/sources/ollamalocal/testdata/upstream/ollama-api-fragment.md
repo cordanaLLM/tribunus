@@ -6,7 +6,7 @@ Full document sha256: 96db03080e385dbabf5d70e75f298d41b75983bc30975cae56f7119f84
 Extraction date: 2026-10-09
 SPDX licence: MIT
 Copyright holder: Ollama
-Changes: provenance header added by Tribunus; derived /api/tags and /api/ps response shapes from examples
+Changes: provenance header added by Epitrop; derived /api/tags and /api/ps response shapes from examples
 -->
 
 # Ollama API response fragments

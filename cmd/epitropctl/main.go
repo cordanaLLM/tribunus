@@ -1,7 +1,7 @@
-// Command tribunusctl syncs the model data Tribunus routes on from a handful
+// Command epitropctl syncs the model data Epitrop routes on from a handful
 // of local and remote sources into one snapshot file, and can render that
 // snapshot as a table. See the catalog package for the record shape and
-// docs/data-sync.md for installing tribunusctl and for what each source does
+// docs/data-sync.md for installing epitropctl and for what each source does
 // and does not know.
 package main
 
@@ -58,17 +58,17 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println("tribunusctl - model data sync for the Tribunus graph router")
+	fmt.Println("epitropctl - model data sync for the Epitrop graph router")
 	fmt.Println()
 	fmt.Println("Usage:")
-	fmt.Println("  tribunusctl sync [--sources=a,b] [--out=file] [--litellm-base=url] [--litellm-token-file=path] [--ollama=url]")
-	fmt.Println("  tribunusctl show [--in=file]")
-	fmt.Println("  tribunusctl schema")
-	fmt.Println("  tribunusctl version")
-	fmt.Println("  tribunusctl jobs start|status|stop|supervise --config=file [name]")
-	fmt.Println("  tribunusctl watch run|seed --config=file [--once] [--interval=duration]")
-	fmt.Println("  tribunusctl units set|resume|show|note|inbox --config=file ...")
-	fmt.Println("  tribunusctl graph show|apply --config=file [--file=stage.json]")
+	fmt.Println("  epitropctl sync [--sources=a,b] [--out=file] [--litellm-base=url] [--litellm-token-file=path] [--ollama=url]")
+	fmt.Println("  epitropctl show [--in=file]")
+	fmt.Println("  epitropctl schema")
+	fmt.Println("  epitropctl version")
+	fmt.Println("  epitropctl jobs start|status|stop|supervise --config=file [name]")
+	fmt.Println("  epitropctl watch run|seed --config=file [--once] [--interval=duration]")
+	fmt.Println("  epitropctl units set|resume|show|note|inbox --config=file ...")
+	fmt.Println("  epitropctl graph show|apply --config=file [--file=stage.json]")
 }
 
 func printVersion() {

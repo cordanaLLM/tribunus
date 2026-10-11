@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
+	"github.com/tekmora/epitrop/internal/config"
 )
 
 type rt03Fixture struct {

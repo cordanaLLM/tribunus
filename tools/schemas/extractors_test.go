@@ -1,6 +1,6 @@
 //go:build schemasrefresh
 
-// SPDX-FileCopyrightText: 2026 cordanaLLM contributors
+// SPDX-FileCopyrightText: 2026 lusoris <lusoris@pm.me>
 //
 // SPDX-License-Identifier: EUPL-1.2
 
@@ -151,7 +151,7 @@ Response
 }
 
 // TestOpenRouterFragmentDropsExamples: schema examples are not schema; the
-// upstream ones name concrete models, which a Tribunus fixture must not
+// upstream ones name concrete models, which a Epitrop fixture must not
 // carry, so the extracted fragment keeps the shape and drops every example.
 func TestOpenRouterFragmentDropsExamples(t *testing.T) {
 	doc := strings.Replace(syntheticOpenRouterDocument("context_length"),

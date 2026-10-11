@@ -38,8 +38,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/catalog"
-	"github.com/cordanaLLM/tribunus/internal/sources/httpfetch"
+	"github.com/tekmora/epitrop/catalog"
+	"github.com/tekmora/epitrop/internal/sources/httpfetch"
 )
 
 // DefaultOpenRouterURL is the OpenRouter public models endpoint verified

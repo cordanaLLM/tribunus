@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
+	"github.com/tekmora/epitrop/internal/config"
 	"golang.org/x/sys/unix"
 )
 
@@ -117,7 +117,7 @@ func TestStopDoesNotEscalateWhenTermStopsWithinGrace(t *testing.T) {
 	job := testJob("gentle", []string{os.Args[0], "-test.run=TestHelperProcessJob"})
 	job.Stop = config.JobStopConfig{Signal: "TERM", GraceSeconds: 1}
 	sup := testSupervisor(t, job)
-	t.Setenv("TRIBUNUS_TEST_JOB", "sleep")
+	t.Setenv("EPITROP_TEST_JOB", "sleep")
 	if err := sup.Start(testContext(t), "gentle"); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
 	}

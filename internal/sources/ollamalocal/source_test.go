@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/catalog"
+	"github.com/tekmora/epitrop/catalog"
 )
 
 func newServer(t *testing.T, tags, ps string, psStatus int) *httptest.Server {

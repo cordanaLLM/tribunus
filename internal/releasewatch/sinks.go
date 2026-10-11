@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
+	"github.com/tekmora/epitrop/internal/config"
 )
 
 func DeliverGitHubIssue(ctx context.Context, client *Client, state *State, sink *config.GitHubIssueSink, item ReleaseItem) (bool, error) {

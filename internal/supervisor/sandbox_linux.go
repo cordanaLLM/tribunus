@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
+	"github.com/tekmora/epitrop/internal/config"
 )
 
 const (

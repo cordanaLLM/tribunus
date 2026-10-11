@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
+	"github.com/tekmora/epitrop/internal/config"
 )
 
 func oneRouteConfig(t *testing.T, floor int) config.Config {

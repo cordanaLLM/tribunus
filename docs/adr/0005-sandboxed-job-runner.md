@@ -2,7 +2,7 @@
 
 - **Status**: Proposed
 - **Date**: 2026-10-10
-- **Authors**: Tribunus maintainers
+- **Authors**: Epitrop maintainers
 
 ## Context
 
@@ -16,7 +16,7 @@ The first target is the Linux workstation that runs the supervisor as a per-host
 2. **One argv, built by the shim.** For `mode: enforce`, the shim execs (argv only, no shell):
 
    ```text
-   systemd-run --user --scope --quiet --collect --unit=tribunus-job-<id>.scope
+   systemd-run --user --scope --quiet --collect --unit=epitrop-job-<id>.scope
        -p MemoryMax=<memory_max> [-p MemoryHigh=<memory_high>]
        -p CPUWeight=<cpu_weight> -p TasksMax=<tasks_max> --
    env --ignore-signal=TERM
@@ -49,7 +49,7 @@ The first target is the Linux workstation that runs the supervisor as a per-host
    | `/run/systemd/resolve/resolv.conf` | the upstream resolvers. The host's `/etc/resolv.conf` names the systemd-resolved stub on loopback, which the sandbox must not reach. |
    | shim-built environment plus `--unsetenv` | the control plane's environment, which holds its tokens, never reaches the job. Only the names in `env_allow` are copied. bwrap removes the user-manager variables before the job starts, so the job sees exactly `PATH`, `HOME`, `TMPDIR`, `PWD` and its allowlisted names. The names the sandbox sets or removes are refused in `env_allow`. |
 
-3. **Paths are checked at config load and again at start.** `workspace` and each `input` resolve through symlinks. A path that equals, contains or lies inside the event log directory, the signing key, the config file or the running Tribunus executable is refused, as is `/`, `$HOME` or any directory containing `$HOME` (also reached through a symlink). The executable is protected because the supervisor re-executes it as each job's shim: a job that could write it would run its own code outside the sandbox at the next start. Config load fails closed when `$HOME` cannot be found. At job start the shim checks the workspace and inputs against the event log and the signing key again, and refuses a path whose symlink resolution changed since load.
+3. **Paths are checked at config load and again at start.** `workspace` and each `input` resolve through symlinks. A path that equals, contains or lies inside the event log directory, the signing key, the config file or the running Epitrop executable is refused, as is `/`, `$HOME` or any directory containing `$HOME` (also reached through a symlink). The executable is protected because the supervisor re-executes it as each job's shim: a job that could write it would run its own code outside the sandbox at the next start. Config load fails closed when `$HOME` cannot be found. At job start the shim checks the workspace and inputs against the event log and the signing key again, and refuses a path whose symlink resolution changed since load.
 4. **Fail closed.** A missing `bwrap` or `systemd-run`, an `env` outside `/usr` or without `--ignore-signal` and `--default-signal` (GNU coreutils 8.31 or later), a missing `pasta` or resolver file for egress, or TIOCSTI not disabled stops the job start with an error that names the missing piece. There is no fallback to an unsandboxed run. Other platforms report `not-supported` for `mode: enforce`.
 
    The same holds after the start. `systemd-run` exiting 0 does not show where the job runs, so the shim reads the job's cgroup from `/proc/<pid>/cgroup` and appends `job.started` only when it ends in the job's own scope unit. A unit name of its own is what makes the check exact: the cgroup the shim itself runs in may be a scope too. `systemd-run` execs the job only after the user manager placed it, so a process that is no longer `systemd-run`, or has exited, outside its scope is refused at once; while it is still `systemd-run` the shim waits up to 10 s. Whether the process has exited is asked of the kernel's wait interface, not read from `/proc`: `/proc` shows a zombie also for the moment in which a process with several threads execs from a thread other than its first, and a job taken for exited in that moment would be refused although it runs. A refused job's whole process group is killed. The reason is written to the job's log and recorded as a `job.refused` event, so a caller can act on a refusal without reading a log, and `jobs start` returns it. The same event records every other reason the shim did not start a job: a sandbox that cannot be built, a command that cannot start. `TestSandboxedJobOutsideItsScopeIsRefused` plants a scope command that reports success and starts the job without creating a scope; `TestSandboxedJobCgroupMemoryMax` is the allowed case, against the real user manager.

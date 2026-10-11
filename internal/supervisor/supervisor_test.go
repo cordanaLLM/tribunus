@@ -22,14 +22,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
-	"github.com/cordanaLLM/tribunus/internal/eventlog"
 	"github.com/golusoris/golusoris/core/clock"
+	"github.com/tekmora/epitrop/internal/config"
+	"github.com/tekmora/epitrop/internal/eventlog"
 	"golang.org/x/sys/unix"
 )
 
 func TestHelperProcessShim(t *testing.T) {
-	if os.Getenv("TRIBUNUS_TEST_SHIM") != "1" {
+	if os.Getenv("EPITROP_TEST_SHIM") != "1" {
 		return
 	}
 	code := RunShim(argsAfterDash(os.Args))
@@ -37,7 +37,7 @@ func TestHelperProcessShim(t *testing.T) {
 }
 
 func TestHelperProcessJob(t *testing.T) {
-	if os.Getenv("TRIBUNUS_TEST_JOB") == "" {
+	if os.Getenv("EPITROP_TEST_JOB") == "" {
 		return
 	}
 	runHelperJob()
@@ -83,7 +83,7 @@ func TestShellMetacharactersRunLiterally(t *testing.T) {
 	job := testJob("literal", []string{os.Args[0], "-test.run=TestHelperProcessJob", "--", "$HOME;echo bad"})
 	job.LogPath = logPath
 	sup := testSupervisor(t, job)
-	t.Setenv("TRIBUNUS_TEST_JOB", "echo-arg")
+	t.Setenv("EPITROP_TEST_JOB", "echo-arg")
 	if err := sup.Start(testContext(t), "literal"); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
 	}
@@ -230,7 +230,7 @@ func TestOnFailureRestartStopsAtMax(t *testing.T) {
 	job := testJob("flap", []string{os.Args[0], "-test.run=TestHelperProcessJob"})
 	job.Restart = config.JobRestartConfig{Policy: "on-failure", MaxRestarts: 2}
 	sup := testSupervisor(t, job)
-	t.Setenv("TRIBUNUS_TEST_JOB", "exit-7")
+	t.Setenv("EPITROP_TEST_JOB", "exit-7")
 	for i := 0; i < 4; i++ {
 		if err := sup.Reconcile(testContext(t)); err != nil {
 			t.Fatalf("Reconcile(%d) = %v, want nil", i, err)
@@ -258,7 +258,7 @@ func TestNeverRestartDoesNotRestartFailure(t *testing.T) {
 	job := testJob("once", []string{os.Args[0], "-test.run=TestHelperProcessJob"})
 	job.Restart = config.JobRestartConfig{Policy: "never", MaxRestarts: 2}
 	sup := testSupervisor(t, job)
-	t.Setenv("TRIBUNUS_TEST_JOB", "exit-7")
+	t.Setenv("EPITROP_TEST_JOB", "exit-7")
 	if err := sup.Reconcile(testContext(t)); err != nil {
 		t.Fatalf("Reconcile(start) = %v, want nil", err)
 	}
@@ -287,7 +287,7 @@ func TestStopEscalatesAfterGrace(t *testing.T) {
 	job := testJob("stubborn", []string{os.Args[0], "-test.run=TestHelperProcessJob"})
 	job.Stop = config.JobStopConfig{Signal: "TERM", GraceSeconds: 0}
 	sup := testSupervisor(t, job)
-	t.Setenv("TRIBUNUS_TEST_JOB", "ignore-term")
+	t.Setenv("EPITROP_TEST_JOB", "ignore-term")
 	if err := sup.Start(testContext(t), "stubborn"); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
 	}
@@ -304,7 +304,7 @@ func TestStopTermSignalsWholeProcessGroup(t *testing.T) {
 	job := testJob("group", []string{os.Args[0], "-test.run=TestHelperProcessJob"})
 	job.LogPath = logPath
 	sup := testSupervisor(t, job)
-	t.Setenv("TRIBUNUS_TEST_JOB", "spawn-child")
+	t.Setenv("EPITROP_TEST_JOB", "spawn-child")
 	if err := sup.Start(testContext(t), "group"); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
 	}
@@ -321,7 +321,7 @@ func TestStopEscalationKillsWholeProcessGroup(t *testing.T) {
 	job.LogPath = logPath
 	job.Stop = config.JobStopConfig{Signal: "TERM", GraceSeconds: 0}
 	sup := testSupervisor(t, job)
-	t.Setenv("TRIBUNUS_TEST_JOB", "spawn-child-ignore-term")
+	t.Setenv("EPITROP_TEST_JOB", "spawn-child-ignore-term")
 	if err := sup.Start(testContext(t), "killgroup"); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
 	}
@@ -816,7 +816,7 @@ func TestRestartAndShouldRestartBoundaries(t *testing.T) {
 		t.Fatalf("restartJob(canceled) = %v, want append signer error", err)
 	}
 	rt := testRuntime(t)
-	t.Setenv("TRIBUNUS_TEST_JOB", "sleep")
+	t.Setenv("EPITROP_TEST_JOB", "sleep")
 	sup = testSupervisorAt(t, rt, withRestartCommand(job, []string{os.Args[0], "-test.run=TestHelperProcessJob"}))
 	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 	defer cancel()
@@ -1070,7 +1070,7 @@ func TestStopPropagatesKillError(t *testing.T) {
 	job := testJob("probe", []string{os.Args[0], "-test.run=TestHelperProcessJob"})
 	job.Stop.GraceSeconds = 0
 	sup := testSupervisor(t, job)
-	t.Setenv("TRIBUNUS_TEST_JOB", "ignore-term")
+	t.Setenv("EPITROP_TEST_JOB", "ignore-term")
 	if err := sup.Start(testContext(t), "probe"); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
 	}
@@ -1196,7 +1196,7 @@ func TestStartedByChecksShimPIDAndStartTime(t *testing.T) {
 }
 
 func TestRunShimReturnsAfterStartedAppendError(t *testing.T) {
-	t.Setenv("TRIBUNUS_TEST_JOB", "sleep")
+	t.Setenv("EPITROP_TEST_JOB", "sleep")
 	cfg := validShimConfig(t, "probe")
 	cfg.Command = []string{os.Args[0], "-test.run=TestHelperProcessJob"}
 	if err := os.WriteFile(filepath.Join(cfg.EventLogDir, "events"), []byte("file"), 0o600); err != nil {
@@ -1270,7 +1270,7 @@ var (
 // so two runs at once probe the same lock file. TestMain removes the directory.
 func testScratch() string {
 	testScratchOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "tribunus-supervisor-scratch-")
+		dir, err := os.MkdirTemp("", "epitrop-supervisor-scratch-")
 		if err != nil {
 			panic(fmt.Sprintf("supervisor tests: scratch directory: %v", err))
 		}
@@ -1333,7 +1333,7 @@ func testSupervisorAt(t *testing.T, rt testRuntimeConfig, jobs ...config.JobConf
 	if err != nil {
 		t.Fatalf("New() = %v, want nil", err)
 	}
-	t.Setenv("TRIBUNUS_TEST_SHIM", "1")
+	t.Setenv("EPITROP_TEST_SHIM", "1")
 	t.Cleanup(func() {
 		// The test's own context has ended by now.
 		ctx, cancel := context.WithTimeout(context.Background(), testWaitBound)
@@ -1394,10 +1394,10 @@ func countingShimSupervisor(t *testing.T, name string) (*Supervisor, testRuntime
 	rt := testRuntime(t)
 	sup := testSupervisorAt(t, rt, testJob(name, longJobCommand(t)))
 	counter := filepath.Join(t.TempDir(), "starts")
-	t.Setenv("TRIBUNUS_PROBE_COUNT", counter)
+	t.Setenv("EPITROP_PROBE_COUNT", counter)
 	sup.shimCommand = []string{
 		"/bin/sh", "-c",
-		`echo x >> "$TRIBUNUS_PROBE_COUNT"; exec "$@"`,
+		`echo x >> "$EPITROP_PROBE_COUNT"; exec "$@"`,
 		"sh", os.Args[0], "-test.run=TestHelperProcessShim", "--",
 	}
 	return sup, rt, counter
@@ -1442,7 +1442,7 @@ func testRuntime(t *testing.T) testRuntimeConfig {
 	if root == "" {
 		root = t.TempDir()
 	}
-	base, err := os.MkdirTemp(root, "tribunus-supervisor-test-*")
+	base, err := os.MkdirTemp(root, "epitrop-supervisor-test-*")
 	if err != nil {
 		t.Fatalf("MkdirTemp(/var/tmp) = %v, want nil", err)
 	}
@@ -1726,7 +1726,7 @@ func cleanupRecordProcessGroup(t *testing.T, recordPath string) {
 
 func longJobCommand(t *testing.T) []string {
 	t.Helper()
-	t.Setenv("TRIBUNUS_TEST_JOB", "sleep")
+	t.Setenv("EPITROP_TEST_JOB", "sleep")
 	return []string{os.Args[0], "-test.run=TestHelperProcessJob"}
 }
 
@@ -1890,7 +1890,7 @@ func processParent(pid int) (int, error) {
 }
 
 func runHelperJob() {
-	switch os.Getenv("TRIBUNUS_TEST_JOB") {
+	switch os.Getenv("EPITROP_TEST_JOB") {
 	case "echo-arg":
 		fmt.Println(strings.Join(argsAfterDash(os.Args), " "))
 	case "exit-7":

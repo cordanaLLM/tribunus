@@ -1,4 +1,4 @@
-// Package graph stores the in-memory task graph used by the Tribunus control
+// Package graph stores the in-memory task graph used by the Epitrop control
 // plane.
 package graph
 
@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
+	"github.com/tekmora/epitrop/internal/config"
 )
 
 // Store bounds keep validation work finite and reject accidental event floods.

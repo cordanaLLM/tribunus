@@ -22,7 +22,7 @@ import (
 
 // clientName labels the outbound client in golusoris breaker logs and OTel
 // spans.
-const clientName = "tribunus.httpfetch"
+const clientName = "epitrop.httpfetch"
 
 // Get performs a GET against url with a per-call deadline (timeout) and a
 // bounded response read (maxBytes), so a source's HTTP call can neither hang

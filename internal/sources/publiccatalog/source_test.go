@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cordanaLLM/tribunus/catalog"
+	"github.com/tekmora/epitrop/catalog"
 )
 
 func TestFetch_Positive(t *testing.T) {

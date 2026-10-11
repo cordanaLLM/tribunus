@@ -1,8 +1,8 @@
 ---
 version: 1
 repository:
-  owner: cordanaLLM
-  name: tribunus
+  owner: tekmora
+  name: epitrop
   visibility: public
   description: ""
   homepage: ""
@@ -44,11 +44,11 @@ overrides:
 # Documentation drift (praetorctl docs references): a change to a surface must carry a change to
 # one of its documents, or a Docs-Waiver with a reason.
 docs_surfaces:
-  - name: "tribunusctl CLI"
+  - name: "epitropctl CLI"
     paths:
-      - "cmd/tribunusctl/*.go"
+      - "cmd/epitropctl/*.go"
     exclude:
-      - "cmd/tribunusctl/*_test.go"
+      - "cmd/epitropctl/*_test.go"
     docs:
       - "README.md"
       - "docs/agent-onboarding.md"

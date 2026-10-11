@@ -24,11 +24,17 @@ var newUnitsService = func(cfg config.Config) (*units.Service, error) {
 	if err != nil {
 		return nil, err
 	}
+	return units.NewService(cfg.EventLog.Dir, signer, clk, eventLogLimits(cfg, clk))
+}
+
+// eventLogLimits are the limits a command reads and writes the event log under: the
+// configured replay bound and lock timeout.
+func eventLogLimits(cfg config.Config, clk clockwork.Clock) eventlog.Limits {
 	limits := eventlog.Limits{Clock: clk, MaxReplayRecords: cfg.EventLog.MaxReplayRecords}
 	if cfg.EventLog.LockTimeoutSeconds > 0 {
 		limits.LockTimeout = time.Duration(cfg.EventLog.LockTimeoutSeconds) * time.Second
 	}
-	return units.NewService(cfg.EventLog.Dir, signer, clk, limits)
+	return limits
 }
 
 // unitsStdin is the reader "--identity=-" takes the identity object from.
@@ -53,24 +59,34 @@ func runUnits(args []string) error {
 	return fmt.Errorf("unknown units command: %s", args[0])
 }
 
-// unitsCall parses the flags of one action, loads the config and opens the service. need
-// names the positional arguments the action requires.
-func unitsCall(fs *flag.FlagSet, args []string, need ...string) (*units.Service, []string, context.Context, context.CancelFunc, error) {
+// commandConfig parses the flags of one action and loads its config. need names the
+// positional arguments the action requires. The context it returns bounds the action.
+func commandConfig(fs *flag.FlagSet, args []string, need ...string) (config.Config, []string, context.Context, context.CancelFunc, error) {
 	configPath := fs.String("config", "", "configuration file")
 	pos, err := parseInterspersedFlags(fs, args)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return config.Config{}, nil, nil, nil, err
 	}
 	if len(pos) < len(need) {
-		return nil, nil, nil, nil, fmt.Errorf("%s: %s is required", fs.Name(), need[len(pos)])
+		return config.Config{}, nil, nil, nil, fmt.Errorf("%s: %s is required", fs.Name(), need[len(pos)])
 	}
 	if *configPath == "" {
-		return nil, nil, nil, nil, fmt.Errorf("%s: --config is required", fs.Name())
+		return config.Config{}, nil, nil, nil, fmt.Errorf("%s: --config is required", fs.Name())
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	cfg, err := config.Load(ctx, *configPath)
 	if err != nil {
 		cancel()
+		return config.Config{}, nil, nil, nil, err
+	}
+	return cfg, pos, ctx, cancel, nil
+}
+
+// unitsCall parses the flags of one action, loads the config and opens the service. need
+// names the positional arguments the action requires.
+func unitsCall(fs *flag.FlagSet, args []string, need ...string) (*units.Service, []string, context.Context, context.CancelFunc, error) {
+	cfg, pos, ctx, cancel, err := commandConfig(fs, args, need...)
+	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 	svc, err := newUnitsService(cfg)

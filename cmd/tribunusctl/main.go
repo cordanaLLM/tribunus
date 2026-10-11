@@ -31,6 +31,8 @@ func main() {
 		err = runWatch(os.Args[2:])
 	case "units":
 		err = runUnits(os.Args[2:])
+	case "graph":
+		err = runGraph(os.Args[2:])
 	case "show":
 		err = runShow(os.Args[2:])
 	case "schema":
@@ -66,6 +68,7 @@ func printUsage() {
 	fmt.Println("  tribunusctl jobs start|status|stop|supervise --config=file [name]")
 	fmt.Println("  tribunusctl watch run|seed --config=file [--once] [--interval=duration]")
 	fmt.Println("  tribunusctl units set|resume|show|note|inbox --config=file ...")
+	fmt.Println("  tribunusctl graph show|apply --config=file [--file=stage.json]")
 }
 
 func printVersion() {

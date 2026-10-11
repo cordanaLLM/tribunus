@@ -3,7 +3,7 @@ module github.com/tekmora/epitrop
 go 1.27.2
 
 require (
-	github.com/golusoris/golusoris v0.16.2
+	github.com/golusoris/golusoris v0.16.5
 	github.com/golusoris/golusoris/core v0.10.2
 	github.com/jonboulle/clockwork v0.5.0
 	golang.org/x/sys v0.49.0

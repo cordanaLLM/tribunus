@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/eventlog"
-	"github.com/cordanaLLM/tribunus/internal/graph"
-	"github.com/cordanaLLM/tribunus/internal/graphlog"
 	"github.com/jonboulle/clockwork"
+	"github.com/tekmora/epitrop/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/graph"
+	"github.com/tekmora/epitrop/internal/graphlog"
 )
 
 // graphConfig writes a config whose event log is fresh and whose graph depth is depth. It

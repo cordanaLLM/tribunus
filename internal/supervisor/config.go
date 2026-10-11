@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
+	"github.com/tekmora/epitrop/internal/config"
 )
 
 func checkConfig(cfg config.Config) error {

@@ -1,4 +1,4 @@
-module github.com/cordanaLLM/tribunus
+module github.com/tekmora/epitrop
 
 go 1.27.2
 

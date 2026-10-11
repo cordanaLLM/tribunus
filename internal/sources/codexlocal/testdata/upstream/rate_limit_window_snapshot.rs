@@ -5,7 +5,7 @@
 // Extraction date: 2026-10-09
 // SPDX licence: Apache-2.0
 // Copyright holder: OpenAI
-// Changes: provenance header added by Tribunus; extracted the pinned Codex source file verbatim
+// Changes: provenance header added by Epitrop; extracted the pinned Codex source file verbatim
 
 /*
  * codex-backend

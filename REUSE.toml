@@ -3,7 +3,7 @@ version = 1
 [[annotations]]
 path = ["**"]
 precedence = "aggregate"
-SPDX-FileCopyrightText = "2026 cordanaLLM contributors"
+SPDX-FileCopyrightText = "2026 lusoris <lusoris@pm.me>"
 SPDX-License-Identifier = "EUPL-1.2"
 
 # The vendored interfig engine keeps its upstream MIT terms. REUSE applies only the last

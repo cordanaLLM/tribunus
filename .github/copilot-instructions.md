@@ -2,7 +2,7 @@
 <!-- Compiled automatically by praetorctl compile-context from AGENTS.md. DO NOT EDIT DIRECTLY. -->
 
 <!-- markdownlint-disable MD013 -->
-# cordanaLLM/tribunus Agent Operating Harness
+# tekmora/epitrop Agent Operating Harness
 
 Before concluding any turn:
 

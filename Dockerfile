@@ -7,7 +7,7 @@ COPY . .
 # The main package the image runs. Left empty, the build takes the module's only main
 # package, wherever it lives, and stops naming what it found when there is none or more than
 # one. Choose one with: docker build --build-arg MAIN_PACKAGE=./cmd/<name> .
-ARG MAIN_PACKAGE=./cmd/tribunusctl
+ARG MAIN_PACKAGE=./cmd/epitropctl
 RUN set -eu; \
     pkg="${MAIN_PACKAGE:-}"; \
     if [ -z "$pkg" ]; then \

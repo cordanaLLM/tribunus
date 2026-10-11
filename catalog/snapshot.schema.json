@@ -1,5 +1,5 @@
 {
-  "$id": "https://github.com/cordanaLLM/tribunus/catalog/snapshot.schema.json",
+  "$id": "https://github.com/tekmora/epitrop/catalog/snapshot.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Snapshot",
   "type": "object",

@@ -2,7 +2,7 @@
 
 - **Status**: Proposed
 - **Date**: 2026-10-09
-- **Authors**: Tribunus maintainers
+- **Authors**: Epitrop maintainers
 
 ## Context
 
@@ -15,12 +15,12 @@ golusoris publishes two Go modules from one repository, each with its own tags:
 
 Release v0.13.0 and core v0.10.0 were cut from the same commit (`f3b3355`). The root `go.mod` at v0.13.0 still requires core v0.9.2 and uses a `replace => ./core` directive. Go ignores `replace` in a dependency, so for a consumer that names only the root module, the root's own requirement selects core v0.9.2. That version lacks `core/retry`, `core/codec/jcs` and `core/tlsx`, and `httpx/server` and `grpc` at v0.13.0 import `core/tlsx`. The go command then fails, or looks up the newest core release, which nothing pins. Only an explicit core requirement gives the pair golusoris tested together.
 
-Tribunus keeps no relational database ([ADR-001](../architecture-v2.md#adr-001-graph-and-event-log-as-source-of-truth)): state lives in an in-memory graph hydrated from Git and an append-only event log.
+Epitrop keeps no relational database ([ADR-001](../architecture-v2.md#adr-001-graph-and-event-log-as-source-of-truth)): state lives in an in-memory graph hydrated from Git and an append-only event log.
 
 ## Decision
 
 1. `go.mod` requires both modules directly, at exact versions: `github.com/golusoris/golusoris v0.13.0` and `github.com/golusoris/golusoris/core v0.10.0`. They move together, as one update.
-2. A capability golusoris ships is taken from golusoris. Tribunus writes only what the [gaps](#gaps-tribunus-writes) section lists.
+2. A capability golusoris ships is taken from golusoris. Epitrop writes only what the [gaps](#gaps-epitrop-writes) section lists.
 3. Modules that need Postgres, SQLite, Redis, NATS or another external state service stay out (see [Excluded modules](#excluded-modules)).
 4. Existing duplicates move now:
    - [`internal/sources/httpfetch`](../../internal/sources/httpfetch/httpfetch.go) builds its client with `httpx/client.New` and caps bodies with `httpx/client.ReadAllBounded`. It gains `GetWithHeader` for authenticated sources.
@@ -41,32 +41,32 @@ Weights are the third-party modules (golusoris modules excluded) in each package
 
 | Need | golusoris module | Owning go.mod | Used now / planned | Notes |
 | :--- | :--- | :--- | :--- | :--- |
-| Outbound HTTP | `httpx/client` | root | used now: `internal/sources/httpfetch`, file reads in `litellmgateway` and `cmd/tribunusctl` | 25 modules (otelhttp, go-retryablehttp, gobreaker, fx). Retry and breaker off, as before. |
-| Close-and-join errors | `core/errors` | core | used now: `httpfetch`, `litellmgateway`, `codexlocal`, `cmd/tribunusctl` | `CloseJoin`; 1 module (go-faster/errors). |
-| Configuration | `core/config` | core | planned: `cmd/tribunus-server` | koanf: files, environment, Kubernetes secret directories, `*_FILE`; 16 modules. Organisation files under Git (agents, routines, budgets) are domain data for the task-graph store, not process configuration. |
-| Logging | `core/log` | core | planned: `cmd/tribunus-server` | slog; 26 modules. `tribunusctl` operator output stays plain text on stdout; it is not logging. |
+| Outbound HTTP | `httpx/client` | root | used now: `internal/sources/httpfetch`, file reads in `litellmgateway` and `cmd/epitropctl` | 25 modules (otelhttp, go-retryablehttp, gobreaker, fx). Retry and breaker off, as before. |
+| Close-and-join errors | `core/errors` | core | used now: `httpfetch`, `litellmgateway`, `codexlocal`, `cmd/epitropctl` | `CloseJoin`; 1 module (go-faster/errors). |
+| Configuration | `core/config` | core | planned: `cmd/epitrop-server` | koanf: files, environment, Kubernetes secret directories, `*_FILE`; 16 modules. Organisation files under Git (agents, routines, budgets) are domain data for the task-graph store, not process configuration. |
+| Logging | `core/log` | core | planned: `cmd/epitrop-server` | slog; 26 modules. `epitropctl` operator output stays plain text on stdout; it is not logging. |
 | Retry | `core/retry` | core (new in core v0.10.0) | planned: non-HTTP retries | Capped exponential backoff with jitter on an injected clock; 6 modules. HTTP calls retry through `httpx/client` `RetryOptions`, not through `core/retry`. |
 | Clock | `core/clock` | core | planned (follow-up) | clockwork plus fx; 6 modules. Sources and `sync` still call `time.Now` for provenance timestamps; injecting `clock.Clock` changes their signatures, so it is a separate change. |
 | Identifiers | `core/id` | core | planned: task and event ids | UUIDv7 (time-ordered) and KSUID; 7 modules. |
 | Telemetry | `otel` | root | planned: `internal/telemetry` | Heaviest: 59 modules (OTLP gRPC exporters, Prometheus). No-op when no OTLP endpoint is set. `httpx/client` already emits otelhttp spans to the global provider, which stays no-op until `otel.Module` is wired. |
-| REST server | `httpx/server`, `httpx/router`, `httpx/middleware` | root | planned: `cmd/tribunus-server` | `httpx/server` 25 modules, `httpx/router` 6. |
+| REST server | `httpx/server`, `httpx/router`, `httpx/middleware` | root | planned: `cmd/epitrop-server` | `httpx/server` 25 modules, `httpx/router` 6. |
 | Server-sent events | `realtime/sse` | root | planned: UI event stream | Standard library only. Buffers 16 events per client and drops on overflow; no `Last-Event-ID` replay (see gaps). |
 | In-process pub/sub | `realtime/pubsub` | root | planned: broker fan-out | `LocalBus`: synchronous fan-out in the publisher's goroutine, exact topic match, no buffering, standard library only. |
 | MCP server | `core/mcp` | core | planned: `internal/mcp` | Official MCP Go SDK v1.8.0; stdio and streamable HTTP; 32 modules. |
-| Health probes | `k8s/health` | root | planned: `cmd/tribunus-server` | `/livez`, `/readyz`, `/startupz` and a drain gate; 26 modules. Does not import the Kubernetes client. |
-| Idempotency | `idempotency` | root | planned, partial: inbound REST requests | `Idempotency-Key` middleware with `MemoryStore` or a Tribunus `Store` (atomic `Claim`/`Commit`/`Release`). Does not cover RT-02 (see gaps). The package compiles its Postgres and Redis stores in, so importing it links pgx, rueidis and gRPC: 51 modules. |
+| Health probes | `k8s/health` | root | planned: `cmd/epitrop-server` | `/livez`, `/readyz`, `/startupz` and a drain gate; 26 modules. Does not import the Kubernetes client. |
+| Idempotency | `idempotency` | root | planned, partial: inbound REST requests | `Idempotency-Key` middleware with `MemoryStore` or a Epitrop `Store` (atomic `Claim`/`Commit`/`Release`). Does not cover RT-02 (see gaps). The package compiles its Postgres and Redis stores in, so importing it links pgx, rueidis and gRPC: 51 modules. |
 | Canonical JSON | `core/codec/jcs` | core (new in core v0.10.0) | planned: event-log records | RFC 8785; standard library only. Canonical bytes before an event is hashed or signed. |
 | Signed receipts | `core/crypto/receipt` | core | planned: run receipts | Ed25519 Exit-0 receipts, payload wire-compatible with Praetor's execution receipt; refuses a non-zero exit; 25 modules. |
 
 `httpx/extclient` was considered for `litellm-gateway` and rejected. Its `APIError` puts up to 512 bytes of the response body into the error text, and that source must never surface a gateway reply that can echo a credential. Its 8 MiB cap is also fixed.
 
-## Gaps Tribunus writes
+## Gaps Epitrop writes
 
-golusoris v0.13.0 has no graph store and no event-sourcing log. In Go source, `git grep -i -E 'topolog|acyclic|kahn' v0.13.0 -- '*.go'` finds a HISS test fixture, a topology comment in `ai/tiny/serve/fleet` and a recursive-type check in `jsonschema`; none of them stores a graph. Tribunus therefore writes:
+golusoris v0.13.0 has no graph store and no event-sourcing log. In Go source, `git grep -i -E 'topolog|acyclic|kahn' v0.13.0 -- '*.go'` finds a HISS test fixture, a topology comment in `ai/tiny/serve/fleet` and a recursive-type check in `jsonschema`; none of them stores a graph. Epitrop therefore writes:
 
 - **Task-graph store** (`internal/sot`, planned): an in-memory directed acyclic graph hydrated from Git files. It rejects a cycle before the graph changes, bounds traversal depth and stages changes with rollback.
 - **Git-backed append-only event log** (RT-04). golusoris `audit` is an append-only audit trail (actor, action, target) behind a store interface meant for Postgres, with a memory store for tests. It has no Git persistence and no replay into state, so it cannot be the source of truth. The event log may feed it later.
-- **Broker semantics on top of `realtime/pubsub`.** Issue #30 lists the whole in-process broker as a gap. That is not quite right: the in-process fan-out ships as `realtime/pubsub.LocalBus`, and Tribunus uses it through the `pubsub.Bus` interface. Tribunus adds:
+- **Broker semantics on top of `realtime/pubsub`.** Issue #30 lists the whole in-process broker as a gap. That is not quite right: the in-process fan-out ships as `realtime/pubsub.LocalBus`, and Epitrop uses it through the `pubsub.Bus` interface. Epitrop adds:
   - log-first publishing: append, then fan out;
   - a bounded queue per subscriber (HISS-06);
   - cursor replay from the event log, which also serves SSE reconnects with `Last-Event-ID`.
@@ -80,8 +80,8 @@ golusoris v0.13.0 has no graph store and no event-sourcing log. In Go source, `g
 | `jobs` (River on Postgres; `jobs/sqlite`) | Relational database (ADR-001). The task graph schedules work. |
 | `outbox` (Postgres table, River drainer, `outbox/cdc`) | Relational database (ADR-001). The event log is the outbox. |
 | `pubsub/nats`, `pubsub/kafka`, `pubsub/gcp`, `realtime/pubsub/redis` | External broker or store. Durable history is the Git event log; fan-out is in process. |
-| `jobs/workflow` | Needs a Temporal service; the task graph is Tribunus's own. |
-| `idempotency` Postgres, Redis and SQLite stores | External or relational store (ADR-001). The REST API uses `MemoryStore` or a Tribunus `Store`. |
+| `jobs/workflow` | Needs a Temporal service; the task graph is Epitrop's own. |
+| `idempotency` Postgres, Redis and SQLite stores | External or relational store (ADR-001). The REST API uses `MemoryStore` or a Epitrop `Store`. |
 | `httpx/extclient` | Error text carries response bytes; cap fixed (see [Module map](#module-map)). |
 
 ## Updates and Renovate
@@ -96,7 +96,7 @@ Root and core releases are cut from one commit, and the root `go.mod` lags the c
 
 ## v0.13.0
 
-v0.13.0 is released, so Tribunus starts at v0.13.0. No earlier golusoris code exists here to convert, and the migration plan reduces to that starting point. From [`docs/migrations/v0.13.0.md`](https://github.com/golusoris/golusoris/blob/v0.13.0/docs/migrations/v0.13.0.md), these parts become the starting contract for planned modules:
+v0.13.0 is released, so Epitrop starts at v0.13.0. No earlier golusoris code exists here to convert, and the migration plan reduces to that starting point. From [`docs/migrations/v0.13.0.md`](https://github.com/golusoris/golusoris/blob/v0.13.0/docs/migrations/v0.13.0.md), these parts become the starting contract for planned modules:
 
 - `httpx/client`: unsafe methods retry only with an `Idempotency-Key` header or `Retry.AllowUnsafe`.
 - `httpx/server`: a zero request-body limit means 10 MiB.
@@ -114,14 +114,14 @@ The `go` line moves from 1.27 to 1.27.2, because both golusoris modules require 
 
 ## Licence
 
-golusoris code is EUPL-1.2 from v0.9.0 on (`LICENSING.md` at v0.13.0), the same licence as Tribunus. The licence texts are byte-identical (`cmp LICENSES/EUPL-1.2.txt`). The third-party modules now built into Tribunus (`go list -deps -test ./...`) are under MIT, BSD-3-Clause, Apache-2.0 and MPL-2.0 (go-cleanhttp, go-retryablehttp). MPL-2.0 is on the EUPL-1.2 Appendix of compatible licences; the permissive licences carry notice obligations only. No conflict.
+golusoris code is EUPL-1.2 from v0.9.0 on (`LICENSING.md` at v0.13.0), the same licence as Epitrop. The licence texts are byte-identical (`cmp LICENSES/EUPL-1.2.txt`). The third-party modules now built into Epitrop (`go list -deps -test ./...`) are under MIT, BSD-3-Clause, Apache-2.0 and MPL-2.0 (go-cleanhttp, go-retryablehttp). MPL-2.0 is on the EUPL-1.2 Appendix of compatible licences; the permissive licences carry notice obligations only. No conflict.
 
 ## Consequences
 
 - **Positive**: The control plane starts on tested modules for config, logging, telemetry, server, health, MCP and idempotency instead of new code. The catalog sources share one HTTP client stack with OTel spans, ready for retry and a breaker when a source needs them. Oversized bodies are now distinguishable with `errors.Is`.
 - **Negative**:
-  - Tribunus's build list grows from zero to 25 third-party modules for the code that exists today; each planned module above adds its weight.
-  - Importing `idempotency` links Postgres and Redis drivers that Tribunus never uses.
+  - Epitrop's build list grows from zero to 25 third-party modules for the code that exists today; each planned module above adds its weight.
+  - Importing `idempotency` links Postgres and Redis drivers that Epitrop never uses.
   - Two modules must move in step, and golusoris is pre-1.0, so a minor release can break the API (v0.13.0 did).
 
 ## Follow-ups

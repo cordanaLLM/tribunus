@@ -1,5 +1,5 @@
 {
-  "name": "cordanaLLM/tribunus",
+  "name": "tekmora/epitrop",
   "build": {
     "dockerfile": "Dockerfile.praetor",
     "context": "."

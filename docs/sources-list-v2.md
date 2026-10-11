@@ -1,6 +1,6 @@
 # Sources
 
-Reference links behind the Tribunus design. Each row was opened on 2026-10-09 and resolved to the source it names. Where a site refuses automated readers, the registry's or project's own API confirmed it instead (crates.io, GitHub, PyPI, Fedora's documentation source). Rows are references, not endorsements.
+Reference links behind the Epitrop design. Each row was opened on 2026-10-09 and resolved to the source it names. Where a site refuses automated readers, the registry's or project's own API confirmed it instead (crates.io, GitHub, PyPI, Fedora's documentation source). Rows are references, not endorsements.
 
 Entries: 81
 

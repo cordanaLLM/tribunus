@@ -1,5 +1,5 @@
 <!-- markdownlint-disable MD013 -->
-# cordanaLLM/tribunus Agent Operating Harness
+# tekmora/epitrop Agent Operating Harness
 
 Run read-only: file edits, state mutations, commits prohibited. Mutating steps dropped; prohibitions kept.
 

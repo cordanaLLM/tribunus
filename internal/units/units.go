@@ -12,8 +12,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/cordanaLLM/tribunus/internal/eventlog"
-	"github.com/cordanaLLM/tribunus/internal/graph"
+	"github.com/tekmora/epitrop/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/graph"
 )
 
 const (

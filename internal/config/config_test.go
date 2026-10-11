@@ -20,7 +20,7 @@ func TestLoadPositiveFullFile(t *testing.T) {
   "jobs": [{
     "name": "daily-catalog-sync",
     "command": ["/bin/echo", "catalog"],
-    "log_path": "/var/log/tribunus/daily-catalog-sync.log",
+    "log_path": "/var/log/epitrop/daily-catalog-sync.log",
     "schedule": "0 2 * * *",
     "router_alias": "cordana/auto",
     "max_runtime_seconds": 1800,
@@ -32,8 +32,8 @@ func TestLoadPositiveFullFile(t *testing.T) {
   "router": {"aliases": ["cordana/auto", "cordana/coding"]},
   "admission": {"probe": {"timeout_seconds": 45, "interval_seconds": 3, "ready_threshold": 4}},
   "event_log": {
-    "dir": ".tribunus",
-    "signing_key_path": "/run/secrets/tribunus-eventlog-seed",
+    "dir": ".epitrop",
+    "signing_key_path": "/run/secrets/epitrop-eventlog-seed",
     "public_key": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
     "lock_timeout_seconds": 7,
     "max_replay_records": 1234
@@ -578,7 +578,7 @@ func TestLoadSandboxFailsClosedWithoutExecutable(t *testing.T) {
 func TestReleaseWatchPositive(t *testing.T) {
 	body := `{
 		"release_watch": {
-			"state_dir": "/var/tmp/tribunus",
+			"state_dir": "/var/tmp/epitrop",
 			"rate_limit_floor": 150,
 			"max_actions_per_run": 25,
 			"per_source_cap": 5,
@@ -600,7 +600,7 @@ func TestReleaseWatchPositive(t *testing.T) {
 		t.Fatalf("Load() = %v, want nil", err)
 	}
 	rw := cfg.ReleaseWatch
-	if rw.StateDir != "/var/tmp/tribunus" || rw.RateLimitFloor != 150 || rw.MaxActionsPerRun != 25 || rw.PerSourceCap != 5 {
+	if rw.StateDir != "/var/tmp/epitrop" || rw.RateLimitFloor != 150 || rw.MaxActionsPerRun != 25 || rw.PerSourceCap != 5 {
 		t.Fatalf("ReleaseWatch = %+v, want configured values", rw)
 	}
 	if len(rw.Routes) != 1 || rw.Routes[0].Name != "route-one" {

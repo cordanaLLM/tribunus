@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
-	"github.com/cordanaLLM/tribunus/internal/eventlog"
-	"github.com/cordanaLLM/tribunus/internal/graph"
 	"github.com/golusoris/golusoris/core/clock"
 	corereceipt "github.com/golusoris/golusoris/core/crypto/receipt"
+	"github.com/tekmora/epitrop/internal/config"
+	"github.com/tekmora/epitrop/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/graph"
 )
 
 func testSigner(t *testing.T) (*corereceipt.Signer, clock.Clock) {

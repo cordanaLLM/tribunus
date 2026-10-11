@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
-	"github.com/cordanaLLM/tribunus/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/config"
+	"github.com/tekmora/epitrop/internal/eventlog"
 )
 
 // deadlineJob is a job that runs until it is stopped, far longer than any bound in these tests. Its first process and a child both

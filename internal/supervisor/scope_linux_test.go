@@ -18,16 +18,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
-	"github.com/cordanaLLM/tribunus/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/config"
+	"github.com/tekmora/epitrop/internal/eventlog"
 )
 
 // fakeScopeEnv makes the test binary stand in for systemd-run. See TestMain. With
 // fakeStragglerEnv set to a file, the stand-in also leaves a process behind in the job's
 // process group and writes its pid there.
 const (
-	fakeScopeEnv     = "TRIBUNUS_TEST_FAKE_SCOPE"
-	fakeStragglerEnv = "TRIBUNUS_TEST_FAKE_SCOPE_STRAGGLER"
+	fakeScopeEnv     = "EPITROP_TEST_FAKE_SCOPE"
+	fakeStragglerEnv = "EPITROP_TEST_FAKE_SCOPE_STRAGGLER"
 )
 
 // TestMain lets the test binary be the scope command of the negative scope tests. Started
@@ -107,7 +107,7 @@ func plantFakeScopeCommand(t *testing.T) {
 }
 
 func TestNewScopeNameIsOneUnitPerStart(t *testing.T) {
-	valid := regexp.MustCompile(`^tribunus-job-[0-9a-f]{16}\.scope$`)
+	valid := regexp.MustCompile(`^epitrop-job-[0-9a-f]{16}\.scope$`)
 	first, err := newScopeName()
 	if err != nil || !valid.MatchString(first) {
 		t.Fatalf("newScopeName() = %q, %v, want %s", first, err, valid)
@@ -119,7 +119,7 @@ func TestNewScopeNameIsOneUnitPerStart(t *testing.T) {
 }
 
 func TestCgroupInScope(t *testing.T) {
-	const scope = "tribunus-job-0123456789abcdef.scope"
+	const scope = "epitrop-job-0123456789abcdef.scope"
 	const app = "/user.slice/user-1000.slice/user@1000.service/app.slice/"
 	cases := []struct {
 		name   string
@@ -129,7 +129,7 @@ func TestCgroupInScope(t *testing.T) {
 		{"in the scope", app + scope, true},
 		{"exited, scope removed", app + scope + " (deleted)", true},
 		{"the service the job was started from", "/system.slice/hosted-compute-agent.service", false},
-		{"another job's scope", app + "tribunus-job-fedcba9876543210.scope", false},
+		{"another job's scope", app + "epitrop-job-fedcba9876543210.scope", false},
 		{"a scope the shim itself runs in", app + "session-3.scope", false},
 		{"a transient scope with another name", app + "run-p12-i34.scope", false},
 		{"below the scope", app + scope + "/sub", false},
@@ -199,7 +199,7 @@ func (w *scopeWorld) install(t *testing.T) {
 }
 
 func TestConfirmJobScope(t *testing.T) {
-	const scope = "tribunus-job-0123456789abcdef.scope"
+	const scope = "epitrop-job-0123456789abcdef.scope"
 	const runner = "/usr/bin/systemd-run"
 	const outside = "/system.slice/hosted-compute-agent.service"
 	const inside = "/user.slice/user-1001.slice/user@1001.service/app.slice/" + scope
@@ -472,7 +472,7 @@ func TestSandboxedJobOutsideItsScopeIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile(job log) = %v, want nil", err)
 	}
-	if !strings.Contains(string(log), "tribunus: job-shim: sandbox-noscope refused: sandbox: job ") || !strings.Contains(string(log), "scope "+scopeNamePrefix) {
+	if !strings.Contains(string(log), "epitrop: job-shim: sandbox-noscope refused: sandbox: job ") || !strings.Contains(string(log), "scope "+scopeNamePrefix) {
 		t.Fatalf("job log = %q, want the refusal naming the scope", log)
 	}
 	t.Logf("refusal in the job log: %s", strings.TrimSpace(string(log)))

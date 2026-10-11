@@ -11,7 +11,7 @@
 //
 // This intentionally does not import the internal/router package of
 // cordanaLLM/praetor, which talks to the same two endpoints for routing
-// decisions. That package is planned to read the Tribunus catalog instead
+// decisions. That package is planned to read the Epitrop catalog instead
 // (one model catalog, #29); until then the two GETs exist in both places.
 package ollamalocal
 
@@ -22,8 +22,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/catalog"
-	"github.com/cordanaLLM/tribunus/internal/sources/httpfetch"
+	"github.com/tekmora/epitrop/catalog"
+	"github.com/tekmora/epitrop/internal/sources/httpfetch"
 )
 
 // SourceName identifies this source in Snapshot.SourceRuns and CLI flags.

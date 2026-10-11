@@ -1,6 +1,6 @@
 //go:build schemasrefresh
 
-// SPDX-FileCopyrightText: 2026 cordanaLLM contributors
+// SPDX-FileCopyrightText: 2026 lusoris <lusoris@pm.me>
 //
 // SPDX-License-Identifier: EUPL-1.2
 
@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/sources/httpfetch"
+	"github.com/tekmora/epitrop/internal/sources/httpfetch"
 )
 
 const (
@@ -125,7 +125,7 @@ func refresh(ctx context.Context, manifest schemaManifest, outRoot string, repin
 }
 
 func check(ctx context.Context, manifest schemaManifest, root string) error {
-	tmp, err := os.MkdirTemp("", "tribunus-schema-check-*")
+	tmp, err := os.MkdirTemp("", "epitrop-schema-check-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
 	}
@@ -592,7 +592,7 @@ func provenanceLines(source schemaSource) []string {
 		"Extraction date: " + extractionDate,
 		"SPDX licence: " + source.SPDXLicense,
 		"Copyright holder: " + source.CopyrightHolder,
-		"Changes: provenance header added by Tribunus; " + extractionChange(source.ID),
+		"Changes: provenance header added by Epitrop; " + extractionChange(source.ID),
 	}
 }
 
@@ -646,7 +646,7 @@ func jsonProvenance(source schemaSource) ([]byte, error) {
 		"spdx_license":           source.SPDXLicense,
 		"copyright_holder":       source.CopyrightHolder,
 		"source_pin_description": source.PinDescription,
-		"changes":                "provenance header added by Tribunus; " + extractionChange(source.ID),
+		"changes":                "provenance header added by Epitrop; " + extractionChange(source.ID),
 	})
 	if err != nil {
 		return nil, err

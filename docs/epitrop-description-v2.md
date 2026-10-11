@@ -1,6 +1,6 @@
-# Tribunus: description
+# Epitrop: description
 
-Tribunus is the agent runtime and task-graph engine for the cordanaLLM ecosystem. The name comes from the Roman tribunes, who coordinated units and protected rights.
+Epitrop is the agent runtime and task-graph engine for the Tekmora ecosystem. The name comes from Greek *epitropos*, the appointed trustee.
 
 ## Idea
 

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
+	"github.com/tekmora/epitrop/internal/config"
 )
 
 func (s *Supervisor) shimCmd(ctx context.Context, job config.JobConfig) *exec.Cmd {

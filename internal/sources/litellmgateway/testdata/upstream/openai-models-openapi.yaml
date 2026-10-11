@@ -5,7 +5,7 @@
 # Extraction date: 2026-10-09
 # SPDX licence: MIT
 # Copyright holder: OpenAI
-# Changes: provenance header added by Tribunus; extracted /models path and ListModelsResponse/Model schema blocks
+# Changes: provenance header added by Epitrop; extracted /models path and ListModelsResponse/Model schema blocks
 
 openapi: 3.1.0
 paths:

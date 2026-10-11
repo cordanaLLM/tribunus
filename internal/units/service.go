@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/cordanaLLM/tribunus/internal/eventlog"
 	"github.com/golusoris/golusoris/core/clock"
 	corereceipt "github.com/golusoris/golusoris/core/crypto/receipt"
 	"github.com/jonboulle/clockwork"
+	"github.com/tekmora/epitrop/internal/eventlog"
 )
 
 type Service struct {

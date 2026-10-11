@@ -5,7 +5,7 @@ package supervisor
 import (
 	"fmt"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
+	"github.com/tekmora/epitrop/internal/config"
 )
 
 func buildSandboxCommand(command []string, sandbox config.SandboxConfig, opts sandboxBuildOptions) (jobCommand, error) {

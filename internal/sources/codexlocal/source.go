@@ -34,7 +34,7 @@ import (
 
 	gerrors "github.com/golusoris/golusoris/core/errors"
 
-	"github.com/cordanaLLM/tribunus/catalog"
+	"github.com/tekmora/epitrop/catalog"
 )
 
 // SourceName identifies this source in Snapshot.SourceRuns and CLI flags.

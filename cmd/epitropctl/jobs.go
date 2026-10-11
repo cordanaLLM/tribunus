@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
-	"github.com/cordanaLLM/tribunus/internal/supervisor"
+	"github.com/tekmora/epitrop/internal/config"
+	"github.com/tekmora/epitrop/internal/supervisor"
 )
 
 func runJobShim(args []string) int {

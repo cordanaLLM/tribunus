@@ -13,7 +13,7 @@ import (
 
 	"github.com/golusoris/golusoris/httpx/client"
 
-	"github.com/cordanaLLM/tribunus/catalog"
+	"github.com/tekmora/epitrop/catalog"
 )
 
 func writeTokenFile(t *testing.T, contents string) string {

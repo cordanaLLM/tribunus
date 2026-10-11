@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
-	"github.com/cordanaLLM/tribunus/internal/eventlog"
 	"github.com/jonboulle/clockwork"
+	"github.com/tekmora/epitrop/internal/config"
+	"github.com/tekmora/epitrop/internal/eventlog"
 )
 
 func writeUnitsConfig(t *testing.T) (string, string) {
@@ -112,10 +112,10 @@ func TestCLIUnitsBadFlagsExit2Subprocess(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
-	bin := filepath.Join(t.TempDir(), "tribunusctl")
+	bin := filepath.Join(t.TempDir(), "epitropctl")
 	buildCmd := exec.CommandContext(ctx, "go", "build", "-o", bin, ".")
 	if out, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("build tribunusctl: %v\n%s", err, out)
+		t.Fatalf("build epitropctl: %v\n%s", err, out)
 	}
 
 	cmd := exec.CommandContext(ctx, bin, "units", "set", "--bad-flag")
@@ -124,7 +124,7 @@ func TestCLIUnitsBadFlagsExit2Subprocess(t *testing.T) {
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	if err == nil {
-		t.Fatal("tribunusctl units set --bad-flag = nil error, want exit 2")
+		t.Fatal("epitropctl units set --bad-flag = nil error, want exit 2")
 	}
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 2 {
@@ -134,7 +134,7 @@ func TestCLIUnitsBadFlagsExit2Subprocess(t *testing.T) {
 
 func TestRunUnitsDispatchEndToEnd(t *testing.T) {
 	cfgPath, _ := writeUnitsConfig(t)
-	id := "cordanaLLM/tribunus#22"
+	id := "tekmora/epitrop#22"
 
 	setArgs := []string{"--config=" + cfgPath, id, "--status=implementing", "--pr=5", "--worktree=/wt/1", "--branch=feat/22", "--lane=core"}
 	if err := runUnits(append([]string{"set"}, setArgs...)); err != nil {
@@ -201,7 +201,7 @@ const testIdentity = `{"physical_model":"model-x","harness":"harness-a","harness
 // units show prints it back, and a malformed pointer is refused before anything is recorded.
 func TestRunUnitsSetRecordsAnEvidencePointer(t *testing.T) {
 	cfgPath, _ := writeUnitsConfig(t)
-	id := "cordanaLLM/tribunus#22"
+	id := "tekmora/epitrop#22"
 	if err := runUnits([]string{"set", "--config=" + cfgPath, id, "--status=implementing"}); err != nil {
 		t.Fatalf("runUnits set: %v", err)
 	}
@@ -243,14 +243,14 @@ func TestRunUnitsIdentityFromFileAndStdin(t *testing.T) {
 		t.Fatalf("WriteFile(identity) = %v", err)
 	}
 	key := "sha256:" + strings.Repeat("ab", 32)
-	fromFile := "cordanaLLM/tribunus#1"
+	fromFile := "tekmora/epitrop#1"
 	if err := runUnits([]string{"set", fromFile, "--status=implementing", "--config=" + cfgPath, "--identity=" + identityFile, "--identity-key=" + key, "--target=cordana/coding", "--resolved-model=model-x"}); err != nil {
 		t.Fatalf("units set --identity=file: %v", err)
 	}
 	oldStdin := unitsStdin
 	t.Cleanup(func() { unitsStdin = oldStdin })
 	unitsStdin = strings.NewReader(testIdentity)
-	fromStdin := "cordanaLLM/tribunus#2"
+	fromStdin := "tekmora/epitrop#2"
 	if err := runUnits([]string{"set", fromStdin, "--status=ready", "--config=" + cfgPath, "--identity", "-"}); err != nil {
 		t.Fatalf("units set --identity -: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestRunUnitsIdentityFromFileAndStdin(t *testing.T) {
 	if !strings.Contains(out, `"identity_key": "`+key+`"`) || !strings.Contains(out, `"target": "cordana/coding"`) {
 		t.Fatalf("show = %s, want identity_key and target as given", out)
 	}
-	if err := runUnits([]string{"set", "cordanaLLM/tribunus#3", "--status=ready", "--config=" + cfgPath, "--identity=" + filepath.Join(t.TempDir(), "missing.json")}); err == nil {
+	if err := runUnits([]string{"set", "tekmora/epitrop#3", "--status=ready", "--config=" + cfgPath, "--identity=" + filepath.Join(t.TempDir(), "missing.json")}); err == nil {
 		t.Fatal("units set with a missing identity file = nil, want an error")
 	}
 }
@@ -280,7 +280,7 @@ func TestRunUnitsIdentityFromFileAndStdin(t *testing.T) {
 // TestRunUnitsNotePrintsQuotedText: a note cannot forge a second output line.
 func TestRunUnitsNotePrintsQuotedText(t *testing.T) {
 	cfgPath, _ := writeUnitsConfig(t)
-	id := "cordanaLLM/tribunus#9"
+	id := "tekmora/epitrop#9"
 	if err := runUnits([]string{"set", id, "--status=implementing", "--config=" + cfgPath}); err != nil {
 		t.Fatalf("units set: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestRunUnitsNotePrintsQuotedText(t *testing.T) {
 // stderr, never dropped in silence.
 func TestRunUnitsResumeReportsIgnoredRecords(t *testing.T) {
 	cfgPath, stateDir := writeUnitsConfig(t)
-	id := "cordanaLLM/tribunus#5"
+	id := "tekmora/epitrop#5"
 	if err := runUnits([]string{"set", id, "--status=landed", "--config=" + cfgPath}); err != nil {
 		t.Fatalf("units set: %v", err)
 	}
@@ -352,7 +352,7 @@ func TestRunUnitsResumeReportsIgnoredRecords(t *testing.T) {
 
 func TestRunUnitsSetNamesTheMissingStatus(t *testing.T) {
 	cfgPath, _ := writeUnitsConfig(t)
-	err := runUnits([]string{"set", "cordanaLLM/tribunus#1", "--config=" + cfgPath})
+	err := runUnits([]string{"set", "tekmora/epitrop#1", "--config=" + cfgPath})
 	if err == nil || !strings.Contains(err.Error(), "--status is required") {
 		t.Fatalf("units set without --status = %v, want the flag named", err)
 	}

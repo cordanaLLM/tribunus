@@ -11,14 +11,14 @@ import (
 	gerrors "github.com/golusoris/golusoris/core/errors"
 	"github.com/golusoris/golusoris/httpx/client"
 
-	"github.com/cordanaLLM/tribunus/catalog"
+	"github.com/tekmora/epitrop/catalog"
 )
 
 // maxSnapshotReadBytes bounds how large a snapshot file show will read
 // (HISS-02).
 const maxSnapshotReadBytes = 64 << 20
 
-// runShow is tribunusctl's "show" subcommand: it reads a snapshot file
+// runShow is epitropctl's "show" subcommand: it reads a snapshot file
 // written by sync and renders it as a table.
 func runShow(args []string) error {
 	fs := flag.NewFlagSet("show", flag.ContinueOnError)
@@ -62,7 +62,7 @@ func readSnapshotFile(path string) (snap catalog.Snapshot, err error) {
 	snap, err = catalog.ParseSnapshot(data)
 	if err != nil {
 		if strings.Contains(err.Error(), "schema_version") {
-			return catalog.Snapshot{}, fmt.Errorf("parse snapshot %s: %w; re-run tribunusctl sync", path, err)
+			return catalog.Snapshot{}, fmt.Errorf("parse snapshot %s: %w; re-run epitropctl sync", path, err)
 		}
 		return catalog.Snapshot{}, fmt.Errorf("parse snapshot %s: %w", path, err)
 	}

@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
-	"github.com/cordanaLLM/tribunus/internal/releasewatch"
+	"github.com/tekmora/epitrop/internal/config"
+	"github.com/tekmora/epitrop/internal/releasewatch"
 )
 
 type flagErr struct {

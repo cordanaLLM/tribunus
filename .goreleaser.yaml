@@ -1,12 +1,12 @@
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
 version: 2
 
-project_name: tribunusctl
+project_name: epitropctl
 
 builds:
-  - id: tribunusctl
-    main: ./cmd/tribunusctl
-    binary: tribunusctl
+  - id: epitropctl
+    main: ./cmd/epitropctl
+    binary: epitropctl
     goos:
       - linux
       - darwin
@@ -22,14 +22,14 @@ builds:
       - -s -w -X main.version={{.Version}}
 
 archives:
-  - id: tribunusctl
+  - id: epitropctl
     ids:
-      - tribunusctl
+      - epitropctl
     formats: [tar.gz]
     format_overrides:
       - goos: windows
         formats: [zip]
-    name_template: "tribunusctl_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "epitropctl_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
       - LICENSE

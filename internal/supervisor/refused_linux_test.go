@@ -13,9 +13,9 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/cordanaLLM/tribunus/internal/config"
-	"github.com/cordanaLLM/tribunus/internal/eventlog"
 	"github.com/jonboulle/clockwork"
+	"github.com/tekmora/epitrop/internal/config"
+	"github.com/tekmora/epitrop/internal/eventlog"
 )
 
 // TestRefusedStartIsAnEvent: whatever stops the shim before it records a start, the caller
@@ -52,7 +52,7 @@ func assertRefusedStart(t *testing.T, sup *Supervisor, name string, logPath stri
 		t.Fatalf("event log holds %+v, want the refusal's shim and time and no start", job)
 	}
 	log, err := os.ReadFile(logPath)
-	if err != nil || !strings.Contains(string(log), "tribunus: job-shim: "+name+" refused: "+wantReason) {
+	if err != nil || !strings.Contains(string(log), "epitrop: job-shim: "+name+" refused: "+wantReason) {
 		t.Fatalf("job log = %q, %v, want the refusal line", log, err)
 	}
 	waitForUnlock(t, sup, mustJob(t, sup, name))
@@ -154,7 +154,7 @@ func TestRefuseJobReportsWhatItCouldNotRecord(t *testing.T) {
 	if err == nil || !errors.Is(err, cause) || strings.Contains(err.Error(), "record refusal") {
 		t.Fatalf("refuseJob() = %.120v, want the cause and no recording error", err)
 	}
-	if !strings.HasPrefix(log.String(), "tribunus: job-shim: probe refused: job-shim: sandbox probe: ") {
+	if !strings.HasPrefix(log.String(), "epitrop: job-shim: probe refused: job-shim: sandbox probe: ") {
 		t.Fatalf("job log = %.80q, want the refusal line", log.String())
 	}
 	state, err := eventlog.Replay(testContext(t), cfg.EventLogDir, shimPublicKey(t, cfg), eventlog.Limits{Clock: clockwork.NewRealClock()}, JobReducer)

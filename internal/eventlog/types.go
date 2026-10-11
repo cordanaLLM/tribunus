@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	AppendCommand  = "tribunus event-log append"
+	AppendCommand  = "epitrop event-log append"
 	MaxRecordBytes = 64 * 1024
 
 	defaultLockTimeout = 5 * time.Second

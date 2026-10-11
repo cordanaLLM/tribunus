@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   release:
-    name: Release Tribunus Artefacts
+    name: Release Epitrop Artefacts
     uses: ./.github/workflows/release-binaries.yml
     permissions:
       contents: write

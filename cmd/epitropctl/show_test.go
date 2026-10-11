@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cordanaLLM/tribunus/catalog"
+	"github.com/tekmora/epitrop/catalog"
 )
 
 // failingWriter always refuses a Write, so a test can force renderTable's
@@ -94,8 +94,8 @@ func TestReadSnapshotFileRejectsUnsupportedSchemaVersion(t *testing.T) {
 			if err == nil {
 				t.Fatal("readSnapshotFile() = nil error, want schema version failure")
 			}
-			if msg := err.Error(); !strings.Contains(msg, "re-run tribunusctl sync") {
-				t.Fatalf("error = %q, want guidance to re-run tribunusctl sync", msg)
+			if msg := err.Error(); !strings.Contains(msg, "re-run epitropctl sync") {
+				t.Fatalf("error = %q, want guidance to re-run epitropctl sync", msg)
 			}
 		})
 	}

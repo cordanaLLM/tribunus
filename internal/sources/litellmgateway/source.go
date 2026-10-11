@@ -23,8 +23,8 @@ import (
 	gerrors "github.com/golusoris/golusoris/core/errors"
 	"github.com/golusoris/golusoris/httpx/client"
 
-	"github.com/cordanaLLM/tribunus/catalog"
-	"github.com/cordanaLLM/tribunus/internal/sources/httpfetch"
+	"github.com/tekmora/epitrop/catalog"
+	"github.com/tekmora/epitrop/internal/sources/httpfetch"
 )
 
 // SourceName identifies this source in Snapshot.SourceRuns and CLI flags.

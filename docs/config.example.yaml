@@ -7,9 +7,9 @@ budgets:
 jobs:
   - name: daily-catalog-sync
     command:
-      - /usr/local/bin/tribunusctl
+      - /usr/local/bin/epitropctl
       - sync
-    log_path: /var/log/tribunus/daily-catalog-sync.log
+    log_path: /var/log/epitrop/daily-catalog-sync.log
     schedule: "0 2 * * *"
     router_alias: cordana/auto
     # Stop the job when it has run this long; 0 (the default) sets no deadline of its own.
@@ -27,7 +27,7 @@ jobs:
       workspace: /var/tmp
       inputs: []
       env_allow:
-        - TRIBUNUS_JOB_TOKEN
+        - EPITROP_JOB_TOKEN
       network: none
       memory_max: 2G
       # Optional soft limit below memory_max: the job is throttled there before it is killed.
@@ -48,8 +48,8 @@ admission:
     interval_seconds: 5
     ready_threshold: 2
 event_log:
-  dir: .tribunus
-  signing_key_path: /run/secrets/tribunus-eventlog-seed
+  dir: .epitrop
+  signing_key_path: /run/secrets/epitrop-eventlog-seed
   public_key: ""
   # How long a writer waits for the log's lock (1 to 300). Writers queue: the last of n
   # waits for n-1 appends of four syncs each. Raise it on a slow disk.
@@ -58,21 +58,21 @@ event_log:
 # The release watch runs as its own supervised, sandboxed job, for example:
 #   jobs:
 #     - name: release-watch
-#       command: [/usr/local/bin/tribunusctl, watch, run, --config=/etc/tribunus/release-watch.yaml]
+#       command: [/usr/local/bin/epitropctl, watch, run, --config=/etc/epitrop/release-watch.yaml]
 #       schedule: always
 #       restart: {policy: on-failure, max_restarts: 3, backoff_seconds: 300}
 #       sandbox:
-#         workspace: /var/tmp/tribunus/release-watch   # = state_dir; the seen-set is all it writes
-#         inputs: [/etc/tribunus/release-watch.yaml]
+#         workspace: /var/tmp/epitrop/release-watch   # = state_dir; the seen-set is all it writes
+#         inputs: [/etc/epitrop/release-watch.yaml]
 #         env_allow: [GITHUB_TOKEN]
 #         network: egress
 # The job reads a separate file that holds only the release_watch block: the sandbox
-# refuses the control-plane config as an input. Run `tribunusctl watch seed` once before
+# refuses the control-plane config as an input. Run `epitropctl watch seed` once before
 # the first `watch run`, or the first pass files an issue for every release it can see,
 # within the caps. Give the job GITHUB_TOKEN: unauthenticated GitHub allows 60 requests an
 # hour, below the default rate_limit_floor, so every pass would stop after one request.
 release_watch:
-  state_dir: /var/tmp/tribunus/release-watch
+  state_dir: /var/tmp/epitrop/release-watch
   rate_limit_floor: 100
   max_actions_per_run: 12
   per_source_cap: 3

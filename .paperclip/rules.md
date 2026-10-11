@@ -1,4 +1,4 @@
-# Paperclip Operating Rules (cordanaLLM/tribunus)
+# Paperclip Operating Rules (tekmora/epitrop)
 
 ## Operating Contract
 

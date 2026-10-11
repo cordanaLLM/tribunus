@@ -1,7 +1,7 @@
 # ADR-0005: Sandbox job execution with a systemd scope, bubblewrap and pasta
 
-- **Status**: Proposed
-- **Date**: 2026-10-10
+- **Status**: Accepted
+- **Date**: 2026-10-10, accepted 2026-10-11
 - **Authors**: Epitrop maintainers
 
 ## Context
@@ -63,6 +63,30 @@ The first target is the Linux workstation that runs the supervisor as a per-host
    | network | any connection with `network: none`; with `egress`, reach a listener on host 127.0.0.1 through the namespace's own loopback or through the gateway address | with `egress`, connect to a listener on the host's non-loopback address |
 
    The checker fails when a violation is allowed or a compliant action is refused. The loopback listener binds below the kernel's ephemeral port range, where host services listen: pasta's automatic forwarding skips ephemeral ports, so a listener on port 0 would never show a forwarding leak. Every rule above was removed once, in a copy, to show a test failing (rule 13); each network rule is caught by its fixture, not only by the argv test.
+
+## What this record decides
+
+Some choices behind the runner were made by the maintainer before this record was written; the record builds on them and they are listed under References. The others were made while building the runner and are decided here:
+
+1. Sandbox by default. `mode: off` needs a written reason, and the mode is recorded with every start (item 1).
+2. One argv, built by the shim, without a shell. The shim builds the environment, and the value of an allowed variable never appears on the argv (item 2).
+3. Egress through pasta with every forwarding off, a namespace address from TEST-NET-1 and no mapping of the host's loopback. There is no destination filter yet (item 2).
+4. No `--new-session`. The kernel's TIOCSTI switch has to be off instead, and a start fails when it is not (items 2 and 4).
+5. The two `env` wrappers around the sandbox, so that a stop signal reaches the job and not only its sandbox (item 2).
+6. The path rules: what a workspace or an input may not be or contain, checked at config load and again at start (item 3).
+7. The list of what stops a start: which missing tool or setting, and no fallback to an unsandboxed run (item 4).
+8. A scope unit of its own per start, `epitrop-job-<id>.scope`, as what makes the scope check exact (items 2 and 4).
+9. The RT-03 fixture set as the proof, with a refused and an allowed case per boundary (item 5).
+
+## References
+
+Decisions made before this record, by the maintainer. The wording is paraphrased.
+
+- `structure-06`, 2026-10-10, sandbox tiers: the process sandbox is built now; a virtual-machine tier follows later through a separate sandbox binary (paraphrased).
+- `structure-16`, 2026-10-10, where the supervisor runs: as a per-host systemd user unit (paraphrased).
+- `sandbox-scope-ci`, 2026-10-10, a job outside its scope: the shim fails closed unless the started job sits in its own scope, and the tests need a real scope (paraphrased).
+- `tribunus-open-questions-20261010`, 2026-10-10, three rulings on the scope check: the waits of 10 s and 15 s stay as margins with their measured basis in the code and the measured latency in the CI log; a refused start is recorded as an event; a missing scope fails the tests in CI (paraphrased).
+- The slot plan of 2026-10-10, soft memory limit: a sandboxed job may carry `memory_high` beside `memory_max` (paraphrased).
 
 ## Consequences
 

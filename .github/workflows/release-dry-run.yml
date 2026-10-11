@@ -1,0 +1,107 @@
+name: Release dry run
+
+# Builds what a release tag would build, without signing and without
+# publishing: the GoReleaser configuration check, then a snapshot of every
+# archive and SBOM. The release workflow runs only on a tag, so without this a
+# broken release build shows first on the day of a release. It runs only when
+# something that goes into the archives, or steers how they are built,
+# changes. Because the trigger is path-filtered, it is not a required check.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.goreleaser.yaml'
+      - 'README.md'
+      - 'LICENSE'
+      - 'LICENSES/**'
+      - 'catalog/snapshot.schema.json'
+      - '.github/workflows/release*.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.goreleaser.yaml'
+      - 'README.md'
+      - 'LICENSE'
+      - 'LICENSES/**'
+      - 'catalog/snapshot.schema.json'
+      - '.github/workflows/release*.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    name: Check The Configuration And Build A Snapshot
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      # The tool versions are the ones release-binaries.yml uses: a dry run with
+      # other tools proves nothing about the release.
+      - name: Checkout Source Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Go Toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: 'go.mod'
+          cache: false
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c  # v0.24.3
+        with:
+          syft-version: v1.54.1
+
+      - name: Check GoReleaser Configuration
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
+        with:
+          distribution: goreleaser
+          version: v2.18.3
+          args: check
+
+      # --snapshot publishes nothing and needs no tag; --skip=sign leaves out
+      # the keyless signature, which needs the release workflow's identity.
+      - name: Build Archives And SBOMs As A Snapshot
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
+        with:
+          distribution: goreleaser
+          version: v2.18.3
+          args: release --snapshot --clean --skip=sign
+
+      # Six targets (linux, darwin and windows on amd64 and arm64) give six
+      # archives and six SBOMs. A target dropped from the configuration still
+      # builds without an error, so the count is checked here.
+      - name: Check The Snapshot Holds What A Release Publishes
+        run: |
+          set -euo pipefail
+          archives=$(find dist -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) | wc -l)
+          sboms=$(find dist -maxdepth 1 -type f -name '*.cyclonedx.json' | wc -l)
+          echo "archives=$archives sboms=$sboms"
+          if [ "$archives" -ne 6 ] || [ "$sboms" -ne 6 ]; then
+            echo "::error::expected 6 archives and 6 SBOMs, found $archives and $sboms"
+            ls -l dist
+            exit 1
+          fi
+          (cd dist && sha256sum --check --strict checksums.txt)
+          binary=$(find dist -type f -perm -u+x -path '*_linux_amd64*' | head -n 1)
+          if [ -z "$binary" ]; then
+            echo "::error::no linux/amd64 binary under dist"
+            exit 1
+          fi
+          stamped=$("$binary" version)
+          echo "version=$stamped"
+          case "$stamped" in
+            *-snapshot) ;;
+            *)
+              echo "::error::the binary reports version '$stamped', want one ending in -snapshot"
+              exit 1
+              ;;
+          esac

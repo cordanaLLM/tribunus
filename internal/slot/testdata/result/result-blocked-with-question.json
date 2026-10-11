@@ -1,0 +1,1 @@
+{"id":"result-blocked-with-question","rule":"slot-result","direction":"compliant","document":"{\"unit\":\"epitrop:unit-1\",\"outcome\":\"blocked\",\"summary\":\"The port is not decided.\",\"questions\":[\"DECISION epitrop-unit-1-port: which port | options: a) 8080 b) 9090 | recommended: a | blocks: the listener\"]}","files":{},"expect":{"result":"accepted","says":""}}

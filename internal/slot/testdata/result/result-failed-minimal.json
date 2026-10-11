@@ -1,0 +1,1 @@
+{"id":"result-failed-minimal","rule":"slot-result","direction":"compliant","document":"{\"unit\":\"epitrop:unit-1\",\"outcome\":\"failed\",\"summary\":\"The build does not start.\"}","files":{},"expect":{"result":"accepted","says":""}}

@@ -1,0 +1,1 @@
+{"id":"result-empty-summary","rule":"slot-result","direction":"violation","document":"{\"unit\":\"epitrop:unit-1\",\"outcome\":\"failed\",\"summary\":\"\"}","files":{},"expect":{"result":"refused","says":"summary"}}

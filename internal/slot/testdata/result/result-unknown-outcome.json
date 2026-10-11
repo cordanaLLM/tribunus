@@ -1,0 +1,1 @@
+{"id":"result-unknown-outcome","rule":"slot-result","direction":"violation","document":"{\"unit\":\"epitrop:unit-1\",\"outcome\":\"partial\",\"summary\":\"x\"}","files":{},"expect":{"result":"refused","says":"outcome"}}

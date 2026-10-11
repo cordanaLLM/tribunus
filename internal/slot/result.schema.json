@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tekmora/epitrop/internal/slot/result.schema.json",
+  "title": "Slot run result",
+  "description": "What a slot run leaves in .slot/out/result.json for its runner. The runner validates it before anything is recorded.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["unit", "outcome", "summary"],
+  "properties": {
+    "unit": {
+      "description": "The work unit this run was started for.",
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 141
+    },
+    "outcome": {
+      "description": "done: the unit's work is on its branch. blocked: the run needs an answer. failed: the run could not do the work.",
+      "enum": ["done", "blocked", "failed"]
+    },
+    "head": {
+      "description": "The commit the unit's branch ends at in the run's clone. Required for outcome done.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "summary": {
+      "description": "What the run did, in a few lines.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "evidence": {
+      "description": "Files under .slot/out/evidence/ with their SHA-256 and line count.",
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256", "lines"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "lines": { "type": "integer", "minimum": 0, "maximum": 1073741824 }
+        }
+      }
+    },
+    "questions": {
+      "description": "Decisions or facts the run needs, one line each, in the DECISION or ASK form.",
+      "type": "array",
+      "maxItems": 32,
+      "items": { "type": "string", "pattern": "^(DECISION|ASK) [^\\n]+$", "maxLength": 2048 }
+    }
+  }
+}

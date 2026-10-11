@@ -1,0 +1,1 @@
+{"id":"result-short-head","rule":"slot-result","direction":"violation","document":"{\"unit\":\"epitrop:unit-1\",\"outcome\":\"done\",\"head\":\"0123abc\",\"summary\":\"x\"}","files":{},"expect":{"result":"refused","says":"head"}}

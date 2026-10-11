@@ -50,6 +50,12 @@ type State struct {
 	// UnitRecordsIgnored counts well-formed unit records the reducer did not apply because
 	// they broke a rule a racing writer can break, such as moving a landed unit.
 	UnitRecordsIgnored int `json:"unit_records_ignored,omitempty"`
+	// Graph is the task graph rebuilt from the graph.* records, as the graph's own canonical
+	// snapshot. The reducer of internal/graphlog writes it; this package only carries it.
+	Graph json.RawMessage `json:"graph,omitempty"`
+	// GraphStagesIgnored counts well-formed stages the reducer did not apply because the
+	// graph refused them, as it does when two writers race.
+	GraphStagesIgnored int `json:"graph_stages_ignored,omitempty"`
 }
 
 type Task struct {
@@ -147,7 +153,8 @@ func (s State) CanonicalJSON() ([]byte, error) {
 func KnownDomain(eventType string) bool {
 	return strings.HasPrefix(eventType, "task.") ||
 		strings.HasPrefix(eventType, "job.") ||
-		strings.HasPrefix(eventType, "unit.")
+		strings.HasPrefix(eventType, "unit.") ||
+		strings.HasPrefix(eventType, "graph.")
 }
 
 func TaskReducer(st State, rec Record) (State, error) {

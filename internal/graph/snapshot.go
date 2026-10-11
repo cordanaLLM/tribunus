@@ -31,6 +31,32 @@ func (g *Graph) Snapshot() (Snapshot, error) {
 	return snapshot(g.maxDepth, g.state), nil
 }
 
+// FromSnapshot rebuilds a graph from a snapshot, bounded by maxDepth. It checks what holds for
+// every stored graph: node shape, known kinds and statuses, edges between nodes that exist,
+// no cycle, the depth and count bounds. It does not apply the rules for a change, such as a
+// new node starting as proposed: the snapshot is a graph that changes already led to. A
+// node named twice is refused.
+func FromSnapshot(snap Snapshot, maxDepth int) (*Graph, error) {
+	g, err := New(maxDepth)
+	if err != nil {
+		return nil, err
+	}
+	for i := 0; i < len(snap.Nodes); i++ {
+		node := snap.Nodes[i]
+		if _, twice := g.state.nodes[node.ID]; twice {
+			return nil, fmt.Errorf("graph: snapshot names node %q twice", node.ID)
+		}
+		g.state.nodes[node.ID] = Node{ID: node.ID, Kind: node.Kind, Title: node.Title, Status: node.Status}
+		for j := 0; j < len(node.DependsOn); j++ {
+			g.state.edges[Edge{NodeID: node.ID, DependsOn: node.DependsOn[j]}] = struct{}{}
+		}
+	}
+	if err = validate(g.state, maxDepth); err != nil {
+		return nil, err
+	}
+	return g, nil
+}
+
 // JCS returns the graph snapshot as RFC 8785 canonical JSON.
 func (g *Graph) JCS() ([]byte, error) {
 	snap, err := g.Snapshot()

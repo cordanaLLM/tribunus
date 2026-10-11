@@ -25,9 +25,13 @@ Owns task graphs, the event bus and budgets.
 `internal/graph` is the in-memory task graph store. It stages node, edge and
 status edits, validates the staged result with Kahn acyclicity, configured depth
 and vocabulary guardrails, then swaps the state only after every guard passes.
-Replay wiring belongs to the append-only event log (#32); the package provides
-the pure `Apply(event)` reducer that replay will call once both are on the same
-branch. Removing a node with any incident dependency edge is refused; callers
+The event log rebuilds the graph: `internal/graphlog` reduces one
+`graph.stage_committed` record per committed stage, whose payload holds the
+stage's operations in order, through the pure `ApplyStage(events)` of this
+package. A stage the graph refuses, which two racing writers can produce, is
+not applied and is counted in the replayed state; a record that is no stage
+stops the replay. Replay checks the hard depth cap of 64; the configured depth
+binds new writes. Nothing writes these records yet. Removing a node with any incident dependency edge is refused; callers
 remove edges first so history stays explicit.
 
 The task-graph node vocabulary follows Praetor #883 as amended on 2026-10-09

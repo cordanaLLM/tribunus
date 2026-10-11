@@ -1,6 +1,5 @@
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
 version: 2
-planted_defect_for_the_dry_run_proof: true
 
 project_name: tribunusctl
 
@@ -11,7 +10,6 @@ builds:
     goos:
       - linux
       - darwin
-      - windows
     goarch:
       - amd64
       - arm64

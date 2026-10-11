@@ -1,0 +1,118 @@
+package egressproxy
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"os"
+	"sync"
+	"time"
+)
+
+const (
+	// MaxConnections is how many connections one listener accepts over its life: more than
+	// one a second for the longest runtime a job may have. Past it the listener is closed,
+	// so a further connection is refused at once and does not wait for an answer.
+	MaxConnections = 1 << 25
+	// maxTunnels is how many connections are served at a time. One more is answered as
+	// busy.
+	maxTunnels = 64
+	// maxFaults is how many errors that belong to no request are kept for the caller.
+	maxFaults = 8
+)
+
+// deadlineListener is a listener whose Accept can be given a deadline, as the TCP and Unix
+// listeners can.
+type deadlineListener interface {
+	net.Listener
+	SetDeadline(time.Time) error
+}
+
+// pool serves the connections of one listener: each in its own goroutine, at most
+// maxTunnels at a time. It keeps the errors that belong to no single connection, such as
+// a close that failed, for serve to return.
+type pool struct {
+	slots chan struct{}
+	limit int
+
+	mu     sync.Mutex
+	faults []error
+}
+
+func newPool() *pool {
+	return &pool{slots: make(chan struct{}, maxTunnels), limit: MaxConnections}
+}
+
+// serve accepts until ctx ends, the listener is closed or deadline has passed, and returns
+// when the last connection has been served. Those three ends are no error. handle serves a
+// connection that got a slot; busy answers one that found none. serve closes each
+// connection after its function has returned.
+func (p *pool) serve(ctx context.Context, listener deadlineListener, deadline time.Time, handle func(net.Conn), busy func(net.Conn)) error {
+	if err := listener.SetDeadline(deadline); err != nil {
+		return fmt.Errorf("accept deadline: %w", err)
+	}
+	stop := context.AfterFunc(ctx, func() { p.fault(closed(listener)) })
+	defer stop()
+	var serving sync.WaitGroup
+	err := p.accept(ctx, listener, &serving, handle, busy)
+	serving.Wait()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return errors.Join(err, errors.Join(p.faults...))
+}
+
+func (p *pool) accept(ctx context.Context, listener net.Listener, serving *sync.WaitGroup, handle func(net.Conn), busy func(net.Conn)) error {
+	for i := 0; i < p.limit; i++ {
+		conn, err := listener.Accept()
+		if err != nil {
+			if ended(ctx) || errors.Is(err, net.ErrClosed) || errors.Is(err, os.ErrDeadlineExceeded) {
+				return nil
+			}
+			return fmt.Errorf("accept: %w", err)
+		}
+		p.serveOne(conn, serving, handle, busy)
+	}
+	return errors.Join(fmt.Errorf("accepted %d connections, the most one job may open", p.limit), closed(listener))
+}
+
+// ended reports whether ctx is done.
+func ended(ctx context.Context) bool {
+	select {
+	case <-ctx.Done():
+		return true
+	default:
+		return false
+	}
+}
+
+// serveOne gives the connection a slot and a goroutine, or answers it as busy.
+func (p *pool) serveOne(conn net.Conn, serving *sync.WaitGroup, handle func(net.Conn), busy func(net.Conn)) {
+	select {
+	case p.slots <- struct{}{}:
+	default:
+		busy(conn)
+		p.fault(closed(conn))
+		return
+	}
+	serving.Add(1)
+	go func() {
+		defer serving.Done()
+		defer func() { <-p.slots }()
+		defer func() { p.fault(closed(conn)) }()
+		handle(conn)
+	}()
+}
+
+// fault keeps an error that belongs to no single connection. nil is none; past maxFaults
+// the further ones are dropped, the first ones say what went wrong.
+func (p *pool) fault(err error) {
+	if err == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.faults) < maxFaults {
+		p.faults = append(p.faults, err)
+	}
+}

@@ -16,6 +16,7 @@ import (
 
 	"github.com/jonboulle/clockwork"
 	"github.com/tekmora/epitrop/internal/config"
+	"github.com/tekmora/epitrop/internal/egressproxy"
 	"github.com/tekmora/epitrop/internal/eventlog"
 )
 
@@ -74,6 +75,7 @@ func parseShimArgs(args []string) (shimConfig, error) {
 	fs.Var((*stringListFlag)(&cfg.Sandbox.Inputs), "sandbox-input", "")
 	fs.Var((*stringListFlag)(&cfg.Sandbox.EnvAllow), "sandbox-env-allow", "")
 	fs.StringVar(&cfg.Sandbox.Network, "sandbox-network", "", "")
+	fs.Var((*stringListFlag)(&cfg.Sandbox.Destinations), "sandbox-destination", "")
 	fs.StringVar(&cfg.Sandbox.MemoryMax, "sandbox-memory-max", "", "")
 	fs.StringVar(&cfg.Sandbox.MemoryHigh, "sandbox-memory-high", "", "")
 	fs.IntVar(&cfg.Sandbox.CPUWeight, "sandbox-cpu-weight", 0, "")
@@ -134,7 +136,12 @@ func runShim(cfg shimConfig) error {
 	defer runtime.UnlockOSThread()
 	runCtx, cancel := context.WithTimeout(context.Background(), jobDeadline(cfg))
 	defer cancel()
-	cmd, started, err := startConfirmedJob(runCtx, cfg, logFile)
+	proxy, err := startJobProxy(runCtx, cfg, logFile)
+	if err != nil {
+		return refuseJob(cfg, logFile, err)
+	}
+	defer stopProxyForShim(proxy, logFile)
+	cmd, started, err := startConfirmedJob(runCtx, cfg, proxy.binds(), logFile)
 	if err != nil {
 		return refuseJob(cfg, logFile, err)
 	}
@@ -169,10 +176,11 @@ func stopAtDeadline(cfg shimConfig, pid int) error {
 // startConfirmedJob builds the job's command, starts it, writes its record and confirms its
 // scope. After any error the job is not running: one that had started is killed with its
 // process group.
-func startConfirmedJob(ctx context.Context, cfg shimConfig, logFile *os.File) (*exec.Cmd, string, error) {
+func startConfirmedJob(ctx context.Context, cfg shimConfig, proxy sandboxProxy, logFile *os.File) (*exec.Cmd, string, error) {
 	command, err := buildJobCommand(cfg.Command, cfg.Sandbox, sandboxBuildOptions{
 		Paths: sandboxPaths{EventLogDir: cfg.EventLogDir, SigningKey: cfg.SigningKey},
 		Env:   os.LookupEnv,
+		Proxy: proxy,
 	})
 	if err != nil {
 		return nil, "", fmt.Errorf("job-shim: sandbox %s: %w", cfg.Name, err)
@@ -370,6 +378,18 @@ func killAndCollect(cmd *exec.Cmd, cause error) error {
 func closeLockForShim(lock *heldLock) {
 	if err := lock.Close(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: close job lock: %v\n", err)
+	}
+}
+
+// stopProxyForShim ends the job's proxy. What went wrong goes to the job's log, which is
+// kept; the shim's stderr is not.
+func stopProxyForShim(proxy jobProxy, logFile io.Writer) {
+	err := proxy.stop()
+	if err == nil {
+		return
+	}
+	if _, writeErr := fmt.Fprintf(logFile, "epitrop: stop the egress proxy: %s\n", egressproxy.ErrorLine(err)); writeErr != nil {
+		fmt.Fprintf(os.Stderr, "Error: stop the egress proxy: %s; write the job log: %v\n", egressproxy.ErrorLine(err), writeErr)
 	}
 }
 

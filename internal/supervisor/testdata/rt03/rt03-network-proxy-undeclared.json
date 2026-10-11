@@ -1,0 +1,1 @@
+{"id":"rt03-network-proxy-undeclared","boundary":"network","direction":"violation","task":{"network":"proxy","env_allow":["TARGET"],"destinations":["192.0.2.7:443"]},"attempt":{"kind":"proxy_connect","target":"{host}:{port}"},"expect":{"result":"refused","event":{"type":"rt03.violation","boundary":"network","task_id":"rt03-network-proxy-undeclared"}}}

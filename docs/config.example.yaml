@@ -28,6 +28,11 @@ jobs:
       inputs: []
       env_allow:
         - EPITROP_JOB_TOKEN
+      # none: no network. egress: the whole internet, without the host's loopback.
+      # proxy: no network but the destinations listed, each as host:port in lower case;
+      # needs tasks_max of 32 or more, and programs that use HTTPS_PROXY.
+      #   network: proxy
+      #   destinations: [gateway.example:443]
       network: none
       memory_max: 2G
       # Optional soft limit below memory_max: the job is throttled there before it is killed.

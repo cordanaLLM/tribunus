@@ -32,13 +32,17 @@ type rt03Fixture struct {
 	Expect    json.RawMessage `json:"expect"`
 }
 
+// Destinations and Target may hold {host} and {port}: the address and port of the listener
+// the fixture's attempt aims at, known only when the fixture runs.
 type rt03Task struct {
-	Network  string   `json:"network"`
-	EnvAllow []string `json:"env_allow"`
+	Network      string   `json:"network"`
+	EnvAllow     []string `json:"env_allow"`
+	Destinations []string `json:"destinations"`
 }
 
 type rt03Attempt struct {
-	Kind string `json:"kind"`
+	Kind   string `json:"kind"`
+	Target string `json:"target"`
 }
 
 type rt03World struct {
@@ -123,10 +127,12 @@ func runRT03Fixture(t *testing.T, fixture rt03Fixture) bool {
 	world := newRT03World(t)
 	env, cleanup := rt03Env(t, fixture, world)
 	defer cleanup()
-	sandbox := rt03Sandbox(fixture, world)
+	sandbox := rt03Sandbox(fixture, world, env)
 	tools := rt03Tools(t, sandbox.Network)
-	built := rt03Command(t, fixture, sandbox, tools, env)
+	proxy := startRT03Proxy(t, sandbox)
+	built := rt03Command(t, fixture, sandbox, sandboxBuildOptions{Tools: tools, Env: mapLookup(env), Proxy: proxy.job.binds()})
 	ok := runRT03Command(t, built)
+	proxy.judge(t, fixture, world)
 	return rt03Allowed(t, fixture, world, ok)
 }
 
@@ -150,8 +156,8 @@ func newRT03World(t *testing.T) rt03World {
 	return world
 }
 
-func rt03Sandbox(fixture rt03Fixture, world rt03World) config.SandboxConfig {
-	return config.SandboxConfig{
+func rt03Sandbox(fixture rt03Fixture, world rt03World, env map[string]string) config.SandboxConfig {
+	sandbox := config.SandboxConfig{
 		Mode:      "enforce",
 		Workspace: world.workspace,
 		EnvAllow:  append([]string(nil), fixture.Task.EnvAllow...),
@@ -160,6 +166,15 @@ func rt03Sandbox(fixture rt03Fixture, world rt03World) config.SandboxConfig {
 		CPUWeight: 100,
 		TasksMax:  128,
 	}
+	for i := 0; i < len(fixture.Task.Destinations); i++ {
+		sandbox.Destinations = append(sandbox.Destinations, rt03Fill(fixture.Task.Destinations[i], env))
+	}
+	return sandbox
+}
+
+// rt03Fill puts the fixture's listener into a destination or target.
+func rt03Fill(value string, env map[string]string) string {
+	return strings.NewReplacer("{host}", env["TARGET_HOST"], "{port}", env["TARGET_PORT"]).Replace(value)
 }
 
 func rt03Env(t *testing.T, fixture rt03Fixture, world rt03World) (map[string]string, func()) {
@@ -176,9 +191,10 @@ func rt03Env(t *testing.T, fixture rt03Fixture, world rt03World) (map[string]str
 		"SUPERVISOR_PID": strconv.Itoa(os.Getpid()),
 	}
 	cleanup := func() {}
-	if strings.HasPrefix(fixture.Attempt.Kind, "tcp_connect") {
+	if strings.HasPrefix(fixture.Attempt.Kind, "tcp_connect") || fixture.Attempt.Kind == "proxy_connect" {
 		host, port, stop := rt03Listener(t, fixture.Attempt.Kind)
 		env["TARGET_HOST"], env["TARGET_PORT"] = host, port
+		env["TARGET"] = rt03Fill(fixture.Attempt.Target, env)
 		cleanup = stop
 	}
 	return env, cleanup
@@ -212,15 +228,17 @@ func rt03LookPath(t *testing.T, name string) string {
 	return path
 }
 
-func rt03Command(t *testing.T, fixture rt03Fixture, sandbox config.SandboxConfig, tools sandboxTools, env map[string]string) jobCommand {
+func rt03Command(t *testing.T, fixture rt03Fixture, sandbox config.SandboxConfig, opts sandboxBuildOptions) jobCommand {
 	t.Helper()
 	script := rt03Script(fixture.Attempt.Kind)
+	if sandbox.Network == "proxy" {
+		script = rt03RanMark + script
+	}
 	command := []string{"/usr/bin/bash", "-c", script}
-	built, err := buildSandboxCommand(command, sandbox, sandboxBuildOptions{
-		Paths: sandboxPaths{EventLogDir: env["EVENT_LOG_DIR"], SigningKey: env["SIGNING_KEY"]},
-		Tools: tools,
-		Env:   mapLookup(env),
-	})
+	eventLog, _ := opts.Env("EVENT_LOG_DIR")
+	signingKey, _ := opts.Env("SIGNING_KEY")
+	opts.Paths = sandboxPaths{EventLogDir: eventLog, SigningKey: signingKey}
+	built, err := buildSandboxCommand(command, sandbox, opts)
 	if err != nil {
 		t.Fatalf("buildSandboxCommand(%s) = %v, want nil", fixture.ID, err)
 	}
@@ -289,6 +307,8 @@ func rt03Script(kind string) string {
 		return `sleep 10 & child=$!; kill -TERM "$child"; wait "$child"; test "$?" -ne 0`
 	case "tcp_connect", "tcp_connect_loopback", "tcp_connect_host":
 		return `: > /dev/tcp/"$TARGET_HOST"/"$TARGET_PORT"`
+	case "proxy_connect":
+		return rt03ProxyConnectScript
 	case "tcp_connect_gateway":
 		// pasta forwards an unmapped gateway address to the outside world, where TEST-NET-1
 		// never answers, so the attempt is bounded.

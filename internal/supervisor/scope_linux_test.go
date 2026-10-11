@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/tekmora/epitrop/internal/config"
+	"github.com/tekmora/epitrop/internal/egressproxy"
 	"github.com/tekmora/epitrop/internal/eventlog"
 )
 
@@ -36,6 +37,11 @@ const (
 func TestMain(m *testing.M) {
 	if os.Getenv(fakeScopeEnv) == "1" && len(os.Args) > 1 && os.Args[1] == "--user" {
 		os.Exit(runFakeScopeCommand(os.Args))
+	}
+	// A sandbox with network=proxy runs the program of its shim as the relay; in these tests
+	// that program is the test binary.
+	if len(os.Args) > 1 && os.Args[1] == egressproxy.RelayCommand {
+		os.Exit(egressproxy.RunRelay(os.Args[1:], os.Stderr))
 	}
 	code := m.Run()
 	removeTestScratch()

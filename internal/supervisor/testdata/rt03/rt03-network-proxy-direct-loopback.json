@@ -1,0 +1,1 @@
+{"id":"rt03-network-proxy-direct-loopback","boundary":"network","direction":"violation","task":{"network":"proxy","env_allow":["TARGET_HOST","TARGET_PORT"],"destinations":["{host}:{port}"]},"attempt":{"kind":"tcp_connect_loopback"},"expect":{"result":"refused","event":{"type":"rt03.violation","boundary":"network","task_id":"rt03-network-proxy-direct-loopback"}}}

@@ -172,6 +172,7 @@
               "inputs": [],
               "env_allow": [],
               "network": "none",
+              "destinations": [],
               "memory_max": "2G",
               "memory_high": "",
               "cpu_weight": 100,
@@ -222,8 +223,20 @@
                 "default": "none",
                 "enum": [
                   "none",
-                  "egress"
+                  "egress",
+                  "proxy"
                 ]
+              },
+              "destinations": {
+                "type": "array",
+                "default": [],
+                "maxItems": 16,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 261
+                }
               },
               "memory_max": {
                 "type": "string",

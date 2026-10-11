@@ -1,0 +1,1 @@
+{"id":"rt03-network-proxy-name-to-loopback","boundary":"network","direction":"violation","task":{"network":"proxy","env_allow":["TARGET"],"destinations":["localhost:{port}"]},"attempt":{"kind":"proxy_connect","target":"localhost:{port}"},"expect":{"result":"refused","event":{"type":"rt03.violation","boundary":"network","task_id":"rt03-network-proxy-name-to-loopback"}}}

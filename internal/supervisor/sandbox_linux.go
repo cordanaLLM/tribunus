@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tekmora/epitrop/internal/config"
+	"github.com/tekmora/epitrop/internal/egressproxy"
 )
 
 const (
@@ -26,7 +27,21 @@ const (
 	sandboxNetAddress = "192.0.2.2"
 	sandboxNetMask    = "24"
 	sandboxNetGateway = "192.0.2.1"
+
+	// With network=proxy the sandbox has no route out. The job's programs find a proxy on
+	// the sandbox's own loopback: the relay, which leads to the socket of the job's proxy
+	// outside. Both are bound under a directory nothing else uses.
+	sandboxProxySocket = "/run/epitrop/proxy.sock"
+	sandboxRelayPath   = "/run/epitrop/relay"
+	sandboxProxyListen = "127.0.0.1:3128"
+	sandboxProxyURL    = "http://" + sandboxProxyListen
+	// relayProcsEnv tells the Go runtime of the relay its number of processors before it
+	// starts a thread. The job's command starts without it.
+	relayProcsEnv = "GOMAXPROCS"
 )
+
+// proxyEnvNames are the variables programs read their proxy from, in both spellings.
+var proxyEnvNames = []string{"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"}
 
 // busEnvNames are what systemd-run --user needs to reach the user manager. The shim passes
 // them to systemd-run, and bwrap unsets them, with INVOCATION_ID that systemd adds for the
@@ -50,7 +65,10 @@ func buildSandboxCommand(command []string, sandbox config.SandboxConfig, opts sa
 	if err = validateSandboxRuntimePaths(sandbox, opts.Paths); err != nil {
 		return jobCommand{}, err
 	}
-	inner := bwrapArgs(resolvedCommand, command, sandbox, tools)
+	if err = validateSandboxProxy(sandbox, opts.Proxy); err != nil {
+		return jobCommand{}, err
+	}
+	inner := bwrapArgs(resolvedCommand, command, sandbox, tools, opts.Proxy)
 	if sandbox.Network == "egress" {
 		inner = append(pastaArgs(tools.Pasta), inner...)
 	}
@@ -211,6 +229,25 @@ func requireUnchangedResolution(field string, path string) error {
 	return nil
 }
 
+// validateSandboxProxy refuses network=proxy without a proxy to bind: such a sandbox would
+// start with no way out and the job would fail later, with nothing that says why. It also
+// refuses a proxy for any other mode, which would open a way out nobody declared.
+func validateSandboxProxy(sandbox config.SandboxConfig, proxy sandboxProxy) error {
+	if sandbox.Network != "proxy" {
+		if proxy != (sandboxProxy{}) {
+			return fmt.Errorf("sandbox: network=%s takes no proxy", sandbox.Network)
+		}
+		return nil
+	}
+	if !filepath.IsAbs(proxy.Socket) || !filepath.IsAbs(proxy.Relay) {
+		return fmt.Errorf("sandbox: network=proxy needs the proxy socket and the relay program as absolute paths")
+	}
+	if err := requireExists(proxy.Socket); err != nil {
+		return err
+	}
+	return requireExists(proxy.Relay)
+}
+
 func requireTIOCSTIDisabled() error {
 	body, err := sandboxReadFile(legacyTIOCSTIPath)
 	if err != nil {
@@ -285,7 +322,7 @@ func pastaArgs(path string) []string {
 	}
 }
 
-func bwrapArgs(commandPath string, command []string, sandbox config.SandboxConfig, tools sandboxTools) []string {
+func bwrapArgs(commandPath string, command []string, sandbox config.SandboxConfig, tools sandboxTools, proxy sandboxProxy) []string {
 	args := bwrapBaseArgs(tools.Bwrap, sandbox)
 	args = append(args, "--bind", sandbox.Workspace, sandbox.Workspace)
 	args = appendInputBinds(args, sandbox.Inputs)
@@ -295,8 +332,33 @@ func bwrapArgs(commandPath string, command []string, sandbox config.SandboxConfi
 		args = append(args, "--unsetenv", busEnvNames[i])
 	}
 	args = append(args, "--unsetenv", "INVOCATION_ID")
-	jobCommand := append([]string{tools.Env, "--default-signal=TERM", commandPath}, command[1:]...)
-	return append(append(args, "--"), jobCommand...)
+	start := []string{tools.Env, "--default-signal=TERM"}
+	if sandbox.Network == "proxy" {
+		args = appendProxyArgs(args, proxy)
+		// The relay's number of processors is its own: the command starts without it.
+		start = append(relayArgs(), append(start, "--unset="+relayProcsEnv)...)
+	}
+	args = append(append(args, "--"), start...)
+	return append(append(args, commandPath), command[1:]...)
+}
+
+// appendProxyArgs binds the proxy's socket and the relay program, points the job's
+// programs at the relay, and gives the relay its number of processors.
+func appendProxyArgs(args []string, proxy sandboxProxy) []string {
+	args = append(args, "--ro-bind", proxy.Socket, sandboxProxySocket, "--ro-bind", proxy.Relay, sandboxRelayPath)
+	for i := 0; i < len(proxyEnvNames); i++ {
+		args = append(args, "--setenv", proxyEnvNames[i], sandboxProxyURL)
+	}
+	return append(args, "--setenv", relayProcsEnv, strconv.Itoa(egressproxy.RelayProcs))
+}
+
+// relayArgs start the relay, which listens and then runs the job's command as its child.
+// The relay ignores TERM like the rest of the chain; the command still gets it back.
+func relayArgs() []string {
+	return []string{
+		sandboxRelayPath, egressproxy.RelayCommand,
+		"--socket", sandboxProxySocket, "--listen", sandboxProxyListen, "--",
+	}
 }
 
 func bwrapBaseArgs(path string, sandbox config.SandboxConfig) []string {

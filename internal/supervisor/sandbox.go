@@ -20,10 +20,18 @@ type sandboxTools struct {
 	Systemd    bool
 }
 
+// sandboxProxy is what a sandbox with network=proxy binds: the socket of the job's proxy,
+// which runs outside the sandbox, and the program that runs as the relay inside it.
+type sandboxProxy struct {
+	Socket string
+	Relay  string
+}
+
 type sandboxBuildOptions struct {
 	Paths sandboxPaths
 	Tools sandboxTools
 	Env   func(string) (string, bool)
+	Proxy sandboxProxy
 }
 
 func sandboxStatus(sandbox config.SandboxConfig) string {
@@ -51,6 +59,9 @@ func sandboxFlagArgs(sandbox config.SandboxConfig) []string {
 	}
 	for i := 0; i < len(sandbox.EnvAllow); i++ {
 		args = append(args, "--sandbox-env-allow", sandbox.EnvAllow[i])
+	}
+	for i := 0; i < len(sandbox.Destinations); i++ {
+		args = append(args, "--sandbox-destination", sandbox.Destinations[i])
 	}
 	return args
 }

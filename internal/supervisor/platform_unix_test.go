@@ -738,18 +738,45 @@ func TestSignalAndKillTreatVanishedTargetAsDone(t *testing.T) {
 
 // TestValidateSignalParentTreatsMissingProcStatusAsGone pins that a target whose
 // /proc entry disappeared between checks is treated as gone, and nothing is signalled.
+// The entry is missing for a process that ended before the status file was opened
+// (ENOENT), and the read fails with ESRCH for one that ended after the open.
 func TestValidateSignalParentTreatsMissingProcStatusAsGone(t *testing.T) {
+	gone := []struct {
+		name string
+		err  error
+	}{
+		{name: "ended before the open", err: os.ErrNotExist},
+		{name: "ended between the open and the read", err: &os.PathError{Op: "read", Path: "/proc/1/status", Err: unix.ESRCH}},
+	}
+	for i := 0; i < len(gone); i++ {
+		t.Run(gone[i].name, func(t *testing.T) {
+			rec := withRecordingSignaller(t)
+			cmd := startSleep(t, true)
+			withProcStatusError(t, gone[i].err)
+			target := testSignalTarget(cmd.Process.Pid, os.Getpid())
+			if err := signalProcessGroup(target, "TERM"); err != nil {
+				t.Fatalf("signalProcessGroup(status gone) = %v, want nil", err)
+			}
+			if err := killProcess(target); err != nil {
+				t.Fatalf("killProcess(status gone) = %v, want nil", err)
+			}
+			if len(*rec) != 0 {
+				t.Fatalf("signals = %+v, want none when the target's /proc entry is gone", *rec)
+			}
+			if !processExists(cmd.Process.Pid) {
+				t.Fatalf("sleep pid %d exited, want it untouched", cmd.Process.Pid)
+			}
+		})
+	}
+}
+
+// TestValidateSignalParentRefusesAStatusItCannotRead pins the other side: an error that
+// does not say the process is gone refuses the signal and names the record.
+func TestValidateSignalParentRefusesAStatusItCannotRead(t *testing.T) {
 	rec := withRecordingSignaller(t)
 	cmd := startSleep(t, true)
-	withProcStatusError(t, os.ErrNotExist)
+	withProcStatusError(t, &os.PathError{Op: "read", Path: "/proc/1/status", Err: unix.EIO})
 	target := testSignalTarget(cmd.Process.Pid, os.Getpid())
-	if err := signalProcessGroup(target, "TERM"); err != nil {
-		t.Fatalf("signalProcessGroup(status gone) = %v, want nil", err)
-	}
-	if len(*rec) != 0 {
-		t.Fatalf("signals = %+v, want none when the target's /proc entry is gone", *rec)
-	}
-	if !processExists(cmd.Process.Pid) {
-		t.Fatalf("sleep pid %d exited, want it untouched", cmd.Process.Pid)
-	}
+	err := signalProcessGroup(target, "TERM")
+	assertRefusedWithoutSignal(t, err, "input/output error", rec)
 }

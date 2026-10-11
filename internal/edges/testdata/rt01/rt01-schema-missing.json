@@ -1,0 +1,1 @@
+{"id":"rt01-schema-missing","rule":"rt01","direction":"violation","call":{"temperature":0,"output":"{\"verdict\":\"pass\",\"score\":91}"},"expect":{"result":"refused","reason":"schema"}}

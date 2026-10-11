@@ -92,6 +92,14 @@ Operator view built with runes (`$state`, `$derived`, `$effect`) and snippets.
 
 RT rules are separate from the HISS code standards. Source code in this repository also meets HISS-01, -02, -04 (function limit 60 lines), -07 and -10.
 
+### RT-01: deterministic edges
+
+`internal/edges.Check` is the check of RT-01 for one model call: the request carries a temperature of exactly 0, and the output validates against the JSON Schema its caller declared. A call without a temperature is refused, because it runs at the provider's default. A call without a schema, or with an empty one, is refused, because an output "validated" against a schema that accepts everything is not validated.
+
+The rule is stated by fixtures replayed in both directions (`internal/edges/testdata/rt01/`): a temperature above 0 or missing, a schema missing or empty, and an output that is no JSON, lacks a field, breaks a bound or carries an extra field must be refused; a sound call must be allowed.
+
+Coverage: the check is bound to no live edge. The runtime makes no model call of its own yet, so nothing in a running system passes through `Check` today, and RT-01 is not enforced anywhere. The fixtures prove the check, not a system. The first model edge has to route every call through it; that binding is tracked as its own issue.
+
 ### RT-02: the side-effect ledger
 
 `internal/effects` records every outbound side effect in the event log under its key, the task id and the action type. `Ledger.Do(key, effect)` runs the effect at most once:

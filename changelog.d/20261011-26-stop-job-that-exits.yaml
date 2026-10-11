@@ -1,3 +1,0 @@
-type: fixed
-title: 'Stopping a job whose process ends while its status is read now reports the job as gone and not as an error'
-issue: "21"

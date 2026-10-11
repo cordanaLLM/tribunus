@@ -6,6 +6,7 @@
   "postUpdateOptions": [
     "gomodTidy"
   ],
+  "minimumReleaseAge": "3 days",
   "customManagers": [
     {
       "customType": "regex",
@@ -124,6 +125,17 @@
         "github.com/cordanaLLM/praetor/**"
       ],
       "enabled": false
+    },
+    {
+      "description": "golusoris is this project's own framework: a release there has passed the same maintainers' gates, so it is adopted at once and does not wait the three days",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchPackageNames": [
+        "github.com/golusoris/golusoris",
+        "github.com/golusoris/golusoris/**"
+      ],
+      "minimumReleaseAge": null
     }
   ]
 }

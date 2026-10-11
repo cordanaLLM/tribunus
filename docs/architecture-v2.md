@@ -31,7 +31,10 @@ stage's operations in order, through the pure `ApplyStage(events)` of this
 package. A stage the graph refuses, which two racing writers can produce, is
 not applied and is counted in the replayed state; a record that is no stage
 stops the replay. Replay checks the hard depth cap of 64; the configured depth
-binds new writes. Nothing writes these records yet. Removing a node with any incident dependency edge is refused; callers
+binds new writes: `tribunusctl graph apply` checks a stage against the graph
+the log holds, under the configured depth, and appends it as one record, and
+`tribunusctl graph show` prints the graph rebuilt from the log. The check runs
+outside the log's lock, as the run record's does (#108). Removing a node with any incident dependency edge is refused; callers
 remove edges first so history stays explicit.
 
 The task-graph node vocabulary follows Praetor #883 as amended on 2026-10-09

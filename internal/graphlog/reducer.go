@@ -102,13 +102,23 @@ func stageOps(rec eventlog.Record) ([]graph.Event, error) {
 	if err := dec.Decode(&payload); err != nil {
 		return nil, fmt.Errorf("eventlog: seq %d: payload: %w", rec.Seq, err)
 	}
-	if len(payload.Ops) == 0 || len(payload.Ops) > MaxStageOps {
-		return nil, fmt.Errorf("eventlog: seq %d: a stage holds 1 to %d operations, this one %d", rec.Seq, MaxStageOps, len(payload.Ops))
-	}
-	for i := 0; i < len(payload.Ops); i++ {
-		if !graph.KnownEvent(payload.Ops[i].Type) {
-			return nil, fmt.Errorf("eventlog: seq %d: operation %d has unknown type %q", rec.Seq, i, payload.Ops[i].Type)
-		}
+	if err := checkOps(payload.Ops); err != nil {
+		return nil, fmt.Errorf("eventlog: seq %d: %w", rec.Seq, err)
 	}
 	return payload.Ops, nil
+}
+
+// checkOps refuses a stage no record may hold: no operation, too many, or an unknown one.
+// The writer checks it before it appends and the reducer when it reads, so the two cannot
+// disagree about what a stage is.
+func checkOps(ops []graph.Event) error {
+	if len(ops) == 0 || len(ops) > MaxStageOps {
+		return fmt.Errorf("a stage holds 1 to %d operations, this one %d", MaxStageOps, len(ops))
+	}
+	for i := 0; i < len(ops); i++ {
+		if !graph.KnownEvent(ops[i].Type) {
+			return fmt.Errorf("operation %d has unknown type %q", i, ops[i].Type)
+		}
+	}
+	return nil
 }

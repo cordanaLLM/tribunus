@@ -1,0 +1,3 @@
+type: added
+title: 'Keep the task graph in the event log: graph apply commits a staged change as one record, graph show rebuilds the graph from the log'
+issue: "5"

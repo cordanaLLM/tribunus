@@ -33,6 +33,8 @@ func main() {
 		err = runUnits(os.Args[2:])
 	case "graph":
 		err = runGraph(os.Args[2:])
+	case "effects":
+		err = runEffects(os.Args[2:])
 	case "show":
 		err = runShow(os.Args[2:])
 	case "schema":
@@ -69,6 +71,7 @@ func printUsage() {
 	fmt.Println("  epitropctl watch run|seed --config=file [--once] [--interval=duration]")
 	fmt.Println("  epitropctl units set|resume|show|note|inbox --config=file ...")
 	fmt.Println("  epitropctl graph show|apply --config=file [--file=stage.json]")
+	fmt.Println("  epitropctl effects list|resolve --config=file [--outcome=done|retry --by=name <task id> <action type>]")
 }
 
 func printVersion() {

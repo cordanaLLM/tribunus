@@ -1,0 +1,1 @@
+{"id":"rt02-second-delivery","rule":"rt02","direction":"violation","setup":[{"act":"deliver"}],"attempt":{"act":"deliver"},"expect":{"result":"refused","executions":1,"record":"effect.skipped"}}

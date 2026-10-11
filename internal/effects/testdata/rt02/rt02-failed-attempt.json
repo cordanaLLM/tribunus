@@ -1,0 +1,1 @@
+{"id":"rt02-failed-attempt","rule":"rt02","direction":"violation","setup":[{"act":"deliver_failing"}],"attempt":{"act":"deliver"},"expect":{"result":"refused","executions":1,"record":""}}

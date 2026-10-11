@@ -10,11 +10,12 @@ import (
 )
 
 func (s *Supervisor) shimCmd(ctx context.Context, job config.JobConfig) *exec.Cmd {
-	args := make([]string, 0, len(s.shimCommand)+len(job.Command)+16)
+	args := make([]string, 0, len(s.shimCommand)+len(job.Command)+18)
 	args = append(args, s.shimCommand[1:]...)
 	args = append(args,
 		"__job-shim",
 		"--event-log-dir", s.cfg.EventLog.Dir,
+		"--event-log-lock-timeout-seconds", strconv.Itoa(s.cfg.EventLog.LockTimeoutSeconds),
 		"--signing-key", s.cfg.EventLog.SigningKeyPath,
 		"--name", job.Name,
 		"--lock", s.lockPath(job.Name),

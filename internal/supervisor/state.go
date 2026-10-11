@@ -29,8 +29,19 @@ func (s *Supervisor) replayState(ctx context.Context) (eventlog.State, error) {
 	} else if err != nil {
 		return eventlog.State{}, fmt.Errorf("supervisor: stat %s: %w", events, err)
 	}
-	limits := eventlog.Limits{Clock: s.clk, MaxReplayRecords: s.cfg.EventLog.MaxReplayRecords}
-	return eventlog.ReplayStable(ctx, s.cfg.EventLog.Dir, s.signer.PublicKey(), limits, JobReducer)
+	return eventlog.ReplayStable(ctx, s.cfg.EventLog.Dir, s.signer.PublicKey(), s.eventLogLimits(), JobReducer)
+}
+
+// eventLogLimits are the limits under which the supervisor reads and writes the event log.
+// The lock timeout is the configured one. Left out, the log falls back to its own default,
+// and an operator who raised event_log.lock_timeout_seconds for a slow disk would see no
+// effect.
+func (s *Supervisor) eventLogLimits() eventlog.Limits {
+	return eventlog.Limits{
+		Clock:            s.clk,
+		LockTimeout:      time.Duration(s.cfg.EventLog.LockTimeoutSeconds) * time.Second,
+		MaxReplayRecords: s.cfg.EventLog.MaxReplayRecords,
+	}
 }
 
 func JobReducer(st eventlog.State, rec eventlog.Record) (eventlog.State, error) {
@@ -165,7 +176,7 @@ func (s *Supervisor) appendJobEvent(ctx context.Context, typ string, name string
 	if err != nil {
 		return fmt.Errorf("supervisor: marshal %s: %w", typ, err)
 	}
-	writer, err := eventlog.Open(s.cfg.EventLog.Dir, s.signer, eventlog.Limits{Clock: s.clk, MaxReplayRecords: s.cfg.EventLog.MaxReplayRecords})
+	writer, err := eventlog.Open(s.cfg.EventLog.Dir, s.signer, s.eventLogLimits())
 	if err != nil {
 		return err
 	}

@@ -18,6 +18,7 @@ on:
       - 'LICENSE'
       - 'LICENSES/**'
       - 'catalog/snapshot.schema.json'
+      - 'CHANGELOG.md'
       - '.github/workflows/release*.yml'
   pull_request:
     branches: [main]
@@ -30,6 +31,7 @@ on:
       - 'LICENSE'
       - 'LICENSES/**'
       - 'catalog/snapshot.schema.json'
+      - 'CHANGELOG.md'
       - '.github/workflows/release*.yml'
 
 permissions:
@@ -67,6 +69,18 @@ jobs:
           version: v2.18.3
           args: check
 
+      # A snapshot builds no release notes, so the command the release
+      # workflow runs for them runs here on the newest released section of the
+      # changelog. No heading found leaves the version empty, which the tool
+      # refuses.
+      - name: Take The Release Notes Of The Newest Released Version
+        run: |
+          set -euo pipefail
+          version=$(sed -n '/^## \[[0-9]/{s/^## \[\([^]]*\)\].*/\1/p;q}' CHANGELOG.md)
+          echo "version=$version"
+          go run ./tools/releasenotes -changelog=CHANGELOG.md -version="v$version" -out="$RUNNER_TEMP/release-notes.md"
+          wc -l "$RUNNER_TEMP/release-notes.md"
+
       # --snapshot publishes nothing and needs no tag; --skip=sign leaves out
       # the keyless signature, which needs the release workflow's identity.
       - name: Build Archives And SBOMs As A Snapshot
@@ -78,7 +92,11 @@ jobs:
 
       # Six targets (linux, darwin and windows on amd64 and arm64) give six
       # archives and six SBOMs. A target dropped from the configuration still
-      # builds without an error, so the count is checked here.
+      # builds without an error, so the count is checked here. checksums.txt
+      # must list those twelve files and the snapshot schema, and nothing
+      # else: the signature and the provenance of a release cover exactly the
+      # files it lists. GoReleaser reads the schema from catalog/, so it is
+      # copied under its published name for the digest check.
       - name: Check The Snapshot Holds What A Release Publishes
         run: |
           set -euo pipefail
@@ -90,6 +108,15 @@ jobs:
             ls -l dist
             exit 1
           fi
+          listed=$(wc -l < dist/checksums.txt)
+          schema=$(awk '$2 == "snapshot.schema.json"' dist/checksums.txt | wc -l)
+          echo "listed=$listed schema=$schema"
+          if [ "$listed" -ne 13 ] || [ "$schema" -ne 1 ]; then
+            echo "::error::checksums.txt must list 13 files, one of them snapshot.schema.json; it lists $listed, the schema $schema times"
+            cat dist/checksums.txt
+            exit 1
+          fi
+          cp catalog/snapshot.schema.json dist/snapshot.schema.json
           (cd dist && sha256sum --check --strict checksums.txt)
           binary=$(find dist -type f -perm -u+x -path '*_linux_amd64*' | head -n 1)
           if [ -z "$binary" ]; then

@@ -40,6 +40,13 @@ const (
 	relayProcsEnv = "GOMAXPROCS"
 )
 
+// scopeNoExpand keeps the job's arguments as its config wrote them. With --scope, systemd-run
+// rewrites the command from its own environment (by default from systemd 258 on): ${NAME}
+// anywhere and an argument that is $NAME become the value, an unset $NAME argument is
+// dropped, and $$ becomes $. That environment carries the job's env_allow values, so a value
+// would land on the argv.
+const scopeNoExpand = "--expand-environment=no"
+
 // proxyEnvNames are the variables programs read their proxy from, in both spellings.
 var proxyEnvNames = []string{"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"}
 
@@ -101,9 +108,8 @@ func sandboxToolchain(sandbox config.SandboxConfig, tools sandboxTools) (sandbox
 	}
 	var err error
 	tools.Systemd = true
-	tools.SystemdRun, err = resolveExecutable("systemd-run")
-	if err != nil {
-		return sandboxTools{}, fmt.Errorf("sandbox: systemd-run: %w", err)
+	if tools.SystemdRun, err = resolveScopeRunner(); err != nil {
+		return sandboxTools{}, err
 	}
 	tools.Bwrap, err = resolveExecutable("bwrap")
 	if err != nil {
@@ -138,13 +144,34 @@ func resolveSignalEnv() (string, error) {
 	if !strings.HasPrefix(path, "/usr/") {
 		return "", fmt.Errorf("sandbox: env %s is outside /usr, so the sandbox cannot run it", path)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	// #nosec G204 -- fixed probe of the resolved env binary.
-	if out, err := exec.CommandContext(ctx, path, "--ignore-signal=TERM", "--default-signal=TERM", "true").CombinedOutput(); err != nil {
-		return "", fmt.Errorf("sandbox: env %s lacks --ignore-signal/--default-signal: %w: %s", path, err, strings.TrimSpace(string(out)))
+	if out, err := probeTool(path, "--ignore-signal=TERM", "--default-signal=TERM", "true"); err != nil {
+		return "", fmt.Errorf("sandbox: env %s lacks --ignore-signal/--default-signal: %w: %s", path, err, out)
 	}
 	return path, nil
+}
+
+// resolveScopeRunner finds a systemd-run that takes --expand-environment (systemd 254 or
+// later). An older one would stop every job start at that switch, so the preflight names
+// the missing piece first. The probe starts no unit: it parses the switch and prints the
+// version.
+func resolveScopeRunner() (string, error) {
+	path, err := resolveExecutable("systemd-run")
+	if err != nil {
+		return "", fmt.Errorf("sandbox: systemd-run: %w", err)
+	}
+	if out, err := probeTool(path, scopeNoExpand, "--version"); err != nil {
+		return "", fmt.Errorf("sandbox: systemd-run %s lacks --expand-environment (systemd 254 or later): %w: %s", path, err, out)
+	}
+	return path, nil
+}
+
+// probeTool runs a resolved tool with fixed arguments that change nothing, and returns what
+// it printed.
+func probeTool(path string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, path, args...).CombinedOutput() // #nosec G204 -- fixed probe arguments of a resolved tool.
+	return strings.TrimSpace(string(out)), err
 }
 
 // resolvePasta finds pasta by its own name. pasta and passt are one binary that picks its
@@ -295,7 +322,7 @@ func pathOverlapsSandbox(a string, b string) bool {
 
 func systemdRunArgs(path string, scope string, sandbox config.SandboxConfig) []string {
 	args := []string{
-		path, "--user", "--scope", "--quiet", "--collect", "--unit=" + scope,
+		path, "--user", "--scope", "--quiet", "--collect", scopeNoExpand, "--unit=" + scope,
 		"-p", "MemoryMax=" + sandbox.MemoryMax,
 	}
 	// The soft limit is optional: without it systemd leaves MemoryHigh at "infinity".

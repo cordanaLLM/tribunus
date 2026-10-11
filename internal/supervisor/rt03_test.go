@@ -82,7 +82,7 @@ func TestSandboxProductionArgvKeepsSystemdPrefix(t *testing.T) {
 	if !strings.HasPrefix(built.Scope, scopeNamePrefix) {
 		t.Fatalf("Scope = %q, want the unit the shim must find the job in", built.Scope)
 	}
-	want := []string{"/usr/bin/systemd-run", "--user", "--scope", "--quiet", "--collect", "--unit=" + built.Scope}
+	want := []string{"/usr/bin/systemd-run", "--user", "--scope", "--quiet", "--collect", "--expand-environment=no", "--unit=" + built.Scope}
 	for i := 0; i < len(want); i++ {
 		if args[i] != want[i] {
 			t.Fatalf("argv[%d] = %q, want %q in %q", i, args[i], want[i], args)
@@ -853,12 +853,13 @@ func TestSandboxRuntimeRefusesWorkspaceOverlappingEventLog(t *testing.T) {
 	}
 }
 
-func withEnvLookPath(t *testing.T, path string) {
+// withToolLookPath makes the sandbox preflight find one tool at the given path.
+func withToolLookPath(t *testing.T, tool string, path string) {
 	t.Helper()
 	old := sandboxLookPath
 	t.Cleanup(func() { sandboxLookPath = old })
 	sandboxLookPath = func(name string) (string, error) {
-		if name == "env" {
+		if name == tool {
 			return path, nil
 		}
 		return old(name)
@@ -874,16 +875,82 @@ func TestSandboxPreflightRefusesEnvOutsideUsr(t *testing.T) {
 	if err = os.WriteFile(outside, body, 0o700); err != nil {
 		t.Fatalf("copy env: %v", err)
 	}
-	withEnvLookPath(t, outside)
+	withToolLookPath(t, "env", outside)
 	if _, err = resolveSignalEnv(); err == nil || !strings.Contains(err.Error(), "outside /usr") {
 		t.Fatalf("resolveSignalEnv(%s) = %v, want outside-/usr refusal", outside, err)
 	}
 }
 
 func TestSandboxPreflightRefusesEnvWithoutSignalFlags(t *testing.T) {
-	withEnvLookPath(t, rt03LookPath(t, "false"))
+	withToolLookPath(t, "env", rt03LookPath(t, "false"))
 	if _, err := resolveSignalEnv(); err == nil || !strings.Contains(err.Error(), "lacks --ignore-signal") {
 		t.Fatalf("resolveSignalEnv(false) = %v, want probe refusal", err)
+	}
+}
+
+// oldScopeRunner stands in for a systemd-run older than 254: it knows --version and refuses
+// --expand-environment the way getopt refuses an unknown option.
+const oldScopeRunner = `#!/bin/sh
+for arg in "$@"; do
+	case "$arg" in
+	--expand-environment=*) echo "systemd-run: unrecognized option '$arg'" >&2; exit 1 ;;
+	esac
+done
+echo "systemd 253 (stand-in)"
+`
+
+func TestSandboxPreflightRefusesScopeRunnerWithoutNoExpand(t *testing.T) {
+	old := filepath.Join(t.TempDir(), "systemd-run")
+	if err := os.WriteFile(old, []byte(oldScopeRunner), 0o700); err != nil { // #nosec G306 -- a stand-in the test must be able to start.
+		t.Fatalf("WriteFile(stand-in) = %v, want nil", err)
+	}
+	withToolLookPath(t, "systemd-run", old)
+	if _, err := resolveScopeRunner(); err == nil || !strings.Contains(err.Error(), "lacks --expand-environment") || !strings.Contains(err.Error(), "unrecognized option") {
+		t.Fatalf("resolveScopeRunner(stand-in for systemd 253) = %v, want a refusal that names the switch and carries the tool's message", err)
+	}
+	if _, err := sandboxToolchain(config.SandboxConfig{Network: "none"}, sandboxTools{}); err == nil || !strings.Contains(err.Error(), "lacks --expand-environment") {
+		t.Fatalf("sandboxToolchain(stand-in for systemd 253) = %v, want the preflight to refuse", err)
+	}
+	withToolLookPath(t, "systemd-run", filepath.Join(t.TempDir(), "absent"))
+	if _, err := resolveScopeRunner(); err == nil || !strings.Contains(err.Error(), "sandbox: systemd-run:") || strings.Contains(err.Error(), "lacks") {
+		t.Fatalf("resolveScopeRunner(absent) = %v, want the missing tool named, not its switch", err)
+	}
+}
+
+// TestSandboxedJobArgumentsArriveUnexpanded: a job gets its arguments as its config wrote
+// them. systemd-run would rewrite them from its own environment, which carries the env_allow
+// values: the value would land on the argv, and an unset $NAME argument would be dropped.
+func TestSandboxedJobArgumentsArriveUnexpanded(t *testing.T) {
+	requireSystemdUserScope(t)
+	sandbox := config.SandboxConfig{Mode: "enforce", Workspace: t.TempDir(), Network: "none", MemoryMax: "256M", CPUWeight: 100, TasksMax: 128, EnvAllow: []string{"ALLOWED"}}
+	requireSandboxToolchain(t, sandbox)
+	args := []string{"${ALLOWED}", "$ALLOWED", "a$$b", "$UNSET_NAME", "--flag=${ALLOWED}"}
+	built, err := buildSandboxCommand(append([]string{"/usr/bin/printf", `%s\n`}, args...), sandbox, sandboxBuildOptions{
+		Env: func(name string) (string, bool) {
+			if name == "ALLOWED" {
+				return "value-from-the-environment", true
+			}
+			return os.LookupEnv(name)
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildSandboxCommand() = %v, want nil", err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, built.Argv[0], built.Argv[1:]...) // #nosec G204 -- argv built by sandbox builder under test.
+	cmd.Env = built.Env
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		if os.Getenv("CI") != "true" && rt03RuntimeUnavailable(stderr.String(), err) {
+			t.Skipf("sandbox argument test skipped: runtime unavailable: %v: %s", err, stderr.String())
+		}
+		t.Fatalf("sandboxed printf = %v, want nil; stderr=%s", err, stderr.String())
+	}
+	if got, want := string(out), strings.Join(args, "\n")+"\n"; got != want {
+		t.Fatalf("arguments inside the sandbox = %q, want them unchanged: %q; stderr=%s", got, want, stderr.String())
 	}
 }
 

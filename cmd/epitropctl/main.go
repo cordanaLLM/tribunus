@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+
+	"github.com/tekmora/epitrop/internal/egressproxy"
 )
 
 var version = ""
@@ -23,6 +25,8 @@ func main() {
 	switch os.Args[1] {
 	case "__job-shim":
 		os.Exit(runJobShim(os.Args[1:]))
+	case egressproxy.RelayCommand:
+		os.Exit(egressproxy.RunRelay(os.Args[1:], os.Stderr))
 	case "sync":
 		err = runSync(os.Args[2:])
 	case "jobs":

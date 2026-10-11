@@ -1,0 +1,1 @@
+{"id":"rt03-network-proxy-declared","boundary":"network","direction":"compliant","task":{"network":"proxy","env_allow":["TARGET"],"destinations":["{host}:{port}"]},"attempt":{"kind":"proxy_connect","target":"{host}:{port}"},"expect":{"result":"allowed"}}

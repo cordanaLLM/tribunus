@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -56,5 +58,24 @@ func TestVersionOutputUsesInjectedVersion(t *testing.T) {
 	}
 	if want := []byte("v9.8.7\n"); !bytes.Equal(output, want) {
 		t.Fatalf("epitropctl version = %q, want %q", output, want)
+	}
+}
+
+// TestRelayCommandIsDispatched: the sandbox of a job with network=proxy runs this program
+// as the relay in front of the job's command.
+func TestRelayCommandIsDispatched(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the relay runs inside the sandbox, which is Linux only")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	socket := filepath.Join(t.TempDir(), "none.sock")
+	output, err := exec.CommandContext(ctx, "go", "run", ".", "__egress-relay", "--socket", socket, "--listen", "127.0.0.1:0", "--", "/usr/bin/printf", "relayed").CombinedOutput()
+	if err != nil {
+		t.Fatalf("epitropctl __egress-relay: %v\n%s", err, output)
+	}
+	if want := []byte("relayed"); !bytes.Equal(output, want) {
+		t.Fatalf("epitropctl __egress-relay = %q, want the command's output %q", output, want)
 	}
 }

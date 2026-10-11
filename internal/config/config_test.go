@@ -8,9 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tekmora/epitrop/internal/egressproxy"
 )
 
 func TestLoadPositiveFullFile(t *testing.T) {
@@ -519,6 +522,115 @@ func TestValidateSandboxRules(t *testing.T) {
 		if tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
 			t.Fatalf("%s: ValidateSandbox() = %v, want error containing %q", tc.name, err, tc.want)
 		}
+	}
+}
+
+func proxyDestinations(count int) []string {
+	out := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		out = append(out, fmt.Sprintf("gateway%d.example:443", i))
+	}
+	return out
+}
+
+func TestValidateSandboxProxyRules(t *testing.T) {
+	cases := []struct {
+		name string
+		edit func(*SandboxConfig)
+		want string
+	}{
+		{"one destination", func(*SandboxConfig) {}, ""},
+		{"an address as destination", func(s *SandboxConfig) { s.Destinations = []string{"127.0.0.1:4000", "[::1]:4000"} }, ""},
+		{"destinations at limit", func(s *SandboxConfig) { s.Destinations = proxyDestinations(egressproxy.MaxDestinations) }, ""},
+		{"destinations over limit", func(s *SandboxConfig) { s.Destinations = proxyDestinations(egressproxy.MaxDestinations + 1) }, "destinations: network=proxy needs 1..16"},
+		{"no destination", func(s *SandboxConfig) { s.Destinations = nil }, "destinations: network=proxy needs 1..16"},
+		{"destinations without the proxy", func(s *SandboxConfig) { s.Network = "none" }, "destinations: forbidden unless network=proxy"},
+		{"destinations with open egress", func(s *SandboxConfig) { s.Network = "egress" }, "destinations: forbidden unless network=proxy"},
+		{"second spelling", func(s *SandboxConfig) { s.Destinations = []string{"Gateway.example:443"} }, `destinations/0: destination "Gateway.example:443": write it as "gateway.example:443"`},
+		{"wildcard", func(s *SandboxConfig) { s.Destinations = []string{"gateway.example:443", "*.example:443"} }, "destinations/1: destination"},
+		{"no port", func(s *SandboxConfig) { s.Destinations = []string{"gateway.example"} }, "want host:port"},
+		{"named twice", func(s *SandboxConfig) { s.Destinations = []string{"a.example:443", "b.example:443", "a.example:443"} }, "destinations/2: a.example:443 is named twice"},
+		{"same host, two ports", func(s *SandboxConfig) { s.Destinations = []string{"a.example:443", "a.example:8443"} }, ""},
+		{"HTTPS_PROXY from outside", func(s *SandboxConfig) { s.EnvAllow = []string{"LANG", "HTTPS_PROXY"} }, "env_allow/1: HTTPS_PROXY is set by the sandbox"},
+		{"HTTP_PROXY from outside", func(s *SandboxConfig) { s.EnvAllow = []string{"HTTP_PROXY"} }, "env_allow/0: HTTP_PROXY is set by the sandbox"},
+		{"ALL_PROXY from outside", func(s *SandboxConfig) { s.EnvAllow = []string{"ALL_PROXY"} }, "env_allow/0: ALL_PROXY is set by the sandbox"},
+		{"NO_PROXY from outside", func(s *SandboxConfig) { s.EnvAllow = []string{"NO_PROXY"} }, "env_allow/0: NO_PROXY is set by the sandbox"},
+		{"GOMAXPROCS from outside", func(s *SandboxConfig) { s.EnvAllow = []string{"GOMAXPROCS"} }, "env_allow/0: GOMAXPROCS is set by the sandbox"},
+		{"GOMAXPROCS without the proxy", func(s *SandboxConfig) { s.Network, s.Destinations, s.EnvAllow = "egress", nil, []string{"GOMAXPROCS"} }, ""},
+		{"another name from outside", func(s *SandboxConfig) { s.EnvAllow = []string{"PROXY_TOKEN"} }, ""},
+		{"HTTPS_PROXY without the proxy", func(s *SandboxConfig) { s.Network, s.Destinations, s.EnvAllow = "egress", nil, []string{"HTTPS_PROXY"} }, ""},
+		{"tasks with room for the relay", func(s *SandboxConfig) { s.TasksMax = 16 + egressproxy.MaxRelayTasks }, ""},
+		{"tasks without room for the relay", func(s *SandboxConfig) { s.TasksMax = 15 + egressproxy.MaxRelayTasks }, "tasks_max: network=proxy needs at least 32"},
+		{"the same tasks without the proxy", func(s *SandboxConfig) { s.Network, s.Destinations, s.TasksMax = "none", nil, 16 }, ""},
+	}
+	for _, tc := range cases {
+		sandbox := SandboxConfig{Mode: "enforce", Network: "proxy", Destinations: []string{"gateway.example:443"}, MemoryMax: "2G", CPUWeight: 100, TasksMax: 512}
+		tc.edit(&sandbox)
+		err := ValidateSandbox(sandbox)
+		if tc.want == "" && err != nil {
+			t.Errorf("%s: ValidateSandbox() = %v, want nil", tc.name, err)
+		}
+		if tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%s: ValidateSandbox() = %v, want error containing %q", tc.name, err, tc.want)
+		}
+	}
+}
+
+func proxyJobConfig(t *testing.T, sandbox string) string {
+	t.Helper()
+	return writeConfig(t, fmt.Sprintf(`{"jobs": [{"name": "slot", "command": ["/bin/true"], "log_path": "/tmp/slot.log", "sandbox": {"workspace": %q, %s}}]}`, t.TempDir(), sandbox))
+}
+
+// TestLoadProxySandbox: the file's schema and the Go rules accept and refuse the same
+// declarations of a job that reaches its destinations through the proxy.
+func TestLoadProxySandbox(t *testing.T) {
+	cfg, err := Load(testContext(t), proxyJobConfig(t, `"network": "proxy", "destinations": ["gateway.example:443", "127.0.0.1:4000"]`))
+	if err != nil {
+		t.Fatalf("Load(proxy with two destinations) = %v, want nil", err)
+	}
+	if got := cfg.Jobs[0].Sandbox; got.Network != "proxy" || !slices.Equal(got.Destinations, []string{"gateway.example:443", "127.0.0.1:4000"}) {
+		t.Fatalf("sandbox = %+v, want the proxy and both destinations in the declared order", got)
+	}
+	most, err := json.Marshal(proxyDestinations(egressproxy.MaxDestinations))
+	if err != nil {
+		t.Fatalf("Marshal() = %v, want nil", err)
+	}
+	if _, err = Load(testContext(t), proxyJobConfig(t, `"network": "proxy", "destinations": `+string(most))); err != nil {
+		t.Fatalf("Load(%d destinations) = %v, want nil", egressproxy.MaxDestinations, err)
+	}
+	refused := []struct {
+		name    string
+		sandbox string
+	}{
+		{"one destination over the limit", `"network": "proxy", "destinations": ` + strings.Replace(string(most), "[", `["one.example:443",`, 1)},
+		{"proxy without destinations", `"network": "proxy"`},
+		{"destinations without the proxy", `"network": "none", "destinations": ["gateway.example:443"]`},
+		{"destination named twice", `"network": "proxy", "destinations": ["gateway.example:443", "gateway.example:443"]`},
+		{"destination that is no text", `"network": "proxy", "destinations": [443]`},
+		{"destination that is a URL", `"network": "proxy", "destinations": ["https://gateway.example:443"]`},
+		{"proxy variable from outside", `"network": "proxy", "destinations": ["gateway.example:443"], "env_allow": ["HTTPS_PROXY"]`},
+		{"no room for the relay", `"network": "proxy", "destinations": ["gateway.example:443"], "tasks_max": 31`},
+	}
+	for i := 0; i < len(refused); i++ {
+		if _, err = Load(testContext(t), proxyJobConfig(t, refused[i].sandbox)); err == nil {
+			t.Errorf("Load(%s) = nil, want it refused", refused[i].name)
+		}
+	}
+}
+
+// TestRelayLifeIsAboveEveryJobRuntime: the relay bounds itself from inside the sandbox; the
+// supervisor's deadline and stop grace must always come first.
+// A job that opens a connection every second of the longest runtime keeps its way out.
+func TestProxyConnectionBoundCoversEveryJobRuntime(t *testing.T) {
+	if egressproxy.MaxConnections <= MaxJobRuntimeSeconds {
+		t.Fatalf("MaxConnections = %d, want it above the seconds of the longest job runtime (%d)", egressproxy.MaxConnections, MaxJobRuntimeSeconds)
+	}
+}
+
+func TestRelayLifeIsAboveEveryJobRuntime(t *testing.T) {
+	longest := time.Duration(MaxJobRuntimeSeconds+MaxStopGraceSeconds) * time.Second
+	if egressproxy.MaxRelayLife <= longest {
+		t.Fatalf("MaxRelayLife = %s, want it above the longest job runtime and stop grace (%s)", egressproxy.MaxRelayLife, longest)
 	}
 }
 

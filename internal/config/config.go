@@ -9,11 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
 	coreconfig "github.com/golusoris/golusoris/core/config"
 	golusorisschema "github.com/golusoris/golusoris/jsonschema"
+	"github.com/tekmora/epitrop/internal/egressproxy"
 )
 
 const (
@@ -85,6 +87,14 @@ var (
 // job starts (the systemd bus variables and INVOCATION_ID); allowlisting one would be
 // overridden silently, so config refuses it.
 var reservedSandboxEnv = []string{"PATH", "HOME", "TMPDIR", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "INVOCATION_ID"}
+
+// proxySandboxEnv are the names a program reads its proxy from. With network=proxy the
+// sandbox points them at the job's own proxy; a value from outside would send the job's
+// programs somewhere the sandbox has no route to, or past the proxy for the hosts it
+// names, so config refuses them in that mode. GOMAXPROCS is the relay's: the sandbox sets
+// it for the relay and removes it before the job's command starts, so a value from
+// outside would be dropped silently. A job sets its own in its command.
+var proxySandboxEnv = []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "GOMAXPROCS"}
 
 // Config is the Epitrop process configuration loaded from a schema-checked
 // file.
@@ -178,8 +188,14 @@ type SandboxConfig struct {
 	Workspace string   `koanf:"workspace" json:"workspace"`
 	Inputs    []string `koanf:"inputs" json:"inputs"`
 	EnvAllow  []string `koanf:"env_allow" json:"env_allow"`
-	Network   string   `koanf:"network" json:"network"`
-	MemoryMax string   `koanf:"memory_max" json:"memory_max"`
+	// Network is what the job reaches: "none" nothing, "egress" the internet without the
+	// host's loopback, "proxy" the Destinations and nothing else.
+	Network string `koanf:"network" json:"network"`
+	// Destinations are the "host:port" values a job with network=proxy may connect to,
+	// each in the one spelling egressproxy.Canonical accepts. A name never leads to a
+	// loopback or link-local address; such a destination is written as an address.
+	Destinations []string `koanf:"destinations" json:"destinations"`
+	MemoryMax    string   `koanf:"memory_max" json:"memory_max"`
 	// MemoryHigh is the soft limit: above it the kernel throttles the job and reclaims its
 	// memory before the hard limit kills it. Empty means none. It never exceeds MemoryMax.
 	MemoryHigh string `koanf:"memory_high" json:"memory_high"`
@@ -508,8 +524,54 @@ func validateSandboxMode(sandbox SandboxConfig) error {
 	default:
 		return fmt.Errorf("mode: unknown value %q", sandbox.Mode)
 	}
-	if sandbox.Network != "none" && sandbox.Network != "egress" {
+	return validateSandboxNetwork(sandbox)
+}
+
+func validateSandboxNetwork(sandbox SandboxConfig) error {
+	switch sandbox.Network {
+	case "none", "egress":
+		if len(sandbox.Destinations) > 0 {
+			return fmt.Errorf("destinations: forbidden unless network=proxy")
+		}
+		return nil
+	case "proxy":
+		return validateSandboxProxy(sandbox)
+	default:
 		return fmt.Errorf("network: unknown value %q", sandbox.Network)
+	}
+}
+
+// validateSandboxProxy checks what network=proxy needs: declared destinations, no proxy
+// variable from outside, and a task limit with room for the relay that runs in front of the
+// job and counts against it.
+func validateSandboxProxy(sandbox SandboxConfig) error {
+	if err := validateSandboxDestinations(sandbox.Destinations); err != nil {
+		return err
+	}
+	for i := 0; i < len(sandbox.EnvAllow); i++ {
+		if slices.Contains(proxySandboxEnv, sandbox.EnvAllow[i]) {
+			return fmt.Errorf("env_allow/%d: %s is set by the sandbox when network=proxy", i, sandbox.EnvAllow[i])
+		}
+	}
+	if least := minTasksMax + egressproxy.MaxRelayTasks; sandbox.TasksMax < least {
+		return fmt.Errorf("tasks_max: network=proxy needs at least %d, the relay in front of the job takes up to %d", least, egressproxy.MaxRelayTasks)
+	}
+	return nil
+}
+
+// validateSandboxDestinations wants at least one destination, each in its one spelling and
+// named once.
+func validateSandboxDestinations(destinations []string) error {
+	if len(destinations) == 0 || len(destinations) > egressproxy.MaxDestinations {
+		return fmt.Errorf("destinations: network=proxy needs 1..%d", egressproxy.MaxDestinations)
+	}
+	for i := 0; i < len(destinations); i++ {
+		if err := egressproxy.Canonical(destinations[i]); err != nil {
+			return fmt.Errorf("destinations/%d: %w", i, err)
+		}
+		if slices.Contains(destinations[:i], destinations[i]) {
+			return fmt.Errorf("destinations/%d: %s is named twice", i, destinations[i])
+		}
 	}
 	return nil
 }

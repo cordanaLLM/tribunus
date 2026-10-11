@@ -36,6 +36,15 @@ func TestRefusedStartIsAnEvent(t *testing.T) {
 		}
 		assertRefusedStart(t, sup, job.Name, job.LogPath, "job-shim: sandbox noworkspace: ")
 	})
+	t.Run("proxy cannot start", func(t *testing.T) {
+		job := sandboxedSupervisorJob(t, "noproxy", `true`)
+		job.Sandbox.Network, job.Sandbox.Destinations = "proxy", []string{"gateway.example:443"}
+		requireSandboxToolchain(t, job.Sandbox)
+		sup := testSupervisor(t, job)
+		// The shim makes the directory of the proxy's socket where TMPDIR says; here that is nowhere.
+		t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "missing"))
+		assertRefusedStart(t, sup, job.Name, job.LogPath, "egress proxy: socket directory: ")
+	})
 }
 
 func assertRefusedStart(t *testing.T, sup *Supervisor, name string, logPath string, wantReason string) {

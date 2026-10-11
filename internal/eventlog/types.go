@@ -56,6 +56,33 @@ type State struct {
 	// GraphStagesIgnored counts well-formed stages the reducer did not apply because the
 	// graph refused them, as it does when two writers race.
 	GraphStagesIgnored int `json:"graph_stages_ignored,omitempty"`
+	// Effects holds the outbound side effects by key, "<task id> <action type>" (RT-02).
+	// The reducer of internal/effects writes it.
+	Effects map[string]Effect `json:"effects,omitempty"`
+	// EffectRecordsIgnored counts well-formed effect records the reducer did not apply
+	// because they broke a rule a racing writer can break, such as a second claim of a key.
+	EffectRecordsIgnored int `json:"effect_records_ignored,omitempty"`
+}
+
+// Effect is one outbound side effect, keyed by task and action type. Claimed and failed are
+// open states: the effect may have happened, in whole or in part, and nothing runs it again
+// until a recorded act resolves it.
+type Effect struct {
+	TaskID     string `json:"task_id"`
+	ActionType string `json:"action_type"`
+	// State is claimed, done, failed or released.
+	State string `json:"state"`
+	// ClaimSeq is the record that claimed the key for the current attempt.
+	ClaimSeq uint64 `json:"claim_seq"`
+	// Attempt counts the claims of this key; more than one means a recorded retry.
+	Attempt int `json:"attempt"`
+	// Skipped counts the deliveries that found the effect done and did not run it.
+	Skipped int `json:"skipped,omitempty"`
+	// Reason is the error of a failed attempt.
+	Reason string `json:"reason,omitempty"`
+	// ResolvedBy and ResolvedNote name who resolved an open claim and why.
+	ResolvedBy   string `json:"resolved_by,omitempty"`
+	ResolvedNote string `json:"resolved_note,omitempty"`
 }
 
 type Task struct {
@@ -154,7 +181,8 @@ func KnownDomain(eventType string) bool {
 	return strings.HasPrefix(eventType, "task.") ||
 		strings.HasPrefix(eventType, "job.") ||
 		strings.HasPrefix(eventType, "unit.") ||
-		strings.HasPrefix(eventType, "graph.")
+		strings.HasPrefix(eventType, "graph.") ||
+		strings.HasPrefix(eventType, "effect.")
 }
 
 func TaskReducer(st State, rec Record) (State, error) {

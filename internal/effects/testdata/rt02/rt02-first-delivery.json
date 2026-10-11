@@ -1,0 +1,1 @@
+{"id":"rt02-first-delivery","rule":"rt02","direction":"compliant","setup":[],"attempt":{"act":"deliver"},"expect":{"result":"allowed","executions":1,"record":"effect.done"}}

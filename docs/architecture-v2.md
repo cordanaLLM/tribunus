@@ -92,6 +92,18 @@ Operator view built with runes (`$state`, `$derived`, `$effect`) and snippets.
 
 RT rules are separate from the HISS code standards. Source code in this repository also meets HISS-01, -02, -04 (function limit 60 lines), -07 and -10.
 
+### RT-02: the side-effect ledger
+
+`internal/effects` records every outbound side effect in the event log under its key, the task id and the action type. `Ledger.Do(key, effect)` runs the effect at most once:
+
+- A key that is done is not run again. The delivery is recorded as `effect.skipped`.
+- A new key is claimed (`effect.claimed`), the effect runs, and its end is recorded (`effect.done` or `effect.failed`). Two writers that deliver the same new key both append a claim; the first claim in log order holds, and each writer replays after its own append to see whether it owns the claim. The other one does not run the effect.
+- A claim without an end, which a crash between the claim and the end leaves behind, and a failed attempt are open. Whether the effect happened is not known then, so nothing runs it again by itself: `Do` returns an error naming the open claim, and `epitropctl effects list` shows it. It stays open until someone records what became of it with `epitropctl effects resolve`: `done` when the effect did happen, `retry` when it did not and may be attempted once more. An open claim does not age out.
+
+The rule is proven by fixtures replayed in both directions (`internal/effects/testdata/rt02/`), in the format of the RT-03 fixtures: a second delivery, a delivery on an open claim and a delivery after a failed attempt must not run the effect; a first delivery and a delivery after a recorded `retry` must.
+
+What it does not cover yet: a sandboxed job cannot write the event log (RT-03), so the release watch still guards its own side effect, one issue per release, with a marker on the forge and its own seen set. Its results pass through the ledger once the broker carries them to the control plane.
+
 ### RT-03: control-plane isolation
 
 The control plane is the Go process that owns the task graph, the event log, the broker, budgets and the operator's credentials. Task execution is everything that runs a unit of work: the sandboxed runner ([#25](https://github.com/tekmora/epitrop/issues/25)), the agents it starts and the commands they run. RT-03 holds when task execution can affect the control plane only by sending messages it validates. A task never gets the control plane's process, credentials, writable paths or network reach:

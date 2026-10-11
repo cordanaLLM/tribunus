@@ -1,0 +1,1 @@
+{"id":"rt02-claim-resolved-done","rule":"rt02","direction":"violation","setup":[{"act":"crash_after_claim"},{"act":"resolve_done"}],"attempt":{"act":"deliver"},"expect":{"result":"refused","executions":0,"record":"effect.skipped"}}

@@ -1,0 +1,1 @@
+{"id":"rt02-open-claim","rule":"rt02","direction":"violation","setup":[{"act":"crash_after_claim"}],"attempt":{"act":"deliver"},"expect":{"result":"refused","executions":0,"record":""}}

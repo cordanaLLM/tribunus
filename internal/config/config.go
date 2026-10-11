@@ -300,6 +300,26 @@ func Load(ctx context.Context, path string) (Config, error) {
 	return cfg, nil
 }
 
+// ReadDocument reads a configuration file as a document. It validates nothing and applies
+// no default: it is for a caller that completes the document and writes it out before it is
+// loaded, and Load is what validates the result.
+func ReadDocument(ctx context.Context, path string) (map[string]any, error) {
+	if err := readyContext(ctx); err != nil {
+		return nil, err
+	}
+	if path == "" {
+		return nil, errors.New("config: path is required")
+	}
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("config: stat %s: %w", path, err)
+	}
+	loaded, err := coreconfig.New(coreconfig.Options{Delimiter: ".", Files: []string{path}, Watch: false, EnvPrefix: disabledEnvPrefix})
+	if err != nil {
+		return nil, fmt.Errorf("config: load %s: %w", path, err)
+	}
+	return nestedDocument(loaded.All())
+}
+
 func applyJobDefaults(jobs []JobConfig) {
 	for i := 0; i < len(jobs); i++ {
 		if jobs[i].Schedule == "" {

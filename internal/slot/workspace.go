@@ -30,6 +30,30 @@ type Decision struct {
 	Answer string
 }
 
+// ParseDecisions reads the answered decisions of a unit from their file form, the one the
+// workspace gets: one decision per line, the id, a tab, the answer. An empty line is
+// skipped. The bounds and the form of an id and an answer are checked when the workspace is
+// prepared.
+func ParseDecisions(body []byte) ([]Decision, error) {
+	lines := strings.Split(string(body), "\n")
+	if len(lines) > MaxDecisions+1 {
+		return nil, fmt.Errorf("slot: at most %d decisions", MaxDecisions)
+	}
+	decisions := make([]Decision, 0, len(lines))
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSuffix(lines[i], "\r")
+		if line == "" {
+			continue
+		}
+		id, answer, found := strings.Cut(line, "\t")
+		if !found || id == "" {
+			return nil, fmt.Errorf("slot: decisions line %d is not an id, a tab and an answer", i+1)
+		}
+		decisions = append(decisions, Decision{ID: id, Answer: answer})
+	}
+	return decisions, nil
+}
+
 // Inputs is what the runner puts into a run's workspace.
 type Inputs struct {
 	// Brief is the unit: goal, done-when, files.
@@ -144,7 +168,10 @@ func checkInputs(in Inputs) error {
 func finishClone(ctx context.Context, ws Workspace, in Inputs) error {
 	steps := [][]string{
 		{"remote", "remove", "origin"},
-		{"switch", "--quiet", "--create", ws.Branch, ws.Base},
+		// A clone gets a branch of its own for the branch the repository is on. When that is
+		// the unit's branch, it exists here already, at the repository's commit and not at
+		// the base: the branch is made anew in every case.
+		{"switch", "--quiet", "--force-create", ws.Branch, ws.Base},
 	}
 	for i := 0; i < len(steps); i++ {
 		if _, err := git(ctx, ws.Dir, steps[i]...); err != nil {

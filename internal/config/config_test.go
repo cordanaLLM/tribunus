@@ -163,6 +163,49 @@ func TestLoadDisablesEnvironmentOverrides(t *testing.T) {
 	}
 }
 
+// ReadDocument gives the file as it is: no default is added and nothing is refused, so a
+// document that Load would refuse can still be read, completed and then loaded.
+func TestReadDocumentGivesTheFileUnvalidated(t *testing.T) {
+	t.Setenv("APP_GRAPH_MAX_DEPTH", "64")
+	path := writeConfig(t, `{"graph": {"max_depth": 7}, "jobs": [{"name": "slot", "command": ["/usr/bin/true"], "sandbox": {"network": "none"}}], "not_in_the_schema": true}`+"\n")
+	if _, err := Load(testContext(t), path); err == nil {
+		t.Fatal("Load(document with an unknown key) = nil, want it refused: the test needs a document Load refuses")
+	}
+	doc, err := ReadDocument(testContext(t), path)
+	if err != nil {
+		t.Fatalf("ReadDocument() = %v, want nil", err)
+	}
+	graph, isGraph := doc["graph"].(map[string]any)
+	jobs, isJobs := doc["jobs"].([]any)
+	if !isGraph || !isJobs || len(doc) != 3 || len(graph) != 1 || fmt.Sprint(graph["max_depth"]) != "7" || doc["not_in_the_schema"] != true || len(jobs) != 1 {
+		t.Fatalf("ReadDocument() = %v, want the three keys of the file and nothing else", doc)
+	}
+	job, isJob := jobs[0].(map[string]any)
+	sandbox, isSandbox := job["sandbox"].(map[string]any)
+	if !isJob || !isSandbox || len(job) != 3 || job["name"] != "slot" || len(sandbox) != 1 || sandbox["network"] != "none" {
+		t.Fatalf("job = %v, want the job as written, without defaults", job)
+	}
+}
+
+func TestReadDocumentRefusals(t *testing.T) {
+	path := writeConfig(t, "{}\n")
+	if _, err := ReadDocument(context.Background(), path); err == nil || !strings.Contains(err.Error(), "deadline") {
+		t.Fatalf("ReadDocument(no deadline) = %v, want it refused", err)
+	}
+	if _, err := ReadDocument(testContext(t), ""); err == nil || !strings.Contains(err.Error(), "path is required") {
+		t.Fatalf("ReadDocument(no path) = %v, want it refused", err)
+	}
+	if _, err := ReadDocument(testContext(t), filepath.Join(t.TempDir(), "missing.json")); err == nil || !strings.Contains(err.Error(), "stat") {
+		t.Fatalf("ReadDocument(missing file) = %v, want it refused", err)
+	}
+	if _, err := ReadDocument(testContext(t), writeConfig(t, "{not json")); err == nil || !strings.Contains(err.Error(), "load") {
+		t.Fatalf("ReadDocument(no JSON) = %v, want it refused", err)
+	}
+	if doc, err := ReadDocument(testContext(t), path); err != nil || len(doc) != 0 {
+		t.Fatalf("ReadDocument(empty document) = %v, %v; want an empty document", doc, err)
+	}
+}
+
 func TestSchemaFileAgreesWithEmbedded(t *testing.T) {
 	docs, err := os.ReadFile(filepath.Join("..", "..", "docs", "config.schema.json"))
 	if err != nil {

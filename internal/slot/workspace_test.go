@@ -150,6 +150,26 @@ func TestPrepareMakesACloneThatSharesNothingWithItsRepository(t *testing.T) {
 	}
 }
 
+// A repository that is on the unit's own branch gives its clone a branch of that name, at
+// the repository's commit. The workspace still starts at the base that was asked for.
+func TestPrepareStartsAtTheBaseWhenTheRepositoryIsOnTheUnitsBranch(t *testing.T) {
+	repo, first, second := testRepo(t)
+	gitIn(t, repo, "switch", "--quiet", "--create", Branch(testUnit), first)
+	ws, err := Prepare(slotCtx(t), request(t, repo, second))
+	if err != nil {
+		t.Fatalf("Prepare(repository on the unit's branch) = %v, want nil", err)
+	}
+	if head := gitIn(t, ws.Dir, "rev-parse", "HEAD"); head != second {
+		t.Fatalf("the workspace is at %s, want the base %s", head, second)
+	}
+	if branch := gitIn(t, ws.Dir, "branch", "--show-current"); branch != ws.Branch {
+		t.Fatalf("the workspace is on %q, want %q", branch, ws.Branch)
+	}
+	if head := gitIn(t, repo, "rev-parse", "refs/heads/"+Branch(testUnit)); head != first {
+		t.Fatalf("the repository's branch moved to %s, want it at %s", head, first)
+	}
+}
+
 // Git exports GIT_DIR, GIT_WORK_TREE and GIT_INDEX_FILE to a hook. Prepare started from one
 // still clones the repository it was given and touches no other.
 func TestPrepareIgnoresTheCallersGitEnvironment(t *testing.T) {
@@ -300,5 +320,43 @@ func TestBranchGivesEachUnitItsOwnName(t *testing.T) {
 			t.Errorf("Branch(%q) and Branch(%q) are both %q, want a name of its own for each unit", unit, other, got)
 		}
 		seen[got] = unit
+	}
+}
+
+// The decisions file a caller hands over reads back as what the workspace gets.
+func TestParseDecisionsReadsTheFormTheWorkspaceGets(t *testing.T) {
+	got, err := ParseDecisions([]byte("epitrop-port\ta) 8080\n\nepitrop-retries\t3\r\nepitrop-empty\t\n"))
+	want := []Decision{{ID: "epitrop-port", Answer: "a) 8080"}, {ID: "epitrop-retries", Answer: "3"}, {ID: "epitrop-empty", Answer: ""}}
+	if err != nil || !slices.Equal(got, want) {
+		t.Fatalf("ParseDecisions() = %+v, %v; want %+v", got, err, want)
+	}
+	if got, err = ParseDecisions(nil); err != nil || len(got) != 0 {
+		t.Fatalf("ParseDecisions(empty) = %+v, %v; want none", got, err)
+	}
+	for _, body := range []string{"no tab here\n", "\tanswer without an id\n", "ok\tyes\nbroken\n"} {
+		if _, err = ParseDecisions([]byte(body)); err == nil || !strings.Contains(err.Error(), "is not an id, a tab and an answer") {
+			t.Errorf("ParseDecisions(%q) = %v, want it refused", body, err)
+		}
+	}
+	if _, err = ParseDecisions([]byte(strings.Repeat("id\tanswer\n", MaxDecisions))); err != nil {
+		t.Fatalf("ParseDecisions(%d lines) = %v, want nil", MaxDecisions, err)
+	}
+	if _, err = ParseDecisions([]byte(strings.Repeat("id\tanswer\n", MaxDecisions+1))); err == nil || !strings.Contains(err.Error(), "at most 256 decisions") {
+		t.Fatalf("ParseDecisions(%d lines) = %v, want it refused", MaxDecisions+1, err)
+	}
+	// What is parsed is what Prepare writes: the file reads back as itself.
+	repo, first, _ := testRepo(t)
+	req := request(t, repo, first)
+	req.In.Decisions = want
+	ws, err := Prepare(slotCtx(t), req)
+	if err != nil {
+		t.Fatalf("Prepare() = %v, want nil", err)
+	}
+	written, err := os.ReadFile(filepath.Join(ws.Dir, filepath.FromSlash(DecisionsFile)))
+	if err != nil {
+		t.Fatalf("ReadFile() = %v, want nil", err)
+	}
+	if again, parseErr := ParseDecisions(written); parseErr != nil || !slices.Equal(again, want) {
+		t.Fatalf("ParseDecisions(written file) = %+v, %v; want %+v", again, parseErr, want)
 	}
 }

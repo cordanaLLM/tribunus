@@ -71,6 +71,12 @@ func buildSandboxCommand(command []string, sandbox config.SandboxConfig, opts sa
 	return jobCommand{Argv: append(systemdRunArgs(tools.SystemdRun, scope, sandbox), inner...), Env: env, Scope: scope}, nil
 }
 
+// sandboxPreflight looks for the tools a sandboxed start needs, as the shim will.
+func sandboxPreflight(sandbox config.SandboxConfig) error {
+	_, err := sandboxToolchain(sandbox, sandboxTools{})
+	return err
+}
+
 func sandboxToolchain(sandbox config.SandboxConfig, tools sandboxTools) (sandboxTools, error) {
 	if tools.Bwrap != "" {
 		return tools, nil

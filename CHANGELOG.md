@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 
+## [0.1.0] - 2026-10-11
+
+### Changed
+
+- No change since 0.1.0-rc.3: the first release is the code of that candidate, and the changelog sections of the release candidates list what it holds. Known gap: a sandboxed job with the network mode egress reaches the whole internet, and no mode limits a job to declared destinations. A job started by slot run that needs its model gateway therefore has network access to every address. Run no real work unit in a slot until a later release closes this (#25)
+
+
 ## [0.1.0-rc.3] - 2026-10-11
 
 ### Fixed

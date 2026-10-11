@@ -1,0 +1,3 @@
+type: changed
+title: Require govulncheck and gosec on every pull request
+issue: "57"

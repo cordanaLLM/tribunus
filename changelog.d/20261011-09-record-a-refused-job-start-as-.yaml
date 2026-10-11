@@ -1,0 +1,3 @@
+type: added
+title: Record a refused job start as a job.refused event
+issue: "94"

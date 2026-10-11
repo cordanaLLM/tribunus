@@ -1,0 +1,3 @@
+type: added
+title: Stop a job at its own deadline with max_runtime_seconds
+issue: "95"

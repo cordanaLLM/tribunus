@@ -17,6 +17,10 @@ The flow follows Praetor's: the same GoReleaser layout, `changelog.d/` fragments
 
 `tribunusctl version` prints the version the release build injected (`-X main.version`); a build from source prints `dev`.
 
+## The dry run
+
+`.github/workflows/release-dry-run.yml` builds the same archives and SBOMs on pull requests and on `main`, with the tool versions of `release-binaries.yml`: `goreleaser check`, then `goreleaser release --snapshot --clean --skip=sign`. It signs nothing and publishes nothing. It then checks that the snapshot holds six archives and six SBOMs, that `checksums.txt` matches them, and that the linux/amd64 binary reports a version ending in `-snapshot`. It runs when Go sources, `go.mod`, `.goreleaser.yaml`, the files packed into the archives or a release workflow change, so a broken release build shows on the change that broke it and not on the day of a release. It is not a required check.
+
 ## Verifying a release
 
 ```bash

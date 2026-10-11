@@ -197,7 +197,9 @@ func validateSignalTarget(target jobSignalTarget) error {
 
 func validateSignalParent(target jobSignalTarget) error {
 	parent, err := linuxProcessParent(target.PID)
-	if errors.Is(err, fs.ErrNotExist) {
+	// A process that ends between the open and the read of its status file gives ESRCH,
+	// not a missing file.
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, unix.ESRCH) {
 		return signalRecordError(target, fmt.Errorf("pid %d: %w", target.PID, errProcessGone))
 	}
 	if err != nil {

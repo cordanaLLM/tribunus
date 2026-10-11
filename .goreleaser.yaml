@@ -54,8 +54,15 @@ signs:
       - "${artifact}"
     artifacts: checksum
 
+# The snapshot schema is listed in checksums.txt like every archive and SBOM.
+# The signature covers that file and the provenance names every file in it, so
+# the schema is signed and attested with them. The entry below must name the
+# same file under the same name as release.extra_files, which uploads it.
 checksum:
   name_template: "checksums.txt"
+  extra_files:
+    - glob: catalog/snapshot.schema.json
+      name_template: snapshot.schema.json
 
 # The snapshot schema ships beside the binaries, so Praetor can pin the exact
 # contract a release writes (catalog/snapshot.schema.json, version 1).
@@ -72,9 +79,7 @@ release:
 snapshot:
   version_template: "{{ incpatch .Version }}-snapshot"
 
-changelog:
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
+# The release notes are not generated here. The release workflow passes the
+# tag's section of CHANGELOG.md with --release-notes (tools/releasenotes), and
+# GoReleaser then builds no changelog of its own. `changelog.disable` must stay
+# unset: it skips the step that reads the notes file as well.

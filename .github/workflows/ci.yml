@@ -79,6 +79,12 @@ jobs:
       # runner's systemd version and how long a job took to enter its scope. A sandbox test
       # that finds no systemd user scope here fails; it skips only outside CI.
       - run: go test -race -v ./...
+      # tools/schemas builds only with the schemasrefresh tag, so ./... above sees a
+      # placeholder with no tests: its extractor tests would run nowhere.
+      - name: go vet and go test for tools/schemas (tag schemasrefresh)
+        run: |
+          go vet -tags schemasrefresh ./tools/schemas/
+          go test -race -v -tags schemasrefresh ./tools/schemas/
       - name: golangci-lint
         run: go tool -modfile=tools/go/go.mod golangci-lint run ./...
       - name: HISS scan (praetorctl audit)

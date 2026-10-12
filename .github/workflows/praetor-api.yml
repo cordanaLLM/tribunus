@@ -65,4 +65,5 @@ jobs:
         if: github.event.pull_request.draft != true
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
+          GOTOOLCHAIN: auto
         run: go run tools/apicompat/gate/main.go -base="$BASE"

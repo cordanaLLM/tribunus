@@ -3,6 +3,7 @@ package graph
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -436,6 +437,41 @@ func TestLargeLinearChainWithinBounds(t *testing.T) {
 			}
 		}
 	})
+	requireLinearChain(t, g, 64)
+	before := graphJCS(t, g)
+	err := commitErr(g, func(stage *Stage) {
+		stage.AddNode(validNode("n65"))
+		stage.AddEdge(Edge{NodeID: "n65", DependsOn: "n64"})
+	})
+	requireErrContains(t, err, `node "n65" dependency depth 65 exceeds 64`)
+	if after := graphJCS(t, g); !bytes.Equal(after, before) {
+		t.Fatalf("refused commit changed the graph:\n got %s\nwant %s", after, before)
+	}
+}
+
+// requireLinearChain checks that g holds exactly n01..nNN, each depending only on the one before.
+func requireLinearChain(t *testing.T, g *Graph, n int) {
+	t.Helper()
+	snap, err := g.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot() = %v", err)
+	}
+	if len(snap.Nodes) != n {
+		t.Fatalf("Snapshot() holds %d nodes, want %d", len(snap.Nodes), n)
+	}
+	for i := 0; i < n; i++ {
+		node := snap.Nodes[i]
+		if want := fmt.Sprintf("n%02d", i+1); node.ID != want {
+			t.Fatalf("node %d = %q, want %q", i, node.ID, want)
+		}
+		var want []string
+		if i > 0 {
+			want = []string{fmt.Sprintf("n%02d", i)}
+		}
+		if !slices.Equal(node.DependsOn, want) {
+			t.Fatalf("node %q depends on %v, want %v", node.ID, node.DependsOn, want)
+		}
+	}
 }
 
 func denseBoundGraph(t *testing.T) *Graph {

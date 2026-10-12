@@ -409,8 +409,11 @@ func TestSandboxedJobReachesOnlyItsDeclaredDestination(t *testing.T) {
 	if err := sup.Stop(testContext(t), job.Name); err != nil {
 		t.Fatalf("Stop() = %v, want nil", err)
 	}
-	wantLog := `egress proxy: refused "192.0.2.7:443": 192.0.2.7:443 is not a declared destination` + "\nepitrop: egress proxy: 1 requests refused\n"
-	logged := waitUntil(func() bool { return jobLogHas(job.LogPath, wantLog) })
+	logged := waitUntil(func() bool {
+		return jobLogHasLines(job.LogPath,
+			`egress proxy: refused "192.0.2.7:443": 192.0.2.7:443 is not a declared destination`,
+			"epitrop: egress proxy: 1 requests refused")
+	})
 	body, err := os.ReadFile(job.LogPath)
 	if err != nil {
 		t.Fatalf("ReadFile(job log) = %v, want nil", err)
@@ -430,7 +433,52 @@ func TestSandboxedJobReachesOnlyItsDeclaredDestination(t *testing.T) {
 	}
 }
 
-func jobLogHas(path string, want string) bool {
+func TestJobLogHasLines(t *testing.T) {
+	refused := `egress proxy: refused "192.0.2.7:443": 192.0.2.7:443 is not a declared destination`
+	summary := "epitrop: egress proxy: 1 requests refused"
+	cases := []struct {
+		name string
+		log  string
+		want bool
+	}{
+		{"adjacent", refused + "\n" + summary + "\n", true},
+		{"coverage warning between", refused + "\nwarning: GOCOVERDIR not set, no coverage data emitted\n" + summary + "\n", true},
+		{"out of order", summary + "\n" + refused + "\n", false},
+		{"summary missing", refused + "\n", false},
+		{"refusal missing", summary + "\n", false},
+		{"last line not ended", refused + "\n" + summary, false},
+		{"line with a prefix", refused + "\nx " + summary + "\n", false},
+		{"empty", "", false},
+	}
+	for _, tc := range cases {
+		path := filepath.Join(t.TempDir(), "job.log")
+		if err := os.WriteFile(path, []byte(tc.log), 0o600); err != nil {
+			t.Fatalf("WriteFile() = %v", err)
+		}
+		if got := jobLogHasLines(path, refused, summary); got != tc.want {
+			t.Errorf("%s: jobLogHasLines() = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	if jobLogHasLines(filepath.Join(t.TempDir(), "missing.log"), refused) {
+		t.Error("missing log: jobLogHasLines() = true, want false")
+	}
+}
+
+// jobLogHasLines reports whether the job log holds each wanted line, whole, ended by a newline
+// and in order. Other lines may come between them: a coverage build of the helper process adds
+// its own warning line to the log.
+func jobLogHasLines(path string, want ...string) bool {
 	body, err := os.ReadFile(path) // #nosec G304 -- test-controlled path.
-	return err == nil && strings.Contains(string(body), want)
+	if err != nil {
+		return false
+	}
+	lines := strings.Split(string(body), "\n")
+	lines = lines[:len(lines)-1] // the text after the last newline is not a whole line yet
+	next := 0
+	for i := 0; i < len(lines) && next < len(want); i++ {
+		if lines[i] == want[next] {
+			next++
+		}
+	}
+	return next == len(want)
 }

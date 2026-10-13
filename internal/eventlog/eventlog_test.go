@@ -640,3 +640,47 @@ func TestReplayStableBoundsItsRetriesAndSkipsThemForOtherErrors(t *testing.T) {
 		t.Fatalf("ReplayStable gave up after %v, want about a second of retries", took)
 	}
 }
+
+func TestNormalizeLimitsDefaultsAndBoundaries(t *testing.T) {
+	clk := clock.NewFake()
+
+	got, err := normalizeLimits(Limits{Clock: clk})
+	if err != nil {
+		t.Fatalf("normalizeLimits(zero fields) = %v, want nil", err)
+	}
+	if got.LockTimeout != defaultLockTimeout || got.MaxReplayRecords != defaultReplayCap || got.MaxRecordBytes != MaxRecordBytes {
+		t.Fatalf("got defaults %+v, want lockTimeout=%v replayCap=%d recordBytes=%d", got, defaultLockTimeout, defaultReplayCap, MaxRecordBytes)
+	}
+
+	custom := Limits{
+		Clock:            clk,
+		LockTimeout:      1 * time.Nanosecond,
+		MaxReplayRecords: 1,
+		MaxRecordBytes:   1,
+	}
+	got, err = normalizeLimits(custom)
+	if err != nil {
+		t.Fatalf("normalizeLimits(boundary=1) = %v, want nil", err)
+	}
+	if got.LockTimeout != 1*time.Nanosecond || got.MaxReplayRecords != 1 || got.MaxRecordBytes != 1 {
+		t.Fatalf("got pass-through %+v, want boundary values 1", got)
+	}
+
+	cases := []struct {
+		name    string
+		limits  Limits
+		wantErr string
+	}{
+		{"nil clock", Limits{}, "limits clock is required"},
+		{"negative lock timeout", Limits{Clock: clk, LockTimeout: -1}, "lock timeout must be non-negative"},
+		{"negative replay cap", Limits{Clock: clk, MaxReplayRecords: -1}, "max replay records must be non-negative"},
+		{"record bytes below 1", Limits{Clock: clk, MaxRecordBytes: -1}, "max record bytes must be 1..65536"},
+		{"record bytes above cap", Limits{Clock: clk, MaxRecordBytes: MaxRecordBytes + 1}, "max record bytes must be 1..65536"},
+	}
+	for i := 0; i < len(cases); i++ {
+		_, err := normalizeLimits(cases[i].limits)
+		if err == nil || !strings.Contains(err.Error(), cases[i].wantErr) {
+			t.Errorf("%s: err = %v, want error containing %q", cases[i].name, err, cases[i].wantErr)
+		}
+	}
+}

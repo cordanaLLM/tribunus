@@ -70,7 +70,7 @@ Each record (`catalog.Record`) carries a model id, provider, access path (`api`,
 
 The two public catalogs use incompatible model-id schemes (for example `openai/gpt-4` and `gpt-4`). The sync does not reconcile them; each record names its sub-feed in its provenance (`public-catalog:openrouter` or `public-catalog:litellm-prices`).
 
-Every parser is checked against a schema fragment taken from the upstream's published document at a pinned revision (`internal/sources/upstream-schemas.json`; `make schemas-check`, and `make schemas-repin` after Renovate moves a pin). A rename or retype upstream fails a parser test instead of dropping a field.
+Every parser is checked against a schema fragment taken from the upstream's published document at a pinned revision (`internal/sources/upstream-schemas.json`; `make schemas-check`). Renovate moves the pins together in one pull request a week (`renovate.json`, group `upstream schema pins`). That pull request needs one `make schemas-repin` commit, and it merges once each pinned commit is at least three days old. Renovate cannot hold these back by age, because git refs carry no release timestamp. A rename or retype upstream fails a parser test instead of dropping a field.
 
 Two sources are not implemented, on purpose: a Claude subscription usage source (no current local store to read) and a Gemini quota source (no readable local store). Neither is scraped from an undocumented endpoint.
 

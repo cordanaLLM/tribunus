@@ -136,6 +136,21 @@
         "github.com/golusoris/golusoris/**"
       ],
       "minimumReleaseAge": null
+    },
+    {
+      "description": "the upstream schema pins move together, as one pull request a week: each move needs one make schemas-repin commit (docs/data-sync.md). git-refs gives no release timestamp, so minimumReleaseAge cannot hold these back; the digest stays put through the week instead, and the pull request merges once the pinned commit is three days old",
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "matchFileNames": [
+        "internal/sources/upstream-schemas.json",
+        "internal/sources/publiccatalog/litellmprices.go"
+      ],
+      "groupName": "upstream schema pins",
+      "schedule": [
+        "* 0-3 * * 1"
+      ],
+      "updateNotScheduled": false
     }
   ]
 }

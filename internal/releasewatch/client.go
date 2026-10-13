@@ -132,12 +132,6 @@ func (c *Client) GitHubToken() string {
 	return strings.TrimSpace(token)
 }
 
-func (c *Client) IsThrottled() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.throttled
-}
-
 // ResetThrottle clears the rate-limit throttle at the start of a pass.
 func (c *Client) ResetThrottle() {
 	c.mu.Lock()

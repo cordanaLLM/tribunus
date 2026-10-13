@@ -3,6 +3,7 @@ package codexlocal
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -186,4 +187,78 @@ func TestFetch_EmptyLimitIDFails(t *testing.T) {
 	if !strings.Contains(res.Detail, "limit_id") {
 		t.Fatalf("Detail = %q, want limit_id reason", res.Detail)
 	}
+}
+
+func TestDefaultSessionsDir(t *testing.T) {
+	t.Run("resolves under HOME", func(t *testing.T) {
+		tempHome := t.TempDir()
+		t.Setenv("HOME", tempHome)
+		t.Setenv("USERPROFILE", tempHome)
+		got, err := DefaultSessionsDir()
+		if err != nil {
+			t.Fatalf("DefaultSessionsDir() = %v, want nil", err)
+		}
+		want := filepath.Join(tempHome, ".codex", "sessions")
+		if got != want {
+			t.Fatalf("DefaultSessionsDir() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("fails when the home directory is unset", func(t *testing.T) {
+		t.Setenv("HOME", "")
+		t.Setenv("USERPROFILE", "")
+		_, err := DefaultSessionsDir()
+		if err == nil || !strings.Contains(err.Error(), "resolve home directory") {
+			t.Fatalf("DefaultSessionsDir() with empty HOME = %v, want error", err)
+		}
+	})
+}
+
+func TestCloseSessionFile(t *testing.T) {
+	t.Run("closes open file and preserves cause", func(t *testing.T) {
+		f, err := os.CreateTemp(t.TempDir(), "session-*")
+		if err != nil {
+			t.Fatalf("CreateTemp: %v", err)
+		}
+		cause := errors.New("open-cause")
+		got := closeSessionFile(f, cause)
+		if !errors.Is(got, cause) {
+			t.Fatalf("closeSessionFile() = %v, want cause %v", got, cause)
+		}
+		if err = f.Close(); err == nil {
+			t.Fatal("second Close() = nil, want error since file was closed")
+		}
+	})
+
+	t.Run("joins close error on already closed file", func(t *testing.T) {
+		f, err := os.CreateTemp(t.TempDir(), "session-*")
+		if err != nil {
+			t.Fatalf("CreateTemp: %v", err)
+		}
+		if err = f.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		cause := errors.New("prior-cause")
+		got := closeSessionFile(f, cause)
+		if !errors.Is(got, cause) {
+			t.Fatalf("closeSessionFile() = %v, want cause %v", got, cause)
+		}
+		if !errors.Is(got, os.ErrClosed) {
+			t.Fatalf("closeSessionFile() = %v, want joined os.ErrClosed", got)
+		}
+	})
+
+	t.Run("nil cause with already closed file", func(t *testing.T) {
+		f, err := os.CreateTemp(t.TempDir(), "session-*")
+		if err != nil {
+			t.Fatalf("CreateTemp: %v", err)
+		}
+		if err = f.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		got := closeSessionFile(f, nil)
+		if !errors.Is(got, os.ErrClosed) {
+			t.Fatalf("closeSessionFile() = %v, want os.ErrClosed", got)
+		}
+	})
 }

@@ -1,7 +1,7 @@
 # ADR-0004: Base the control plane on golusoris, pinned
 
-- **Status**: Proposed
-- **Date**: 2026-10-09
+- **Status**: Accepted
+- **Date**: 2026-10-09, accepted 2026-10-13
 - **Authors**: Epitrop maintainers
 
 ## Context

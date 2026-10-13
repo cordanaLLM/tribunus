@@ -8,7 +8,7 @@ record that supersedes it.
 | Number | Date | Title | Status |
 | :--- | :--- | :--- | :--- |
 | [0000](0000-template.md) | 2026-09-11 | ADR template | Accepted |
-| [0004](0004-golusoris-pinned-base.md) | 2026-10-09 | Base the control plane on golusoris, pinned | Proposed |
+| [0004](0004-golusoris-pinned-base.md) | 2026-10-09 | Base the control plane on golusoris, pinned | Accepted |
 | [0005](0005-sandboxed-job-runner.md) | 2026-10-10 | Sandbox job execution with a systemd scope, bubblewrap and pasta | Accepted |
 | [0006](0006-proxy-socket-egress.md) | 2026-10-11 | Reach declared destinations from a sandbox without a network through a proxy socket | Proposed |
 | [0007](0007-job-arguments-unchanged.md) | 2026-10-11 | Start a sandboxed job with its arguments unchanged | Proposed |

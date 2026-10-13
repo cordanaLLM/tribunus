@@ -46,7 +46,6 @@ watches:
 router:
   aliases:
     - cordana/auto
-    - cordana/coding
 admission:
   probe:
     timeout_seconds: 30

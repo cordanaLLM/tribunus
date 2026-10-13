@@ -482,3 +482,37 @@ func jobLogHasLines(path string, want ...string) bool {
 	}
 	return next == len(want)
 }
+
+func TestRequireReadable(t *testing.T) {
+	t.Run("readable file", func(t *testing.T) {
+		f := filepath.Join(t.TempDir(), "readable.txt")
+		if err := os.WriteFile(f, []byte("data"), 0o600); err != nil {
+			t.Fatalf("WriteFile() = %v", err)
+		}
+		if err := requireReadable(f); err != nil {
+			t.Fatalf("requireReadable(%s) = %v, want nil", f, err)
+		}
+	})
+
+	t.Run("missing file", func(t *testing.T) {
+		f := filepath.Join(t.TempDir(), "missing.txt")
+		err := requireReadable(f)
+		if err == nil || !strings.Contains(err.Error(), "readable:") {
+			t.Fatalf("requireReadable(%s) = %v, want error with 'readable:'", f, err)
+		}
+	})
+
+	t.Run("unreadable file", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("skipping unreadable file test under root (euid 0)")
+		}
+		f := filepath.Join(t.TempDir(), "unreadable.txt")
+		if err := os.WriteFile(f, []byte("secret"), 0o000); err != nil {
+			t.Fatalf("WriteFile() = %v", err)
+		}
+		err := requireReadable(f)
+		if err == nil || !strings.Contains(err.Error(), "readable:") {
+			t.Fatalf("requireReadable(%s) = %v, want error with 'readable:'", f, err)
+		}
+	})
+}

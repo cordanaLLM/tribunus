@@ -199,6 +199,21 @@ func ask(t *testing.T, server *Server, request string) (tunnel, string) {
 	return tun, strings.TrimRight(status, "\r\n")
 }
 
+// askAtLimit is ask for a server that may be at its tunnel limit. There the server answers
+// 503 and closes as it accepts, before it reads anything, so the write may find the socket
+// closed already. The answer is still there to read: a write error fails the test only when
+// no status line follows it.
+func askAtLimit(t *testing.T, server *Server, request string) string {
+	t.Helper()
+	tun := dialServer(t, server)
+	_, writeErr := io.WriteString(tun.conn, request)
+	status, err := tun.reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read status of %.40q = %v (write: %v), want a status line", request, err, writeErr)
+	}
+	return strings.TrimRight(status, "\r\n")
+}
+
 func connectRequest(target string) string {
 	return "CONNECT " + target + " HTTP/1.1\r\nHost: " + target + "\r\n\r\n"
 }
@@ -446,8 +461,7 @@ func TestServerRefusesMoreThanMaxTunnels(t *testing.T) {
 		}
 		open = append(open, tun)
 	}
-	_, status := ask(t, server.Server, connectRequest(target))
-	if status != "HTTP/1.1 503 Service Unavailable" {
+	if status := askAtLimit(t, server.Server, connectRequest(target)); status != "HTTP/1.1 503 Service Unavailable" {
 		t.Fatalf("tunnel %d: status = %q, want 503", maxTunnels, status)
 	}
 	if rest := finish(t, open[0]); rest != "\r\ngot:" {
@@ -455,8 +469,7 @@ func TestServerRefusesMoreThanMaxTunnels(t *testing.T) {
 	}
 	// The slot is free once the server has seen the first tunnel end.
 	freed := waitFor(func() bool {
-		_, again := ask(t, server.Server, connectRequest(target))
-		return strings.Contains(again, " 200 ")
+		return strings.Contains(askAtLimit(t, server.Server, connectRequest(target)), " 200 ")
 	})
 	if !freed {
 		t.Fatalf("no tunnel after one of %d ended, want its slot to be free", maxTunnels)

@@ -53,3 +53,46 @@ schemas-check:
 commit-messages:
 	@f=$$(mktemp) && git log -z --format='%H%n%B' origin/main..HEAD > "$$f" \
 		&& go run ./tools/commitmsg -messages="$$f"; rc=$$?; rm -f "$$f"; exit $$rc
+
+# make verify-all runs every step of ci.yml's required go job as well, so that a green local
+# gate predicts a green pull request. The Linux tests run above (test). govulncheck reads the
+# vulnerability database online, as in CI. docs-drift compares this branch with origin/main;
+# when the pull request body will carry a 'no docs needed: <reason>' line, put that text in a
+# file and pass it as PR_BODY_FILE=<file>.
+.PHONY: ci-parity gofmt-check vet tidy-check schemas-test golangci-lint gitleaks govulncheck gosec docs-drift
+verify-all: ci-parity
+ci-parity: commit-messages gofmt-check vet tidy-check schemas-test golangci-lint gitleaks govulncheck gosec docs-drift
+
+GOTOOL := go tool -modfile=tools/go/go.mod
+
+gofmt-check:
+	@out=$$(gofmt -l .) && if [ -n "$$out" ]; then echo "gofmt would reformat these files:" >&2; \
+		echo "$$out" >&2; exit 1; fi
+
+vet:
+	@go vet ./...
+	@GOOS=darwin go vet ./...
+	@GOOS=windows go vet ./...
+
+tidy-check:
+	@go mod tidy -diff
+
+schemas-test:
+	@go vet -tags schemasrefresh ./tools/schemas/
+	@go test -race -tags schemasrefresh ./tools/schemas/
+
+golangci-lint:
+	@$(GOTOOL) golangci-lint run ./...
+
+gitleaks:
+	@go tool -modfile=tools/gitleaks/go.mod gitleaks git --no-banner --redact .
+
+govulncheck:
+	@$(GOTOOL) standardsctl security govuln --path=. -- $(GOTOOL) govulncheck
+
+gosec:
+	@$(GOTOOL) gosec -conf .gosec.json ./...
+
+docs-drift:
+	@$(GOTOOL) standardsctl docs references --path=. --base=$$(git merge-base origin/main HEAD) \
+		--head=HEAD $(if $(PR_BODY_FILE),--pr-body-file=$(PR_BODY_FILE))

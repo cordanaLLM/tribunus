@@ -45,7 +45,7 @@ Each RT rule gets fixtures replayed in both directions, like [HISS-20](https://g
 
 ## Models
 
-Call models only through router aliases such as `cordana/auto`, `cordana/light`, `cordana/coding`, `cordana/reasoning`. Never hard-code a concrete model. Accelerators are one dynamic pool: placement comes from measured free memory, never from a per-device map.
+Call models only through the router alias `cordana/auto`, the one alias the fleet gateway serves; class aliases such as `cordana/coding` return an error there. Never hard-code a concrete model. Accelerators are one dynamic pool: placement comes from measured free memory, never from a per-device map.
 
 ## Files
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -348,4 +349,31 @@ func TestRejectInvalidRecords_DetailIsBounded(t *testing.T) {
 	if !strings.Contains(got.Detail, "rejected=10") {
 		t.Fatalf("Detail = %q, want the full count rejected=10", got.Detail)
 	}
+}
+
+func TestRunCodexLocalDefaultSessionsDir(t *testing.T) {
+	t.Run("default sessions-dir used when empty", func(t *testing.T) {
+		tempHome := t.TempDir()
+		t.Setenv("HOME", tempHome)
+		t.Setenv("USERPROFILE", tempHome)
+		outcome := runCodexLocal(context.Background(), syncFlags{sessionsDir: ""})
+		if outcome.Status != catalog.StatusSkip {
+			t.Fatalf("outcome.Status = %v, want StatusSkip", outcome.Status)
+		}
+		if !strings.Contains(outcome.Detail, filepath.Join(tempHome, ".codex", "sessions")) {
+			t.Fatalf("outcome.Detail = %q, want path under %s", outcome.Detail, tempHome)
+		}
+	})
+
+	t.Run("fails when home cannot be resolved", func(t *testing.T) {
+		t.Setenv("HOME", "")
+		t.Setenv("USERPROFILE", "")
+		outcome := runCodexLocal(context.Background(), syncFlags{sessionsDir: ""})
+		if outcome.Status != catalog.StatusFail {
+			t.Fatalf("outcome.Status = %v, want StatusFail", outcome.Status)
+		}
+		if !strings.Contains(outcome.Detail, "resolve home directory") {
+			t.Fatalf("outcome.Detail = %q, want error about resolve home directory", outcome.Detail)
+		}
+	})
 }

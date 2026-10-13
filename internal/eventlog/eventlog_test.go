@@ -640,3 +640,74 @@ func TestReplayStableBoundsItsRetriesAndSkipsThemForOtherErrors(t *testing.T) {
 		t.Fatalf("ReplayStable gave up after %v, want about a second of retries", took)
 	}
 }
+
+func TestAtomicReplaceCleanupOnFailure(t *testing.T) {
+	dir := t.TempDir()
+	causeErr := errors.New("simulated-fsync-failure")
+	realSync := syncFile
+	syncFile = func(f *os.File) error {
+		return causeErr
+	}
+	t.Cleanup(func() { syncFile = realSync })
+
+	err := atomicReplace(dir, "record.json", []byte("sample-data"), 0o600)
+	if err == nil {
+		t.Fatal("atomicReplace() = nil, want error")
+	}
+	if !errors.Is(err, causeErr) {
+		t.Fatalf("atomicReplace() = %v, want cause %v", err, causeErr)
+	}
+
+	entries, readErr := os.ReadDir(dir)
+	if readErr != nil {
+		t.Fatalf("ReadDir() = %v", readErr)
+	}
+	for i := 0; i < len(entries); i++ {
+		if strings.HasPrefix(entries[i].Name(), ".") {
+			t.Fatalf("found leftover temp file: %s", entries[i].Name())
+		}
+	}
+	if len(entries) != 0 {
+		t.Fatalf("found %d entries in dir, want 0", len(entries))
+	}
+}
+
+func TestCloseWithCauseAndRemoveTemp(t *testing.T) {
+	t.Run("closeWithCause closes file and returns cause", func(t *testing.T) {
+		f, err := os.CreateTemp(t.TempDir(), "tmp-*")
+		if err != nil {
+			t.Fatalf("CreateTemp: %v", err)
+		}
+		cause := errors.New("initial-cause")
+		gotErr := closeWithCause(f, cause)
+		if !errors.Is(gotErr, cause) {
+			t.Fatalf("closeWithCause() = %v, want cause %v", gotErr, cause)
+		}
+		if err = f.Close(); err == nil {
+			t.Fatal("second Close() = nil, want error on already closed file")
+		}
+	})
+
+	t.Run("closeWithCause joins close error on already closed file", func(t *testing.T) {
+		f, err := os.CreateTemp(t.TempDir(), "tmp-*")
+		if err != nil {
+			t.Fatalf("CreateTemp: %v", err)
+		}
+		if err = f.Close(); err != nil {
+			t.Fatalf("first Close: %v", err)
+		}
+		cause := errors.New("cause-err")
+		gotErr := closeWithCause(f, cause)
+		if !errors.Is(gotErr, cause) || !strings.Contains(gotErr.Error(), "eventlog: close") {
+			t.Fatalf("closeWithCause() = %v, want joined close error", gotErr)
+		}
+	})
+
+	t.Run("removeTemp ignores missing temp file", func(t *testing.T) {
+		cause := errors.New("my-cause")
+		gotErr := removeTemp(filepath.Join(t.TempDir(), "nonexistent"), cause)
+		if !errors.Is(gotErr, cause) || gotErr.Error() != cause.Error() {
+			t.Fatalf("removeTemp() = %v, want the cause alone: %v", gotErr, cause)
+		}
+	})
+}

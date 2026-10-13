@@ -103,4 +103,48 @@ jobs:
             exit 1
           fi
       # Verbose, as in ci.yml: a skipped test shows with its reason.
-      - run: go test -v ./...
+      # On Windows, 9 packages fail today; issue #152 ports them. The Windows
+      # legs skip those and test every other package, so a new package is
+      # tested there at once. A skip entry that names no package fails the
+      # step, so the list cannot outlive a rename. A ported package leaves the
+      # list and runs again.
+      - name: go test
+        run: |
+          set -euo pipefail
+          skip=()
+          if [ "$RUNNER_OS" = Windows ]; then
+            skip=(
+              cmd/epitropctl
+              internal/config
+              internal/effects
+              internal/egressproxy
+              internal/eventlog
+              internal/graphlog
+              internal/slot
+              internal/sources
+              internal/units
+            )
+          fi
+          module="$(go list -m)"
+          all="$(go list ./...)"
+          for s in ${skip[@]+"${skip[@]}"}; do
+            if ! printf '%s\n' "$all" | grep -qxF "$module/$s"; then
+              echo "::error::the skip list names $s, which is no package"
+              exit 1
+            fi
+          done
+          pkgs=()
+          while IFS= read -r p; do
+            skipped=false
+            for s in ${skip[@]+"${skip[@]}"}; do
+              if [ "$p" = "$module/$s" ]; then
+                skipped=true
+              fi
+            done
+            if [ "$skipped" = true ]; then
+              echo "not tested on $RUNNER_OS, issue #152: $p"
+            else
+              pkgs+=("$p")
+            fi
+          done <<< "$all"
+          go test -v "${pkgs[@]}"

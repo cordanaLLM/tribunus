@@ -1,0 +1,61 @@
+name: Container image
+
+# Builds the image from the Dockerfile and runs it once. No release builds or
+# publishes the image, so without this job a broken Dockerfile shows first when
+# someone builds it by hand. It runs only when something that goes into the
+# image changes. Because the trigger is path-filtered, it is not a required
+# check.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Dockerfile'
+      - '.github/workflows/container.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Dockerfile'
+      - '.github/workflows/container.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    name: Build And Run The Container Image
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build The Image
+        run: docker build --tag epitropctl:ci .
+
+      # A binary built without the release ldflags reports the version "dev".
+      # The runtime image is distroless, so the binary is the only thing that
+      # can run in it; the user must stay the unprivileged one the Dockerfile
+      # names.
+      - name: Run The Image
+        run: |
+          set -euo pipefail
+          got=$(docker run --rm epitropctl:ci version)
+          echo "version=$got"
+          if [ "$got" != "dev" ]; then
+            echo "::error::the image reports version '$got', want 'dev'"
+            exit 1
+          fi
+          user=$(docker image inspect --format '{{.Config.User}}' epitropctl:ci)
+          echo "user=$user"
+          if [ "$user" != "65532:65532" ]; then
+            echo "::error::the image runs as '$user', want 65532:65532"
+            exit 1
+          fi

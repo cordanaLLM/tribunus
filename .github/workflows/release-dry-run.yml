@@ -90,6 +90,21 @@ jobs:
           version: v2.18.3
           args: release --snapshot --clean --skip=sign
 
+      # A tag with a prerelease suffix (v0.1.0-rc.1) must publish as a
+      # prerelease, which GitHub never marks as the latest release. GoReleaser
+      # does that only with release.prerelease set to auto; the default, false,
+      # publishes the rc as the latest release. dist/config.yaml is the
+      # configuration GoReleaser ran with, defaults filled in.
+      - name: Check A Prerelease Tag Publishes As A Prerelease
+        run: |
+          set -euo pipefail
+          got=$(yq '.release.prerelease' dist/config.yaml)
+          echo "release.prerelease=$got"
+          if [ "$got" != "auto" ]; then
+            echo "::error::release.prerelease is '$got', want 'auto': an rc tag would publish as the latest release"
+            exit 1
+          fi
+
       # Six targets (linux, darwin and windows on amd64 and arm64) give six
       # archives and six SBOMs. A target dropped from the configuration still
       # builds without an error, so the count is checked here. checksums.txt

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -228,5 +229,52 @@ func TestTwoWritersSeeEachOthersStages(t *testing.T) {
 	}
 	if records(t, dir) != 2 {
 		t.Fatalf("records = %d, want 2", records(t, dir))
+	}
+}
+
+// TestConcurrentConflictingCommitsRefusedUnderLock verifies that two concurrent Commits
+// that conflict (each adds the same node id) are serialized under the lock such that
+// one succeeds, the other fails with "stage refused", and GraphStagesIgnored is 0.
+func TestConcurrentConflictingCommitsRefusedUnderLock(t *testing.T) {
+	dir := t.TempDir()
+	svc := serviceAt(t, dir, 5)
+	ctx := testCtx(t)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			_, err := svc.Commit(ctx, []graph.Event{addNode("conflict-node")})
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+
+	successes := 0
+	refused := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+		} else if strings.Contains(err.Error(), "stage refused") {
+			refused++
+		} else {
+			t.Fatalf("unexpected Commit error: %v", err)
+		}
+	}
+	if successes != 1 || refused != 1 {
+		t.Fatalf("successes = %d, refused = %d; want exactly 1 ok and 1 refused", successes, refused)
+	}
+	snap, ignored, err := svc.Show(ctx)
+	if err != nil {
+		t.Fatalf("Show: %v", err)
+	}
+	if ignored != 0 {
+		t.Fatalf("GraphStagesIgnored = %d, want 0", ignored)
+	}
+	if len(snap.Nodes) != 1 {
+		t.Fatalf("snap.Nodes = %d, want 1", len(snap.Nodes))
 	}
 }

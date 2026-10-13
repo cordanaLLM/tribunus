@@ -458,3 +458,50 @@ func TestOtherReducersSkipEffectRecordsAndThisOneSkipsTheirs(t *testing.T) {
 		}
 	}
 }
+
+// TestConcurrentResolveOnOpenClaim verifies that when multiple goroutines race to resolve
+// an open claim, exactly one succeeds and the rest receive "has no open claim", with
+// zero effect records ignored.
+func TestConcurrentResolveOnOpenClaim(t *testing.T) {
+	ledger, _ := testLedger(t)
+	ctx := testCtx(t)
+	k := Key{TaskID: "task-open", ActionType: "file-issue"}
+	if _, err := ledger.append(ctx, Claimed, k, payload{}); err != nil {
+		t.Fatalf("append(claim) = %v, want nil", err)
+	}
+
+	const total = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, total)
+	for i := 0; i < total; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			errs <- ledger.Resolve(ctx, k, OutcomeDone, "operator", "resolution "+itoa(idx))
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+
+	successes := 0
+	noOpenClaim := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+		} else if strings.Contains(err.Error(), "has no open claim") {
+			noOpenClaim++
+		} else {
+			t.Fatalf("unexpected Resolve error: %v", err)
+		}
+	}
+	if successes != 1 || noOpenClaim != 7 {
+		t.Fatalf("successes = %d, noOpenClaim = %d; want 1 and 7", successes, noOpenClaim)
+	}
+	st, err := ledger.Replay(ctx)
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	if st.EffectRecordsIgnored != 0 {
+		t.Fatalf("EffectRecordsIgnored = %d, want 0", st.EffectRecordsIgnored)
+	}
+}

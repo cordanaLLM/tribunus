@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -550,5 +551,175 @@ func TestServiceNeedsADeadline(t *testing.T) {
 	svc := testService(t)
 	if _, err := svc.Record(context.Background(), unitA, RecordPayload{Status: "ready"}); err == nil || !strings.Contains(err.Error(), "deadline") {
 		t.Fatalf("Record(no deadline) = %v, want a refusal", err)
+	}
+}
+
+// TestConcurrentRecordTerminalRace verifies that concurrent transitions from a non-terminal status
+// to conflicting terminal statuses are serialized under the lock.
+// With the check outside the lock both groups can pass on "landing" and one record is ignored.
+func TestConcurrentRecordTerminalRace(t *testing.T) {
+	svc := testService(t)
+	svc.limits.LockTimeout = time.Minute
+	ctx := testContext(t)
+	mustRecord(t, svc, unitA, RecordPayload{Status: "ready"})
+	mustRecord(t, svc, unitA, RecordPayload{Status: "claimed"})
+	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing"})
+	mustRecord(t, svc, unitA, RecordPayload{Status: "review"})
+	mustRecord(t, svc, unitA, RecordPayload{Status: "landing"})
+
+	const total = 8
+	type result struct {
+		status string
+		err    error
+	}
+	results := make([]result, total)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < total; i++ {
+		wg.Add(1)
+		targetStatus := "landed"
+		if i%2 != 0 {
+			targetStatus = "dropped"
+		}
+		go func(idx int, target string) {
+			defer wg.Done()
+			<-start
+			_, err := svc.Record(ctx, unitA, RecordPayload{Status: target})
+			results[idx] = result{status: target, err: err}
+		}(i, targetStatus)
+	}
+	close(start)
+	wg.Wait()
+
+	var winningStatus string
+	successes := 0
+	for _, res := range results {
+		if res.err == nil {
+			successes++
+			if winningStatus == "" {
+				winningStatus = res.status
+			} else if winningStatus != res.status {
+				t.Fatalf("successful call asked for %q, but winning status is %q", res.status, winningStatus)
+			}
+		} else {
+			if !strings.Contains(res.err.Error(), "pass --reopen") {
+				t.Fatalf("error for %q = %v, want error containing 'pass --reopen'", res.status, res.err)
+			}
+		}
+	}
+	if successes < 1 {
+		t.Fatalf("successes = %d, want at least 1", successes)
+	}
+
+	st, err := svc.Replay(ctx)
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	if got := st.Units[unitA].Status; got != winningStatus {
+		t.Fatalf("final status = %q, want %q", got, winningStatus)
+	}
+	if st.UnitRecordsIgnored != 0 {
+		t.Fatalf("UnitRecordsIgnored = %d, want 0", st.UnitRecordsIgnored)
+	}
+}
+
+func TestConcurrentNoteAtMaxUnreadNotesBoundary(t *testing.T) {
+	svc := testService(t)
+	svc.limits.LockTimeout = time.Minute
+	ctx := testContext(t)
+	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing"})
+	writer, err := eventlog.Open(svc.dir, svc.signer, svc.limits)
+	if err != nil {
+		t.Fatalf("eventlog.Open: %v", err)
+	}
+	for i := 0; i < MaxUnreadNotes-1; i++ {
+		ev := eventlog.Event{Type: "unit.note", TaskID: unitA, Payload: json.RawMessage(`{"from":"peer","text":"note"}`)}
+		if _, err := writer.Append(ctx, ev); err != nil {
+			t.Fatalf("setup note %d: %v", i, err)
+		}
+	}
+
+	const total = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, total)
+	for i := 0; i < total; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			_, noteErr := svc.Note(ctx, unitA, "peer", fmt.Sprintf("race-%d", idx))
+			errs <- noteErr
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+
+	successes := 0
+	alreadyHas := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+		} else if strings.Contains(err.Error(), "already has") {
+			alreadyHas++
+		} else {
+			t.Fatalf("unexpected Note error: %v", err)
+		}
+	}
+	if successes != 1 || alreadyHas != 7 {
+		t.Fatalf("successes = %d, alreadyHas = %d, want 1 and 7", successes, alreadyHas)
+	}
+	st, err := svc.Replay(ctx)
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	if st.UnitRecordsIgnored != 0 {
+		t.Fatalf("UnitRecordsIgnored = %d, want 0", st.UnitRecordsIgnored)
+	}
+	unit, err := svc.Show(ctx, unitA)
+	if err != nil {
+		t.Fatalf("Show: %v", err)
+	}
+	if len(UnreadNotes(unit)) != MaxUnreadNotes {
+		t.Fatalf("unread notes = %d, want %d", len(UnreadNotes(unit)), MaxUnreadNotes)
+	}
+}
+
+func TestConcurrentInboxOnlyOneReturnsNotes(t *testing.T) {
+	svc := testService(t)
+	ctx := testContext(t)
+	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing"})
+	if _, err := svc.Note(ctx, unitA, "peer", "first"); err != nil {
+		t.Fatalf("Note: %v", err)
+	}
+	if _, err := svc.Note(ctx, unitA, "peer", "second"); err != nil {
+		t.Fatalf("Note: %v", err)
+	}
+
+	var notesA, notesB []eventlog.UnitNote
+	var errA, errB error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		notesA, errA = svc.Inbox(ctx, unitA)
+	}()
+	go func() {
+		defer wg.Done()
+		notesB, errB = svc.Inbox(ctx, unitA)
+	}()
+	wg.Wait()
+
+	if errA != nil || errB != nil {
+		t.Fatalf("Inbox errors: A=%v, B=%v", errA, errB)
+	}
+	lenA, lenB := len(notesA), len(notesB)
+	if (lenA != 2 || lenB != 0) && (lenA != 0 || lenB != 2) {
+		t.Fatalf("got lenA=%d, lenB=%d; want one 2 and other 0", lenA, lenB)
+	}
+	st, err := svc.Replay(ctx)
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	if st.UnitRecordsIgnored != 0 {
+		t.Fatalf("UnitRecordsIgnored = %d, want 0", st.UnitRecordsIgnored)
 	}
 }

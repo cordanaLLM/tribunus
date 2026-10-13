@@ -188,9 +188,7 @@ func IsOpen(effect eventlog.Effect) bool {
 	return effect.State == StateClaimed || effect.State == StateFailed
 }
 
-// Resolve records what became of an open claim: OutcomeDone when the effect did happen,
-// OutcomeRetry when it did not and may be attempted once more. by names who decided.
-func (l *Ledger) Resolve(ctx context.Context, key Key, outcome string, by string, note string) error {
+func validateResolveParams(ctx context.Context, key Key, outcome string, by string, note string) error {
 	if err := readyContext(ctx, "resolve"); err != nil {
 		return err
 	}
@@ -206,15 +204,30 @@ func (l *Ledger) Resolve(ctx context.Context, key Key, outcome string, by string
 	if len(note) > MaxReasonBytes {
 		return fmt.Errorf("effects: the note is longer than %d bytes", MaxReasonBytes)
 	}
-	st, err := l.Replay(ctx)
-	if err != nil {
+	return nil
+}
+
+// Resolve records what became of an open claim: OutcomeDone when the effect did happen,
+// OutcomeRetry when it did not and may be attempted once more. by names who decided.
+func (l *Ledger) Resolve(ctx context.Context, key Key, outcome string, by string, note string) error {
+	if err := validateResolveParams(ctx, key, outcome, by, note); err != nil {
 		return err
 	}
-	state := st.Effects[key.String()].State
-	if state != StateClaimed && state != StateFailed {
-		return fmt.Errorf("effects: %q has no open claim to resolve", key.String())
+	raw, err := json.Marshal(payload{Outcome: outcome, By: by, Note: note, ActionType: key.ActionType})
+	if err != nil {
+		return fmt.Errorf("effects: marshal %s: %w", Resolved, err)
 	}
-	_, err = l.append(ctx, Resolved, key, payload{Outcome: outcome, By: by, Note: note})
+	_, err = l.appendChecked(ctx, func(cctx context.Context) (eventlog.Event, error) {
+		st, replayErr := l.Replay(cctx)
+		if replayErr != nil {
+			return eventlog.Event{}, replayErr
+		}
+		state := st.Effects[key.String()].State
+		if state != StateClaimed && state != StateFailed {
+			return eventlog.Event{}, fmt.Errorf("effects: %q has no open claim to resolve", key.String())
+		}
+		return eventlog.Event{Type: Resolved, TaskID: key.TaskID, Payload: raw}, nil
+	})
 	return err
 }
 
@@ -224,11 +237,17 @@ func (l *Ledger) append(ctx context.Context, typ string, key Key, body payload) 
 	if err != nil {
 		return eventlog.Record{}, fmt.Errorf("effects: marshal %s: %w", typ, err)
 	}
+	return l.appendChecked(ctx, func(context.Context) (eventlog.Event, error) {
+		return eventlog.Event{Type: typ, TaskID: key.TaskID, Payload: raw}, nil
+	})
+}
+
+func (l *Ledger) appendChecked(ctx context.Context, check func(context.Context) (eventlog.Event, error)) (eventlog.Record, error) {
 	writer, err := eventlog.Open(l.dir, l.signer, l.limits)
 	if err != nil {
 		return eventlog.Record{}, err
 	}
-	return writer.Append(ctx, eventlog.Event{Type: typ, TaskID: key.TaskID, Payload: raw})
+	return writer.AppendChecked(ctx, check)
 }
 
 func unresolved(effect eventlog.Effect) error {

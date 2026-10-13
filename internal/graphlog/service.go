@@ -82,23 +82,14 @@ func (s *Service) Show(ctx context.Context) (graph.Snapshot, int, error) {
 // raised again: a write checked against a graph that already breaks the bound would say
 // nothing about the write.
 //
-// Like the run record, the check runs outside the log's lock. A writer that appends between
-// this one's replay and its append can make the stage one the graph refuses; the replay then
-// ignores and counts it, and Show reports the count.
+// The check runs under the log's lock; a writer that got in first makes this stage refused
+// with the graph's error.
 func (s *Service) Commit(ctx context.Context, ops []graph.Event) (graph.Snapshot, error) {
 	if err := readyContext(ctx, "commit"); err != nil {
 		return graph.Snapshot{}, err
 	}
 	if err := checkOps(ops); err != nil {
 		return graph.Snapshot{}, fmt.Errorf("graphlog: %w", err)
-	}
-	current, err := s.writable(ctx)
-	if err != nil {
-		return graph.Snapshot{}, err
-	}
-	next, err := current.ApplyStage(ops)
-	if err != nil {
-		return graph.Snapshot{}, fmt.Errorf("graphlog: stage refused: %w", err)
 	}
 	body, err := json.Marshal(StagePayload{Ops: ops})
 	if err != nil {
@@ -108,7 +99,20 @@ func (s *Service) Commit(ctx context.Context, ops []graph.Event) (graph.Snapshot
 	if err != nil {
 		return graph.Snapshot{}, err
 	}
-	if _, err = writer.Append(ctx, eventlog.Event{Type: StageCommitted, Payload: body}); err != nil {
+	var next *graph.Graph
+	_, err = writer.AppendChecked(ctx, func(cctx context.Context) (eventlog.Event, error) {
+		current, wErr := s.writable(cctx)
+		if wErr != nil {
+			return eventlog.Event{}, wErr
+		}
+		applied, aErr := current.ApplyStage(ops)
+		if aErr != nil {
+			return eventlog.Event{}, fmt.Errorf("graphlog: stage refused: %w", aErr)
+		}
+		next = applied
+		return eventlog.Event{Type: StageCommitted, Payload: body}, nil
+	})
+	if err != nil {
 		return graph.Snapshot{}, err
 	}
 	return next.Snapshot()

@@ -3,6 +3,7 @@ package eventlog
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -177,7 +178,7 @@ func checkRecordLinks(rec Record, expected uint64, prev string, path string) err
 func (r replayRun) readHead() (head, bool, error) {
 	path := filepath.Join(r.eventsDir, "HEAD.json")
 	data, err := readFileBounded(path, r.limits.MaxRecordBytes)
-	if os.IsNotExist(err) {
+	if errors.Is(err, os.ErrNotExist) {
 		return head{}, false, nil
 	}
 	if err != nil {

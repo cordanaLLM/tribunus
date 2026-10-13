@@ -782,3 +782,137 @@ func TestCloseWithCauseAndRemoveTemp(t *testing.T) {
 		}
 	})
 }
+
+func TestAppendCheckedPositive(t *testing.T) {
+	dir, signer, limits := testLog(t)
+	writer := openWriter(t, dir, signer, limits)
+	ctx := testContext(t)
+	rec, err := writer.AppendChecked(ctx, func(context.Context) (Event, error) {
+		return Event{Type: "task.created", TaskID: "task-1", Payload: raw(`{"state":"open"}`)}, nil
+	})
+	if err != nil {
+		t.Fatalf("AppendChecked() = %v, want nil", err)
+	}
+	if rec.Seq != 1 {
+		t.Fatalf("rec.Seq = %d, want 1", rec.Seq)
+	}
+	st := replayTasks(t, dir, signer.PublicKey(), limits)
+	if st.Tasks["task-1"].State != "open" {
+		t.Fatalf("replayed task state = %q, want open", st.Tasks["task-1"].State)
+	}
+}
+
+func TestAppendCheckedNegativeCheckErrorLeavesLogUnchanged(t *testing.T) {
+	dir, signer, limits := testLog(t)
+	writer := openWriter(t, dir, signer, limits)
+	ctx := testContext(t)
+	sentinel := errors.New("check refused")
+	_, err := writer.AppendChecked(ctx, func(context.Context) (Event, error) {
+		return Event{}, sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("AppendChecked() error = %v, want sentinel %v", err, sentinel)
+	}
+	seqs := eventSeqs(t, eventsDir(dir))
+	if len(seqs) != 0 {
+		t.Fatalf("records in events dir = %v, want empty", seqs)
+	}
+	headPath := filepath.Join(eventsDir(dir), "HEAD.json")
+	if _, err := os.Stat(headPath); !os.IsNotExist(err) {
+		t.Fatalf("HEAD.json exists after refused check: %v", err)
+	}
+}
+
+func TestAppendCheckedNilCheckRefused(t *testing.T) {
+	dir, signer, limits := testLog(t)
+	writer := openWriter(t, dir, signer, limits)
+	ctx := testContext(t)
+	_, err := writer.AppendChecked(ctx, nil)
+	assertErrContains(t, err, "check function is required")
+}
+
+// TestAppendCheckedRaceSerialization verifies that check closures are serialized by the lock.
+// Writer A enters its check, signals aEntered, and starts writer B. Writer A waits up to 300ms.
+// Because the lock is held by writer A, writer B's check cannot run until A finishes and commits.
+// With a check outside the lock, B enters at once while A waits, sees an empty log (seq 0), and the test fails.
+func TestAppendCheckedRaceSerialization(t *testing.T) {
+	dir, signer, limits := testLog(t)
+	limits.LockTimeout = 5 * time.Second
+	writerA := openWriter(t, dir, signer, limits)
+	writerB := openWriter(t, dir, signer, limits)
+	ctx := testContext(t)
+	if err := os.MkdirAll(eventsDir(dir), 0o750); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	aEntered := make(chan struct{})
+	bEntered := make(chan struct{})
+	var bSawSeqs int
+	var bErr error
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-aEntered
+		_, bErr = writerB.AppendChecked(ctx, func(cctx context.Context) (Event, error) {
+			close(bEntered)
+			st, replayErr := Replay(cctx, dir, signer.PublicKey(), limits, TaskReducer)
+			if replayErr != nil {
+				return Event{}, replayErr
+			}
+			bSawSeqs = len(st.Tasks)
+			if bSawSeqs != 1 {
+				return Event{}, fmt.Errorf("check B observed %d records, want 1", bSawSeqs)
+			}
+			return Event{Type: "task.created", TaskID: "task-b", Payload: raw(`{"state":"open"}`)}, nil
+		})
+	}()
+
+	recA, errA := writerA.AppendChecked(ctx, func(context.Context) (Event, error) {
+		close(aEntered)
+		select {
+		case <-bEntered:
+		case <-time.After(300 * time.Millisecond):
+		}
+		return Event{Type: "task.created", TaskID: "task-a", Payload: raw(`{"state":"open"}`)}, nil
+	})
+	if errA != nil {
+		t.Fatalf("writer A AppendChecked() = %v, want nil", errA)
+	}
+	if recA.Seq != 1 {
+		t.Fatalf("recA.Seq = %d, want 1", recA.Seq)
+	}
+
+	wg.Wait()
+	if bErr != nil {
+		t.Fatalf("writer B AppendChecked() = %v, want nil", bErr)
+	}
+	if bSawSeqs != 1 {
+		t.Fatalf("B observed %d records, want 1 (must run after A commits under lock)", bSawSeqs)
+	}
+}
+
+func TestReplayEmptyEventsDir(t *testing.T) {
+	dir, signer, limits := testLog(t)
+	if err := os.MkdirAll(eventsDir(dir), 0o750); err != nil {
+		t.Fatalf("MkdirAll(eventsDir) = %v, want nil", err)
+	}
+	st, err := Replay(testContext(t), dir, signer.PublicKey(), limits, TaskReducer)
+	if err != nil {
+		t.Fatalf("Replay(empty events dir) = %v, want nil", err)
+	}
+	if len(st.Tasks) != 0 {
+		t.Fatalf("len(st.Tasks) = %d, want 0", len(st.Tasks))
+	}
+
+	// Boundary twin: events dir holding a record file but no HEAD.json still fails with "missing HEAD".
+	dir2, signer2, limits2 := testLog(t)
+	appendEvent(t, dir2, signer2, limits2, Event{Type: "task.created", TaskID: "task-1", Payload: raw(`{"state":"open"}`)})
+	headPath := filepath.Join(eventsDir(dir2), "HEAD.json")
+	if err := os.Remove(headPath); err != nil {
+		t.Fatalf("Remove(HEAD.json) = %v, want nil", err)
+	}
+	_, err = Replay(testContext(t), dir2, signer2.PublicKey(), limits2, TaskReducer)
+	assertErrContains(t, err, "missing HEAD")
+}

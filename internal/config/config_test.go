@@ -943,3 +943,36 @@ func TestLoadRefusesARouterAliasNotInRouterAliases(t *testing.T) {
 		}
 	})
 }
+
+func TestValidateNtfySink(t *testing.T) {
+	for _, p := range []int{1, 5} {
+		sink := &NtfySink{Topic: "valid-topic_1.0", Priority: p}
+		if err := validateNtfySink("route-a", 0, sink); err != nil {
+			t.Fatalf("validateNtfySink(priority=%d) = %v, want nil", p, err)
+		}
+	}
+
+	for _, p := range []int{0, 6} {
+		sink := &NtfySink{Topic: "valid-topic", Priority: p}
+		err := validateNtfySink("route-a", 0, sink)
+		if err == nil || !strings.Contains(err.Error(), "must be 1..5") {
+			t.Fatalf("validateNtfySink(priority=%d) = %v, want 'must be 1..5'", p, err)
+		}
+	}
+
+	for _, topic := range []string{"", "   "} {
+		sink := &NtfySink{Topic: topic, Priority: 3}
+		err := validateNtfySink("route-a", 0, sink)
+		if err == nil || !strings.Contains(err.Error(), "topic: required") {
+			t.Fatalf("validateNtfySink(topic=%q) = %v, want 'topic: required'", topic, err)
+		}
+	}
+
+	for _, topic := range []string{"topic with spaces", "topic/slash", "topic#hash", "topic@at"} {
+		sink := &NtfySink{Topic: topic, Priority: 3}
+		err := validateNtfySink("route-a", 0, sink)
+		if err == nil || !strings.Contains(err.Error(), "invalid topic") {
+			t.Fatalf("validateNtfySink(topic=%q) = %v, want 'invalid topic'", topic, err)
+		}
+	}
+}

@@ -1,0 +1,150 @@
+name: Platforms
+
+# The go job in ci.yml tests linux/amd64 with the Go version go.mod names, and
+# only vets the other platforms. A release ships six targets (linux, darwin and
+# windows on amd64 and arm64), and the docs promise that version or newer.
+# This workflow runs the tests on the five other targets' runners and on the
+# newest stable Go, so code that builds only on Linux, or a test that passes
+# only there, shows before a release does. A change that touches nothing but
+# other files under .github runs no test, so the trigger is path-filtered and
+# the legs are not required checks: a failing leg shows on the pull request
+# but does not block its merge.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**'
+      - '!.github/**'
+      - '.github/workflows/platforms.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '**'
+      - '!.github/**'
+      - '.github/workflows/platforms.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: go test (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux/arm64
+            target: linux/arm64
+            runner: ubuntu-26.04-arm
+            go: go.mod
+            sandbox: true
+          - name: darwin/arm64
+            target: darwin/arm64
+            runner: macos-26
+            go: go.mod
+          - name: darwin/amd64
+            target: darwin/amd64
+            runner: macos-26-intel
+            go: go.mod
+          - name: windows/amd64
+            target: windows/amd64
+            runner: windows-2025
+            go: go.mod
+          - name: windows/arm64
+            target: windows/arm64
+            runner: windows-11-arm
+            go: go.mod
+          - name: linux/amd64, newest stable Go
+            target: linux/amd64
+            runner: ubuntu-26.04
+            go: stable
+            sandbox: true
+    env:
+      # The toolchain setup-go installed runs the tests. Without this, a go.mod
+      # that asked for a newer toolchain would download it, and the stable leg
+      # would test that one instead.
+      GOTOOLCHAIN: local
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        if: matrix.go == 'go.mod'
+        with:
+          go-version-file: 'go.mod'
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        if: matrix.go == 'stable'
+        with:
+          go-version: stable
+      - name: Sandbox runner dependencies
+        # The same setup as the go job in ci.yml: Ubuntu restricts unprivileged user
+        # namespaces, which bwrap needs, through AppArmor.
+        if: matrix.sandbox
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap passt
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # A runner label that resolves to another platform would test the wrong
+      # target without an error, so the target is checked.
+      - name: Go version and target
+        env:
+          WANT: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          go version
+          got="$(go env GOOS)/$(go env GOARCH)"
+          if [ "$got" != "$WANT" ]; then
+            echo "::error::this runner builds for $got, want $WANT"
+            exit 1
+          fi
+      # Verbose, as in ci.yml: a skipped test shows with its reason.
+      # On Windows, 9 packages fail today; issue #152 ports them. The Windows
+      # legs skip those and test every other package, so a new package is
+      # tested there at once. A skip entry that names no package fails the
+      # step, so the list cannot outlive a rename. A ported package leaves the
+      # list and runs again.
+      - name: go test
+        run: |
+          set -euo pipefail
+          skip=()
+          if [ "$RUNNER_OS" = Windows ]; then
+            skip=(
+              cmd/epitropctl
+              internal/config
+              internal/effects
+              internal/egressproxy
+              internal/eventlog
+              internal/graphlog
+              internal/slot
+              internal/sources
+              internal/units
+            )
+          fi
+          module="$(go list -m)"
+          all="$(go list ./...)"
+          for s in ${skip[@]+"${skip[@]}"}; do
+            if ! printf '%s\n' "$all" | grep -qxF "$module/$s"; then
+              echo "::error::the skip list names $s, which is no package"
+              exit 1
+            fi
+          done
+          pkgs=()
+          while IFS= read -r p; do
+            skipped=false
+            for s in ${skip[@]+"${skip[@]}"}; do
+              if [ "$p" = "$module/$s" ]; then
+                skipped=true
+              fi
+            done
+            if [ "$skipped" = true ]; then
+              echo "not tested on $RUNNER_OS, issue #152: $p"
+            else
+              pkgs+=("$p")
+            fi
+          done <<< "$all"
+          go test -v "${pkgs[@]}"

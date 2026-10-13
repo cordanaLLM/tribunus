@@ -13,7 +13,7 @@ env:
   # The Praetor engine this repository runs: the Git hooks install exactly this commit, and
   # tools/go/go.mod pins the same commit for the gates below. Move both together, with a
   # re-adopt (praetorctl adopt).
-  PRAETOR_REF: 6622361940dc66399d027f3a203884bce2f616ac
+  PRAETOR_REF: 3bbde07342bdece12c46f74b0ee2c1f51129478f
 
 jobs:
   # The required check. Every gate here runs offline; the tools come from
@@ -87,6 +87,11 @@ jobs:
           go test -race -v -tags schemasrefresh ./tools/schemas/
       - name: golangci-lint
         run: go tool -modfile=tools/go/go.mod golangci-lint run ./...
+      # HISS-12: no credential anywhere in Git history, not only in the tree (the checkout
+      # above fetches all of it). gitleaks has a tool module of its own because its
+      # dependencies conflict with golangci-lint's in tools/go.
+      - name: gitleaks (full history)
+        run: go tool -modfile=tools/gitleaks/go.mod gitleaks git --no-banner --redact .
       - name: HISS scan (praetorctl audit)
         run: go tool -modfile=tools/go/go.mod standardsctl audit --offline
       # govulncheck runs through praetorctl so security/vex/go.openvex.json is

@@ -706,7 +706,7 @@ func TestCloseWithCauseAndRemoveTemp(t *testing.T) {
 	t.Run("removeTemp ignores missing temp file", func(t *testing.T) {
 		cause := errors.New("my-cause")
 		gotErr := removeTemp(filepath.Join(t.TempDir(), "nonexistent"), cause)
-		if gotErr != cause {
+		if !errors.Is(gotErr, cause) || gotErr.Error() != cause.Error() {
 			t.Fatalf("removeTemp() = %v, want the cause alone: %v", gotErr, cause)
 		}
 	})

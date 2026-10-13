@@ -79,6 +79,10 @@ jobs:
       # runner's systemd version and how long a job took to enter its scope. A sandbox test
       # that finds no systemd user scope here fails; it skips only outside CI.
       - run: go test -race -v ./...
+      # go test runs no benchmark. One pass of each keeps them building and running; a pass
+      # fails only on an error, such as a queued event log writer that hit its lock timeout.
+      - name: Benchmarks, one pass each
+        run: go test -run '^$' -bench . -benchtime=1x ./...
       # tools/schemas builds only with the schemasrefresh tag, so ./... above sees a
       # placeholder with no tests: its extractor tests would run nowhere.
       - name: go vet and go test for tools/schemas (tag schemasrefresh)

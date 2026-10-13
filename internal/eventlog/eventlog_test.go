@@ -173,7 +173,7 @@ func slowSync(t *testing.T, d time.Duration) {
 }
 
 // appendConcurrently starts total writers at once, one record each, and returns their results.
-func appendConcurrently(t *testing.T, dir string, signer *corereceipt.Signer, limits Limits, total int) []error {
+func appendConcurrently(t testing.TB, dir string, signer *corereceipt.Signer, limits Limits, total int) []error {
 	t.Helper()
 	var wg sync.WaitGroup
 	errs := make(chan error, total)
@@ -196,7 +196,7 @@ func appendConcurrently(t *testing.T, dir string, signer *corereceipt.Signer, li
 }
 
 // requireContiguous fails unless the log holds exactly the records 1 to want.
-func requireContiguous(t *testing.T, dir string, want int) {
+func requireContiguous(t testing.TB, dir string, want int) {
 	t.Helper()
 	seqs := eventSeqs(t, eventsDir(dir))
 	if len(seqs) != want {
@@ -220,6 +220,33 @@ func TestConcurrentAppendersContiguous(t *testing.T) {
 		}
 	}
 	requireContiguous(t, dir, total)
+}
+
+// BenchmarkQueuedAppenders measures the queue the lock timeout has to cover: sixteen writers
+// start at once on a fresh log, one record each, on the disk that holds the temporary
+// directory. ns/append is the time the whole queue took divided by the writers, the figure
+// docs/architecture-v2.md quotes. A benchmark measures and asserts no speed; it fails only
+// when a writer times out or the log has a gap.
+func BenchmarkQueuedAppenders(b *testing.B) {
+	const writers = 16
+	limits := testLimits()
+	limits.LockTimeout = testQueueLockTimeout
+	signer := testSigner(b, testSeed(), limits.Clock)
+	for b.Loop() {
+		b.StopTimer()
+		dir := b.TempDir()
+		b.StartTimer()
+		errs := appendConcurrently(b, dir, signer, limits, writers)
+		b.StopTimer()
+		for i := 0; i < len(errs); i++ {
+			if errs[i] != nil {
+				b.Fatalf("queued Append() = %v, want nil", errs[i])
+			}
+		}
+		requireContiguous(b, dir, writers)
+		b.StartTimer()
+	}
+	b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*writers), "ns/append")
 }
 
 // On a disk where a sync is slow, a lock timeout that covers the queue lets every writer
@@ -329,7 +356,7 @@ func TestUnknownEventTypeFailsWithPosition(t *testing.T) {
 	assertErrContains(t, err, "seq 1", "unknown event type")
 }
 
-func testLog(t *testing.T) (string, *corereceipt.Signer, Limits) {
+func testLog(t testing.TB) (string, *corereceipt.Signer, Limits) {
 	t.Helper()
 	limits := testLimits()
 	return t.TempDir(), testSigner(t, testSeed(), limits.Clock), limits
@@ -339,7 +366,7 @@ func testLimits() Limits {
 	return Limits{Clock: clock.NewFake(), LockTimeout: time.Second, MaxReplayRecords: 1000, MaxRecordBytes: MaxRecordBytes}
 }
 
-func testSigner(t *testing.T, seed []byte, clk clock.Clock) *corereceipt.Signer {
+func testSigner(t testing.TB, seed []byte, clk clock.Clock) *corereceipt.Signer {
 	t.Helper()
 	signer, err := corereceipt.NewSignerFromSeed(seed, clk)
 	if err != nil {
@@ -356,7 +383,7 @@ func testSeed() []byte {
 	return seed
 }
 
-func openWriter(t *testing.T, dir string, signer *corereceipt.Signer, limits Limits) *Writer {
+func openWriter(t testing.TB, dir string, signer *corereceipt.Signer, limits Limits) *Writer {
 	t.Helper()
 	writer, err := Open(dir, signer, limits)
 	if err != nil {
@@ -392,7 +419,7 @@ func replayStateBytes(t *testing.T, dir string, pub string, limits Limits) []byt
 	return out
 }
 
-func testContext(t *testing.T) context.Context {
+func testContext(t testing.TB) context.Context {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	t.Cleanup(cancel)
@@ -438,7 +465,7 @@ func assertErrContains(t *testing.T, err error, parts ...string) {
 	}
 }
 
-func eventSeqs(t *testing.T, dir string) []uint64 {
+func eventSeqs(t testing.TB, dir string) []uint64 {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
 	if err != nil {

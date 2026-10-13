@@ -71,6 +71,13 @@ func TestRunJobsActionRejectsParseNameLoadAndNewErrors(t *testing.T) {
 
 func TestRunJobsActionStatusWithLoadedConfig(t *testing.T) {
 	cfgPath := writeJobsConfig(t, "valid-key")
+	if runtime.GOOS != "linux" {
+		// The supervisor runs on Linux only; elsewhere status must say so instead of printing rows.
+		if err := runJobsAction("status", []string{"--config", cfgPath, "idle"}); !errors.Is(err, supervisor.ErrNotSupported) {
+			t.Fatalf("runJobsAction(status loaded) on %s = %v, want supervisor.ErrNotSupported", runtime.GOOS, err)
+		}
+		return
+	}
 	out := captureStdout(t, func() {
 		if err := runJobsAction("status", []string{"--config", cfgPath, "idle"}); err != nil {
 			t.Fatalf("runJobsAction(status loaded) = %v, want nil", err)

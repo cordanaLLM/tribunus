@@ -1,0 +1,4 @@
+type: changed
+title: 'Known limitation: on Windows, appending to the event log fails when it syncs the events directory, so the `epitropctl` commands that write the event log fail there; the port is tracked in #152'
+issue: "152"
+breaking: false

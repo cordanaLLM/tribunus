@@ -27,6 +27,9 @@ func TestFetch_Positive(t *testing.T) {
 	if res.Count != 2 { // 1 openrouter + 1 litellm-prices
 		t.Fatalf("Count = %d, want 2", res.Count)
 	}
+	if !strings.HasPrefix(res.Detail, "openrouter: ok (1);") {
+		t.Fatalf("Detail = %q, want it to start with %q", res.Detail, "openrouter: ok (1);")
+	}
 }
 
 // TestFetch_Negative confirms one sub-source's total failure does not hide
@@ -127,5 +130,55 @@ func TestLiteLLMDetailReportsMalformedEntries(t *testing.T) {
 	})
 	if !strings.Contains(got, "malformed=1") {
 		t.Fatalf("liteLLMDetail() = %q, want malformed=1", got)
+	}
+}
+
+func TestFetch_ReportsRejectedOpenRouterRecords(t *testing.T) {
+	payloadNoID := `{"data":[{"id":"openai/gpt-4","context_length":8192},{"id":""}]}`
+	orNoID := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := w.Write([]byte(payloadNoID)); err != nil {
+			t.Errorf("write stand-in response: %v", err)
+		}
+	}))
+	defer orNoID.Close()
+
+	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := w.Write([]byte(sampleLiteLLMPrices)); err != nil {
+			t.Errorf("write stand-in response: %v", err)
+		}
+	}))
+	defer llm.Close()
+
+	res := Fetch(context.Background(), orNoID.URL, llm.URL)
+	if res.Status != catalog.StatusDegraded {
+		t.Fatalf("Status = %v, want degraded", res.Status)
+	}
+	if res.Count != 2 {
+		t.Fatalf("Count = %d, want 2", res.Count)
+	}
+	wantDetail := "openrouter: ok (1, rejected=1)"
+	if !strings.Contains(res.Detail, wantDetail) {
+		t.Fatalf("Detail = %q, want to contain %q", res.Detail, wantDetail)
+	}
+
+	mods := `"text","image","audio","video","file","a6","a7","a8","a9","a10","a11","a12","a13","a14","a15","a16","a17"`
+	payloadWithErr := `{"data":[{"id":"openai/gpt-4","context_length":8192},{"id":"bad/model","architecture":{"input_modalities":[` + mods + `]}}]}`
+	orWithErr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := w.Write([]byte(payloadWithErr)); err != nil {
+			t.Errorf("write stand-in response: %v", err)
+		}
+	}))
+	defer orWithErr.Close()
+
+	res2 := Fetch(context.Background(), orWithErr.URL, llm.URL)
+	if res2.Status != catalog.StatusDegraded {
+		t.Fatalf("Status = %v, want degraded", res2.Status)
+	}
+	if res2.Count != 2 {
+		t.Fatalf("Count = %d, want 2", res2.Count)
+	}
+	wantDetail2 := "openrouter: ok (1, rejected=1, first: openrouter: bad/model input_modalities: lists more than 16 entries)"
+	if !strings.Contains(res2.Detail, wantDetail2) {
+		t.Fatalf("Detail = %q, want to contain %q", res2.Detail, wantDetail2)
 	}
 }

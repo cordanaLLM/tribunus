@@ -125,3 +125,44 @@ func TestRunEffectsRefusals(t *testing.T) {
 		t.Fatalf("list after the refusals = %q, %v; want it unchanged %q", after, err, before)
 	}
 }
+
+func TestRunEffectsListWarnings(t *testing.T) {
+	cfg, _, writer, ctx := effectsLog(t)
+
+	_, errOut, err := effectsRun(t, "list", "--config", cfg)
+	if err != nil || errOut != "" {
+		t.Fatalf("list(empty) = %q, %v, want empty stderr", errOut, err)
+	}
+
+	claimPayload := []byte(`{"action_type":"file-issue"}`)
+	if _, err := writer.Append(ctx, eventlog.Event{Type: effects.Claimed, TaskID: "task-open", Payload: claimPayload}); err != nil {
+		t.Fatalf("Append(claim) = %v", err)
+	}
+	_, errOut, err = effectsRun(t, "list", "--config", cfg)
+	if err != nil {
+		t.Fatalf("list = %v", err)
+	}
+	wantOpenLine := "effects: 1 open claim(s): each blocks its key until `effects resolve` records what became of it\n"
+	if errOut != wantOpenLine {
+		t.Fatalf("stderr = %q, want exact open warning %q", errOut, wantOpenLine)
+	}
+
+	if _, err := writer.Append(ctx, eventlog.Event{Type: effects.Claimed, TaskID: "task-open", Payload: claimPayload}); err != nil {
+		t.Fatalf("Append(duplicate claim) = %v", err)
+	}
+	wantBoth := wantOpenLine + "effects: replay did not apply 1 effect record(s) that lost a race\n"
+	_, errOut, err = effectsRun(t, "list", "--config", cfg)
+	if err != nil || errOut != wantBoth {
+		t.Fatalf("stderr = %q, want exact both warnings %q", errOut, wantBoth)
+	}
+
+	donePayload := []byte(`{"action_type":"file-issue","claim_seq":1}`)
+	if _, err := writer.Append(ctx, eventlog.Event{Type: effects.Done, TaskID: "task-open", Payload: donePayload}); err != nil {
+		t.Fatalf("Append(done) = %v", err)
+	}
+	wantIgnoredOnly := "effects: replay did not apply 1 effect record(s) that lost a race\n"
+	_, errOut, err = effectsRun(t, "list", "--config", cfg)
+	if err != nil || errOut != wantIgnoredOnly {
+		t.Fatalf("stderr = %q, want exact ignored warning %q", errOut, wantIgnoredOnly)
+	}
+}

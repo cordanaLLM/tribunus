@@ -657,3 +657,41 @@ func TestExportedStatusVocabulary(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoveEdge(t *testing.T) {
+	g := graphWithNodes(t, 12, "a", "b")
+	edge := Edge{NodeID: "b", DependsOn: "a"}
+	commitStage(t, g, func(stage *Stage) {
+		stage.AddEdge(edge)
+	})
+
+	commitStage(t, g, func(stage *Stage) {
+		stage.RemoveEdge(edge)
+	})
+	snap, err := g.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot() = %v, want nil", err)
+	}
+	for i := 0; i < len(snap.Nodes); i++ {
+		if snap.Nodes[i].ID == "b" && len(snap.Nodes[i].DependsOn) != 0 {
+			t.Fatalf("node b DependsOn = %v, want empty after edge removal", snap.Nodes[i].DependsOn)
+		}
+	}
+
+	missingEdge := Edge{NodeID: "b", DependsOn: "a"}
+	err = commitErr(g, func(stage *Stage) {
+		stage.RemoveEdge(missingEdge)
+	})
+	wantErr := `graph: edge "b" depends_on "a" is missing`
+	if err == nil || err.Error() != wantErr {
+		t.Fatalf("commitErr(missing edge) = %v, want %q", err, wantErr)
+	}
+
+	err = commitErr(g, func(stage *Stage) {
+		stage.RemoveEdge(Edge{NodeID: "x", DependsOn: "y"})
+	})
+	wantNonExistent := `graph: edge "x" depends_on "y" is missing`
+	if err == nil || err.Error() != wantNonExistent {
+		t.Fatalf("commitErr(nonexistent nodes edge) = %v, want %q", err, wantNonExistent)
+	}
+}

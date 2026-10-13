@@ -3,12 +3,15 @@ package publiccatalog
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/golusoris/golusoris/httpx/client"
 )
 
 const sampleOpenRouter = `{"data":[{"id":"openai/gpt-4","name":"GPT-4","context_length":8192,"architecture":{"input_modalities":["text"],"output_modalities":["text"]},"pricing":{"prompt":"0.00003","completion":"0.00006"}}]}`
@@ -208,4 +211,69 @@ func TestFetchOpenRouter_OversizedModalitiesRejectOnlyThatEntry(t *testing.T) {
 	if res.Rejected != 1 {
 		t.Fatalf("Rejected = %d, want 1", res.Rejected)
 	}
+}
+
+func TestFetchOpenRouter_ResponseCap(t *testing.T) {
+	serve := func(size int) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			prefix := `{"data":[{"id":"m"}]}`
+			body := []byte(prefix + strings.Repeat(" ", size-len(prefix)))
+			if _, err := w.Write(body); err != nil {
+				t.Errorf("write stand-in response: %v", err)
+			}
+		}))
+	}
+
+	t.Run("exactly at cap", func(t *testing.T) {
+		server := serve(maxResponseBytes)
+		defer server.Close()
+		records, err := fetchOpenRouter(context.Background(), server.URL)
+		if err != nil {
+			t.Fatalf("fetchOpenRouter() = %v, want success at cap", err)
+		}
+		if len(records) != 1 {
+			t.Fatalf("records count = %d, want 1", len(records))
+		}
+	})
+
+	t.Run("one byte over cap", func(t *testing.T) {
+		server := serve(maxResponseBytes + 1)
+		defer server.Close()
+		_, err := fetchOpenRouter(context.Background(), server.URL)
+		if !errors.Is(err, client.ErrBodyTooLarge) {
+			t.Fatalf("fetchOpenRouter() err = %v, want ErrBodyTooLarge", err)
+		}
+	})
+}
+
+func buildOpenRouterDataJSON(count int) []byte {
+	var b strings.Builder
+	b.WriteString(`{"data":[`)
+	for i := 0; i < count; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(`{"id":"m"}`)
+	}
+	b.WriteString(`]}`)
+	return []byte(b.String())
+}
+
+func TestFetchOpenRouter_RecordCap(t *testing.T) {
+	t.Run("4999 pass", func(t *testing.T) {
+		res, err := fetchOpenRouterFromBytes(buildOpenRouterDataJSON(MaxOpenRouterRecords))
+		if err != nil {
+			t.Fatalf("fetchOpenRouterFromBytes() = %v, want nil error", err)
+		}
+		if len(res.Records) != MaxOpenRouterRecords {
+			t.Fatalf("len(res.Records) = %d, want %d", len(res.Records), MaxOpenRouterRecords)
+		}
+	})
+
+	t.Run("5000 fail", func(t *testing.T) {
+		_, err := fetchOpenRouterFromBytes(buildOpenRouterDataJSON(MaxOpenRouterRecords + 1))
+		if err == nil || !strings.Contains(err.Error(), "lists more than") {
+			t.Fatalf("fetchOpenRouterFromBytes() err = %v, want 'lists more than'", err)
+		}
+	})
 }

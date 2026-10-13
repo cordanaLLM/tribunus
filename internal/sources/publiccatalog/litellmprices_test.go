@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/golusoris/golusoris/httpx/client"
 )
 
 // sampleLiteLLMPrices mirrors what GET on the real price map returned live
@@ -160,4 +164,69 @@ func TestFetchLiteLLMPrices_Boundary(t *testing.T) {
 	if len(records) != 1 || records[0].ContextWindow == nil || *records[0].ContextWindow != 4096 {
 		t.Fatalf("records = %+v, want one record with ContextWindow=4096 from the max_tokens fallback", records)
 	}
+}
+
+func TestFetchLiteLLMPrices_ResponseCap(t *testing.T) {
+	serve := func(size int) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			prefix := `{"m":{"litellm_provider":"openai"}}`
+			body := []byte(prefix + strings.Repeat(" ", size-len(prefix)))
+			if _, err := w.Write(body); err != nil {
+				t.Errorf("write stand-in response: %v", err)
+			}
+		}))
+	}
+
+	t.Run("exactly at cap", func(t *testing.T) {
+		server := serve(maxResponseBytes)
+		defer server.Close()
+		records, err := fetchLiteLLMPrices(context.Background(), server.URL)
+		if err != nil {
+			t.Fatalf("fetchLiteLLMPrices() = %v, want success at cap", err)
+		}
+		if len(records) != 1 {
+			t.Fatalf("records count = %d, want 1", len(records))
+		}
+	})
+
+	t.Run("one byte over cap", func(t *testing.T) {
+		server := serve(maxResponseBytes + 1)
+		defer server.Close()
+		_, err := fetchLiteLLMPrices(context.Background(), server.URL)
+		if !errors.Is(err, client.ErrBodyTooLarge) {
+			t.Fatalf("fetchLiteLLMPrices() err = %v, want ErrBodyTooLarge", err)
+		}
+	})
+}
+
+func buildLiteLLMPriceMapJSON(count int) []byte {
+	var b strings.Builder
+	b.WriteString(`{`)
+	for i := 0; i < count; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, `"m%d":{"litellm_provider":"openai"}`, i)
+	}
+	b.WriteString(`}`)
+	return []byte(b.String())
+}
+
+func TestFetchLiteLLMPrices_RecordCap(t *testing.T) {
+	t.Run("4999 pass", func(t *testing.T) {
+		res, err := fetchLiteLLMPricesFromBytes(buildLiteLLMPriceMapJSON(MaxLiteLLMPriceRecords))
+		if err != nil {
+			t.Fatalf("fetchLiteLLMPricesFromBytes() = %v, want nil error", err)
+		}
+		if len(res.Records) != MaxLiteLLMPriceRecords {
+			t.Fatalf("len(res.Records) = %d, want %d", len(res.Records), MaxLiteLLMPriceRecords)
+		}
+	})
+
+	t.Run("5000 fail", func(t *testing.T) {
+		_, err := fetchLiteLLMPricesFromBytes(buildLiteLLMPriceMapJSON(MaxLiteLLMPriceRecords + 1))
+		if err == nil || !strings.Contains(err.Error(), "lists more than") {
+			t.Fatalf("fetchLiteLLMPricesFromBytes() err = %v, want 'lists more than'", err)
+		}
+	})
 }

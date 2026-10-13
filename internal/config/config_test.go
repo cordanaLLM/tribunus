@@ -885,6 +885,65 @@ func TestReleaseWatchBoundaryArrayCaps(t *testing.T) {
 	}
 }
 
+func TestLoadRefusesARouterAliasOutsideThePattern(t *testing.T) {
+	bad := []string{"openai/gpt-4", "cordana/", "cordana/Auto", "cordana/9x"}
+	for _, alias := range bad {
+		t.Run("job_"+alias, func(t *testing.T) {
+			body := fmt.Sprintf(`{"jobs":[{"name":"j","command":["/bin/true"],"log_path":"/tmp/j.log","router_alias":%q,"sandbox":{"mode":"off","reason":"test"}}]}`, alias)
+			_, err := Load(testContext(t), writeConfig(t, body))
+			if err == nil || !strings.Contains(err.Error(), "pattern") {
+				t.Fatalf("Load(job router_alias %q) err = %v, want pattern failure", alias, err)
+			}
+		})
+		t.Run("watch_"+alias, func(t *testing.T) {
+			body := fmt.Sprintf(`{"watches":[{"name":"w","trigger":"event","router_alias":%q}]}`, alias)
+			_, err := Load(testContext(t), writeConfig(t, body))
+			if err == nil || !strings.Contains(err.Error(), "pattern") {
+				t.Fatalf("Load(watch router_alias %q) err = %v, want pattern failure", alias, err)
+			}
+		})
+	}
+	t.Run("boundary_cordana_a", func(t *testing.T) {
+		body := `{"jobs":[{"name":"j","command":["/bin/true"],"log_path":"/tmp/j.log","router_alias":"cordana/a","sandbox":{"mode":"off","reason":"test"}}],"watches":[{"name":"w","trigger":"event","router_alias":"cordana/a"}],"router":{"aliases":["cordana/a"]}}`
+		if _, err := Load(testContext(t), writeConfig(t, body)); err != nil {
+			t.Fatalf("Load(boundary cordana/a) = %v, want nil error", err)
+		}
+	})
+}
+
+func TestLoadRefusesARouterAliasNotInRouterAliases(t *testing.T) {
+	t.Run("listed alias passes", func(t *testing.T) {
+		body := `{"jobs":[{"name":"j","command":["/bin/true"],"log_path":"/tmp/j.log","router_alias":"cordana/coding","sandbox":{"mode":"off","reason":"test"}}],"watches":[{"name":"w","trigger":"event","router_alias":"cordana/coding"}],"router":{"aliases":["cordana/coding"]}}`
+		if _, err := Load(testContext(t), writeConfig(t, body)); err != nil {
+			t.Fatalf("Load() = %v, want nil", err)
+		}
+	})
+	t.Run("unlisted job alias fails", func(t *testing.T) {
+		body := `{"jobs":[{"name":"j","command":["/bin/true"],"log_path":"/tmp/j.log","router_alias":"cordana/coding","sandbox":{"mode":"off","reason":"test"}}],"router":{"aliases":["cordana/auto"]}}`
+		_, err := Load(testContext(t), writeConfig(t, body))
+		wantErr := `config: job "j" router_alias "cordana/coding" is not listed in router.aliases`
+		if err == nil || !strings.Contains(err.Error(), wantErr) {
+			t.Fatalf("Load() = %v, want error %q", err, wantErr)
+		}
+	})
+	t.Run("unlisted watch alias fails", func(t *testing.T) {
+		body := `{"watches":[{"name":"w","trigger":"event","router_alias":"cordana/coding"}],"router":{"aliases":["cordana/auto"]}}`
+		_, err := Load(testContext(t), writeConfig(t, body))
+		wantErr := `config: watch "w" router_alias "cordana/coding" is not listed in router.aliases`
+		if err == nil || !strings.Contains(err.Error(), wantErr) {
+			t.Fatalf("Load() = %v, want error %q", err, wantErr)
+		}
+	})
+	t.Run("defaulted job alias with router.aliases missing cordana/auto fails", func(t *testing.T) {
+		body := `{"jobs":[{"name":"j","command":["/bin/true"],"log_path":"/tmp/j.log","sandbox":{"mode":"off","reason":"test"}}],"router":{"aliases":["cordana/custom"]}}`
+		_, err := Load(testContext(t), writeConfig(t, body))
+		wantErr := `config: job "j" router_alias "cordana/auto" is not listed in router.aliases`
+		if err == nil || !strings.Contains(err.Error(), wantErr) {
+			t.Fatalf("Load() = %v, want error %q", err, wantErr)
+		}
+	})
+}
+
 func TestValidateNtfySink(t *testing.T) {
 	for _, p := range []int{1, 5} {
 		sink := &NtfySink{Topic: "valid-topic_1.0", Priority: p}

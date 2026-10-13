@@ -1,9 +1,11 @@
 package codexlocal
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -261,4 +263,150 @@ func TestCloseSessionFile(t *testing.T) {
 			t.Fatalf("closeSessionFile() = %v, want os.ErrClosed", got)
 		}
 	})
+}
+
+type fakeDirEntry struct{}
+
+func (fakeDirEntry) Name() string               { return "file.txt" }
+func (fakeDirEntry) IsDir() bool                { return false }
+func (fakeDirEntry) Type() fs.FileMode          { return 0 }
+func (fakeDirEntry) Info() (fs.FileInfo, error) { return nil, fs.ErrInvalid }
+
+func TestSessionScan_FilesScannedCap(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	path := filepath.Join(root, "file.txt")
+	scan := &sessionScan{root: root}
+	entry := fakeDirEntry{}
+
+	for i := 0; i < maxSessionFilesScanned; i++ {
+		if err := scan.consider(ctx, path, entry, nil); err != nil {
+			t.Fatalf("consider(%d) = %v, want nil error", i, err)
+		}
+	}
+	if scan.scanned != maxSessionFilesScanned {
+		t.Fatalf("scan.scanned = %d, want %d", scan.scanned, maxSessionFilesScanned)
+	}
+
+	err := scan.consider(ctx, path, entry, nil)
+	if err == nil || !strings.Contains(err.Error(), "files scanned") {
+		t.Fatalf("consider(max+1) = %v, want error with 'files scanned'", err)
+	}
+}
+
+func TestOpenRegularSessionFile_SizeCap(t *testing.T) {
+	t.Run("exactly maxSessionFileBytes opens", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "exact.jsonl")
+		f, err := os.Create(path)
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if err := os.Truncate(path, maxSessionFileBytes); err != nil {
+			t.Fatalf("Truncate: %v", err)
+		}
+		opened, err := openRegularSessionFile(path)
+		if err != nil {
+			t.Fatalf("openRegularSessionFile(cap) = %v, want nil error", err)
+		}
+		if err := opened.Close(); err != nil {
+			t.Fatalf("Close opened: %v", err)
+		}
+	})
+
+	t.Run("maxSessionFileBytes+1 fails with exceeds", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "over.jsonl")
+		f, err := os.Create(path)
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if err := os.Truncate(path, maxSessionFileBytes+1); err != nil {
+			t.Fatalf("Truncate: %v", err)
+		}
+		_, err = openRegularSessionFile(path)
+		if err == nil || !strings.Contains(err.Error(), "exceeds") {
+			t.Fatalf("openRegularSessionFile(cap+1) err = %v, want error with 'exceeds'", err)
+		}
+	})
+}
+
+func TestScanLatestRateLimits_MaxScanLines(t *testing.T) {
+	ctx := context.Background()
+	t.Run("maxScanLines passes", func(t *testing.T) {
+		s := bufio.NewScanner(strings.NewReader(strings.Repeat("\n", maxScanLines)))
+		if _, err := scanLatestRateLimits(ctx, "session.jsonl", s); err != nil {
+			t.Fatalf("scanLatestRateLimits(maxScanLines) = %v, want nil error", err)
+		}
+	})
+
+	t.Run("maxScanLines+1 fails", func(t *testing.T) {
+		s := bufio.NewScanner(strings.NewReader(strings.Repeat("\n", maxScanLines+1)))
+		_, err := scanLatestRateLimits(ctx, "session.jsonl", s)
+		if err == nil || !strings.Contains(err.Error(), "lines scanned") {
+			t.Fatalf("scanLatestRateLimits(maxScanLines+1) = %v, want 'lines scanned'", err)
+		}
+	})
+}
+
+func TestLatestRateLimits_MaxLineBytes(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("longest line scans", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "max.jsonl")
+		line := make([]byte, maxLineBytes)
+		for i := 0; i < maxLineBytes-1; i++ {
+			line[i] = ' '
+		}
+		line[maxLineBytes-1] = '\n'
+		if err := os.WriteFile(path, line, 0o600); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+		if _, err := latestRateLimits(ctx, path); err != nil {
+			t.Fatalf("latestRateLimits() = %v, want nil error", err)
+		}
+	})
+
+	t.Run("one byte longer fails with bufio.ErrTooLong", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "over.jsonl")
+		line := make([]byte, maxLineBytes+1)
+		for i := 0; i < maxLineBytes; i++ {
+			line[i] = ' '
+		}
+		line[maxLineBytes] = '\n'
+		if err := os.WriteFile(path, line, 0o600); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+		_, err := latestRateLimits(ctx, path)
+		if !errors.Is(err, bufio.ErrTooLong) {
+			t.Fatalf("latestRateLimits() err = %v, want bufio.ErrTooLong", err)
+		}
+	})
+}
+
+// TestDataSync_DocBounds pins caps to docs/data-sync.md ("Sources" table:
+// codex-local: 20,000 files walked, 128 MiB per file, 500,000 lines, 4 MiB per line; one record).
+func TestDataSync_DocBounds(t *testing.T) {
+	tests := []struct {
+		name string
+		got  any
+		want any
+	}{
+		{"maxSessionFilesScanned", maxSessionFilesScanned, 20000},
+		{"maxSessionFileBytes", maxSessionFileBytes, 128 << 20},
+		{"maxScanLines", maxScanLines, 500000},
+		{"maxLineBytes", maxLineBytes, 4 << 20},
+		{"MaxRecords", MaxRecords, 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.got != tc.want {
+				t.Fatalf("%s = %v, want %v", tc.name, tc.got, tc.want)
+			}
+		})
+	}
 }

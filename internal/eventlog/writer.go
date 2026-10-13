@@ -12,9 +12,16 @@ import (
 	corereceipt "github.com/golusoris/golusoris/core/crypto/receipt"
 )
 
-func (w *Writer) Append(ctx context.Context, ev Event) (Record, error) {
+// AppendChecked calls check under the event-log lock, then appends the event check returns.
+// The check runs while the lock is held; it may replay the log (Replay takes no lock).
+// Queued writers wait up to LockTimeout meanwhile, so check must stay short.
+// A check error is returned as is and nothing is appended.
+func (w *Writer) AppendChecked(ctx context.Context, check func(context.Context) (Event, error)) (Record, error) {
 	if err := readyContext(ctx, "append"); err != nil {
 		return Record{}, err
+	}
+	if check == nil {
+		return Record{}, errors.New("eventlog: check function is required")
 	}
 	if err := os.MkdirAll(w.eventsDir, 0o750); err != nil {
 		return Record{}, fmt.Errorf("eventlog: mkdir %s: %w", w.eventsDir, err)
@@ -30,11 +37,25 @@ func (w *Writer) Append(ctx context.Context, ev Event) (Record, error) {
 		}
 		return Record{}, err
 	}
+	ev, err := check(ctx)
+	if err != nil {
+		if closeErr := lock.Close(); closeErr != nil {
+			return Record{}, errors.Join(err, fmt.Errorf("eventlog: close lock: %w", closeErr))
+		}
+		return Record{}, err
+	}
 	rec, err := w.writeAppend(current, ev)
 	if closeErr := lock.Close(); closeErr != nil {
 		return Record{}, errors.Join(err, fmt.Errorf("eventlog: close lock after append: %w", closeErr))
 	}
 	return rec, err
+}
+
+// Append appends ev. It is AppendChecked with a check that accepts ev.
+func (w *Writer) Append(ctx context.Context, ev Event) (Record, error) {
+	return w.AppendChecked(ctx, func(context.Context) (Event, error) {
+		return ev, nil
+	})
 }
 
 func (w *Writer) writeAppend(current unsignedHead, ev Event) (Record, error) {

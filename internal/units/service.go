@@ -50,6 +50,32 @@ func (s *Service) Replay(ctx context.Context) (eventlog.State, error) {
 	return eventlog.ReplayStable(ctx, s.dir, s.signer.PublicKey(), s.limits, UnitReducer)
 }
 
+// appendChecked opens an eventlog writer and appends the event returned by build.
+// The check runs under the log's lock (#108).
+func (s *Service) appendChecked(ctx context.Context, build func(eventlog.State) (eventlog.Event, error)) (eventlog.State, error) {
+	writer, err := eventlog.Open(s.dir, s.signer, s.limits)
+	if err != nil {
+		return eventlog.State{}, err
+	}
+	var capturedSt eventlog.State
+	rec, err := writer.AppendChecked(ctx, func(cctx context.Context) (eventlog.Event, error) {
+		st, replayErr := s.Replay(cctx)
+		if replayErr != nil {
+			return eventlog.Event{}, replayErr
+		}
+		ev, buildErr := build(st)
+		if buildErr != nil {
+			return eventlog.Event{}, buildErr
+		}
+		capturedSt = st
+		return ev, nil
+	})
+	if err != nil {
+		return eventlog.State{}, err
+	}
+	return UnitReducer(capturedSt, rec)
+}
+
 // Record appends one status record and returns the unit as it stands after it.
 func (s *Service) Record(ctx context.Context, id string, payload RecordPayload) (eventlog.Unit, error) {
 	if err := readyContext(ctx, "record"); err != nil {
@@ -61,34 +87,20 @@ func (s *Service) Record(ctx context.Context, id string, payload RecordPayload) 
 	if err := validateRecordPayload(payload); err != nil {
 		return eventlog.Unit{}, err
 	}
-	st, err := s.Replay(ctx)
-	if err != nil {
-		return eventlog.Unit{}, err
-	}
-	if err = validateRecordState(st, id, payload.Status, payload.Reopen); err != nil {
-		return eventlog.Unit{}, err
-	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return eventlog.Unit{}, fmt.Errorf("units: marshal payload: %w", err)
 	}
-	updated, err := s.appendAndReduce(ctx, st, eventlog.Event{Type: "unit.recorded", TaskID: id, Payload: body})
+	st, err := s.appendChecked(ctx, func(st eventlog.State) (eventlog.Event, error) {
+		if valErr := validateRecordState(st, id, payload.Status, payload.Reopen); valErr != nil {
+			return eventlog.Event{}, valErr
+		}
+		return eventlog.Event{Type: "unit.recorded", TaskID: id, Payload: body}, nil
+	})
 	if err != nil {
 		return eventlog.Unit{}, err
 	}
-	return updated.Units[id], nil
-}
-
-func (s *Service) appendAndReduce(ctx context.Context, st eventlog.State, ev eventlog.Event) (eventlog.State, error) {
-	writer, err := eventlog.Open(s.dir, s.signer, s.limits)
-	if err != nil {
-		return eventlog.State{}, err
-	}
-	rec, err := writer.Append(ctx, ev)
-	if err != nil {
-		return eventlog.State{}, err
-	}
-	return UnitReducer(st, rec)
+	return st.Units[id], nil
 }
 
 func validateRecordState(st eventlog.State, id string, status string, reopen bool) error {
@@ -108,6 +120,17 @@ func validateRecordState(st eventlog.State, id string, status string, reopen boo
 	return nil
 }
 
+func validateNoteState(st eventlog.State, id string) error {
+	unit, exists := st.Units[id]
+	if !exists {
+		return fmt.Errorf("units: unit %q does not exist", id)
+	}
+	if len(UnreadNotes(unit)) >= MaxUnreadNotes {
+		return fmt.Errorf("units: %q already has %d unread notes", id, MaxUnreadNotes)
+	}
+	return nil
+}
+
 // Note appends a note to a unit's inbox. The unit reads it at its next status record.
 func (s *Service) Note(ctx context.Context, id string, from string, text string) (eventlog.UnitNote, error) {
 	if err := readyContext(ctx, "note"); err != nil {
@@ -116,31 +139,27 @@ func (s *Service) Note(ctx context.Context, id string, from string, text string)
 	if err := validateNoteInput(id, from, text); err != nil {
 		return eventlog.UnitNote{}, err
 	}
-	st, err := s.Replay(ctx)
-	if err != nil {
-		return eventlog.UnitNote{}, err
-	}
-	unit, exists := st.Units[id]
-	if !exists {
-		return eventlog.UnitNote{}, fmt.Errorf("units: unit %q does not exist", id)
-	}
-	if len(UnreadNotes(unit)) >= MaxUnreadNotes {
-		return eventlog.UnitNote{}, fmt.Errorf("units: %q already has %d unread notes", id, MaxUnreadNotes)
-	}
 	body, err := json.Marshal(NotePayload{From: from, Text: text})
 	if err != nil {
 		return eventlog.UnitNote{}, fmt.Errorf("units: marshal note payload: %w", err)
 	}
-	updated, err := s.appendAndReduce(ctx, st, eventlog.Event{Type: "unit.note", TaskID: id, Payload: body})
+	st, err := s.appendChecked(ctx, func(st eventlog.State) (eventlog.Event, error) {
+		if validateErr := validateNoteState(st, id); validateErr != nil {
+			return eventlog.Event{}, validateErr
+		}
+		return eventlog.Event{Type: "unit.note", TaskID: id, Payload: body}, nil
+	})
 	if err != nil {
 		return eventlog.UnitNote{}, err
 	}
-	notes := updated.Units[id].Notes
+	notes := st.Units[id].Notes
 	if len(notes) == 0 {
 		return eventlog.UnitNote{}, fmt.Errorf("units: note for %q was not recorded", id)
 	}
 	return notes[len(notes)-1], nil
 }
+
+var errNothingUnread = errors.New("units: nothing unread")
 
 // Inbox returns the unread notes of a unit and marks them read. Nothing unread appends
 // nothing.
@@ -148,23 +167,30 @@ func (s *Service) Inbox(ctx context.Context, id string) ([]eventlog.UnitNote, er
 	if err := readyContext(ctx, "inbox"); err != nil {
 		return nil, err
 	}
-	unit, err := s.Show(ctx, id)
-	if err != nil {
-		return nil, err
+	if !IsValidID(id) {
+		return nil, fmt.Errorf("units: invalid unit id %q", id)
 	}
-	unread := UnreadNotes(unit)
-	if len(unread) == 0 {
+	var unread []eventlog.UnitNote
+	_, err := s.appendChecked(ctx, func(st eventlog.State) (eventlog.Event, error) {
+		unit, exists := st.Units[id]
+		if !exists {
+			return eventlog.Event{}, fmt.Errorf("units: unit %q does not exist", id)
+		}
+		notes := UnreadNotes(unit)
+		if len(notes) == 0 {
+			return eventlog.Event{}, errNothingUnread
+		}
+		body, marshalErr := json.Marshal(NoteReadPayload{UptoSeq: notes[len(notes)-1].Seq})
+		if marshalErr != nil {
+			return eventlog.Event{}, fmt.Errorf("units: marshal note read payload: %w", marshalErr)
+		}
+		unread = notes
+		return eventlog.Event{Type: "unit.note_read", TaskID: id, Payload: body}, nil
+	})
+	if errors.Is(err, errNothingUnread) {
 		return nil, nil
 	}
-	body, err := json.Marshal(NoteReadPayload{UptoSeq: unread[len(unread)-1].Seq})
 	if err != nil {
-		return nil, fmt.Errorf("units: marshal note read payload: %w", err)
-	}
-	writer, err := eventlog.Open(s.dir, s.signer, s.limits)
-	if err != nil {
-		return nil, err
-	}
-	if _, err = writer.Append(ctx, eventlog.Event{Type: "unit.note_read", TaskID: id, Payload: body}); err != nil {
 		return nil, err
 	}
 	return unread, nil

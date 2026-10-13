@@ -484,6 +484,12 @@ func TestServerLogIsBounded(t *testing.T) {
 		if _, status := ask(t, server.Server, connectRequest("other.example:443")); !strings.Contains(status, " 403 ") {
 			t.Fatalf("request %d: status = %q, want 403", i, status)
 		}
+		// A refusal keeps its slot until it has been logged, after the client has read the
+		// answer. Without this wait, a slow runner piles up more than maxTunnels of them and
+		// the next request is answered as busy.
+		if !waitFor(func() bool { return len(server.pool.slots) == 0 }) {
+			t.Fatalf("request %d: %d slots still held, want the refusal to free its slot", i, len(server.pool.slots))
+		}
 	}
 	if !waitFor(func() bool { return server.Refused() == maxLoggedLines+extra }) {
 		t.Fatalf("Refused() = %d, want every refusal counted (%d)", server.Refused(), maxLoggedLines+extra)

@@ -63,7 +63,7 @@ Each record (`catalog.Record`) carries a model id, provider, access path (`api`,
 
 | Source | How | Kind | Bounds | Failure and edge cases |
 | --- | --- | --- | --- | --- |
-| `codex-local` | Reads `rate_limits.primary` from the newest `~/.codex/sessions/**/*.jsonl`, read-only | measured | 20,000 files walked, 128 MiB per file, 4 MiB per line; one record | no logs or no rate limits: skip; an empty `limit_id`: fail |
+| `codex-local` | Reads `rate_limits.primary` from the newest `~/.codex/sessions/**/*.jsonl`, read-only | measured | 20,000 files walked, 128 MiB per file, 500,000 lines, 4 MiB per line; one record | no logs or no rate limits: skip; an empty `limit_id`: fail |
 | `litellm-gateway` | `GET <base>/v1/models` with a bearer token | measured | 15 s, 8 MiB, 5,000 models | an empty model list: fail; an entry without an id is rejected and counted; a list where no entry has an id: fail. Prices and context are absent, because `/model/info` is not readable with an agent token |
 | `ollama-local` | `GET /api/tags` for installed models, `GET /api/ps` for loaded ones | measured | 5 s, 8 MiB, 5,000 models | no installed models: skip (a real local state); `/api/ps` unavailable: records kept, loaded state absent, status degraded |
 | `public-catalog` | OpenRouter's public models API and LiteLLM's price map | declared | 20 s and 16 MiB per sub-fetch, 4,999 records each | an empty list or map: that sub-fetch fails; one sub-fetch failing: degraded; a malformed entry is counted (`malformed=N`, `rejected=N`); an OpenRouter `-1` price is absent as `variable price`, never negative |

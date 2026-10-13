@@ -307,6 +307,9 @@ func Load(ctx context.Context, path string) (Config, error) {
 	if err = validateNames(cfg); err != nil {
 		return Config{}, err
 	}
+	if err = validateRouterAliases(cfg); err != nil {
+		return Config{}, err
+	}
 	if err = validateReleaseWatch(&cfg); err != nil {
 		return Config{}, err
 	}
@@ -827,6 +830,28 @@ func validateWatchNames(watches []WatchConfig) error {
 			return fmt.Errorf("config: watches/%d/name: duplicate name %q", i, watch.Name)
 		}
 		seen[watch.Name] = struct{}{}
+	}
+	return nil
+}
+
+// validateRouterAliases refuses a job or watch whose router alias is not listed in router.aliases.
+func validateRouterAliases(cfg Config) error {
+	known := make(map[string]struct{}, len(cfg.Router.Aliases))
+	for _, alias := range cfg.Router.Aliases {
+		known[alias] = struct{}{}
+	}
+	for _, job := range cfg.Jobs {
+		if _, ok := known[job.RouterAlias]; !ok {
+			return fmt.Errorf("config: job %q router_alias %q is not listed in router.aliases", job.Name, job.RouterAlias)
+		}
+	}
+	for _, watch := range cfg.Watches {
+		if watch.RouterAlias == "" {
+			continue
+		}
+		if _, ok := known[watch.RouterAlias]; !ok {
+			return fmt.Errorf("config: watch %q router_alias %q is not listed in router.aliases", watch.Name, watch.RouterAlias)
+		}
 	}
 	return nil
 }

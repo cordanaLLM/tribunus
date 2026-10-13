@@ -3,12 +3,15 @@ package ollamalocal
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/golusoris/golusoris/httpx/client"
 
 	"github.com/tekmora/epitrop/catalog"
 )
@@ -181,5 +184,132 @@ func TestToRecord_UnknownLoadedState(t *testing.T) {
 	}
 	if contains(rec.Capabilities, "loaded") {
 		t.Fatalf("Capabilities = %v, want no loaded flag", rec.Capabilities)
+	}
+}
+
+func buildModelsJSON(count int) []byte {
+	var b strings.Builder
+	b.WriteString(`{"models":[`)
+	for i := 0; i < count; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(`{"name":"m"}`)
+	}
+	b.WriteString(`]}`)
+	return []byte(b.String())
+}
+
+func TestGetTags_ResponseCap(t *testing.T) {
+	serve := func(size int) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			prefix := `{"models":[{"name":"m"}]}`
+			body := []byte(prefix + strings.Repeat(" ", size-len(prefix)))
+			if _, err := w.Write(body); err != nil {
+				t.Errorf("write stand-in response: %v", err)
+			}
+		}))
+	}
+
+	t.Run("exactly at cap", func(t *testing.T) {
+		server := serve(maxResponseBytes)
+		defer server.Close()
+		parsed, err := getTags(context.Background(), server.URL)
+		if err != nil {
+			t.Fatalf("getTags() = %v, want success at cap", err)
+		}
+		if len(parsed.Models) != 1 {
+			t.Fatalf("models count = %d, want 1", len(parsed.Models))
+		}
+	})
+
+	t.Run("one byte over cap", func(t *testing.T) {
+		server := serve(maxResponseBytes + 1)
+		defer server.Close()
+		_, err := getTags(context.Background(), server.URL)
+		if !errors.Is(err, client.ErrBodyTooLarge) {
+			t.Fatalf("getTags() err = %v, want ErrBodyTooLarge", err)
+		}
+	})
+}
+
+func TestGetTags_MaxModelsCap(t *testing.T) {
+	t.Run("maxModels passes", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, err := w.Write(buildModelsJSON(maxModels)); err != nil {
+				t.Errorf("write stand-in response: %v", err)
+			}
+		}))
+		defer server.Close()
+		parsed, err := getTags(context.Background(), server.URL)
+		if err != nil {
+			t.Fatalf("getTags() = %v, want success at maxModels", err)
+		}
+		if len(parsed.Models) != maxModels {
+			t.Fatalf("len(parsed.Models) = %d, want %d", len(parsed.Models), maxModels)
+		}
+	})
+
+	t.Run("maxModels+1 fails", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, err := w.Write(buildModelsJSON(maxModels + 1)); err != nil {
+				t.Errorf("write stand-in response: %v", err)
+			}
+		}))
+		defer server.Close()
+		_, err := getTags(context.Background(), server.URL)
+		if err == nil || !strings.Contains(err.Error(), "lists more than") {
+			t.Fatalf("getTags() err = %v, want error with 'lists more than'", err)
+		}
+	})
+}
+
+func TestFetch_PSMaxModelsDegrades(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/tags":
+			if _, err := w.Write([]byte(`{"models":[{"name":"local-m"}]}`)); err != nil {
+				t.Errorf("write stand-in response: %v", err)
+			}
+		case "/api/ps":
+			if _, err := w.Write(buildModelsJSON(maxModels + 1)); err != nil {
+				t.Errorf("write stand-in response: %v", err)
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	res := Fetch(context.Background(), server.URL)
+	if res.Status != catalog.StatusDegraded {
+		t.Fatalf("Status = %v, want StatusDegraded", res.Status)
+	}
+	if res.Count != 1 || len(res.Records) != 1 || res.Records[0].ModelID != "local-m" {
+		t.Fatalf("Records = %+v, want tags record preserved", res.Records)
+	}
+	if !strings.Contains(res.Detail, "/api/ps lists more than") {
+		t.Fatalf("Detail = %q, want mention of '/api/ps lists more than'", res.Detail)
+	}
+}
+
+// TestDataSync_DocBounds pins timeouts and caps to docs/data-sync.md ("Sources" table:
+// ollama-local: 5 s, 8 MiB, 5,000 models).
+func TestDataSync_DocBounds(t *testing.T) {
+	tests := []struct {
+		name string
+		got  any
+		want any
+	}{
+		{"requestTimeout", requestTimeout, 5 * time.Second},
+		{"maxResponseBytes", maxResponseBytes, 8 << 20},
+		{"MaxRecords", MaxRecords, 5000},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.got != tc.want {
+				t.Fatalf("%s = %v, want %v", tc.name, tc.got, tc.want)
+			}
+		})
 	}
 }

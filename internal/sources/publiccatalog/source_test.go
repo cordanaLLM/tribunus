@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tekmora/epitrop/catalog"
 )
@@ -127,5 +128,27 @@ func TestLiteLLMDetailReportsMalformedEntries(t *testing.T) {
 	})
 	if !strings.Contains(got, "malformed=1") {
 		t.Fatalf("liteLLMDetail() = %q, want malformed=1", got)
+	}
+}
+
+// TestDataSync_DocBounds pins timeouts and caps to docs/data-sync.md ("Sources" table:
+// public-catalog: 20 s, 16 MiB, 4,999 records each).
+func TestDataSync_DocBounds(t *testing.T) {
+	tests := []struct {
+		name string
+		got  any
+		want any
+	}{
+		{"requestTimeout", requestTimeout, 20 * time.Second},
+		{"maxResponseBytes", maxResponseBytes, 16 << 20},
+		{"MaxOpenRouterRecords", MaxOpenRouterRecords, 4999},
+		{"MaxLiteLLMPriceRecords", MaxLiteLLMPriceRecords, 4999},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.got != tc.want {
+				t.Fatalf("%s = %v, want %v", tc.name, tc.got, tc.want)
+			}
+		})
 	}
 }

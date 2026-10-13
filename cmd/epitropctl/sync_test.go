@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -155,6 +156,79 @@ func TestRunSync_Positive(t *testing.T) {
 		if run.Status != catalog.StatusOK {
 			t.Fatalf("source %s status = %v, detail = %q, want ok", run.Source, run.Status, run.Detail)
 		}
+	}
+}
+
+func TestFormatSourceLine(t *testing.T) {
+	tests := []struct {
+		name    string
+		src     string
+		outcome sourceOutcome
+		want    string
+	}{
+		{
+			name:    "without detail",
+			src:     "ollama-local",
+			outcome: sourceOutcome{Status: catalog.StatusOK, Count: 3},
+			want:    "ollama-local     ok   count=3",
+		},
+		{
+			name:    "with detail",
+			src:     "ollama-local",
+			outcome: sourceOutcome{Status: catalog.StatusOK, Count: 3, Detail: "models loaded"},
+			want:    "ollama-local     ok   count=3 models loaded",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := formatSourceLine(tc.src, tc.outcome)
+			if got != tc.want {
+				t.Fatalf("formatSourceLine() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunSync_Output(t *testing.T) {
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/tags":
+			body := []byte(`{"models":[{"name":"m1","details":{"context_length":4096}},{"name":"m2","details":{"context_length":4096}}]}`)
+			if _, err := w.Write(body); err != nil {
+				t.Errorf("write stand-in response: %v", err)
+			}
+		case "/api/ps":
+			if _, err := w.Write([]byte(`{"models":[]}`)); err != nil {
+				t.Errorf("write stand-in response: %v", err)
+			}
+		}
+	}))
+	defer ollama.Close()
+
+	out := filepath.Join(t.TempDir(), "out.json")
+	args := []string{
+		"--sources=ollama-local",
+		"--ollama=" + ollama.URL,
+		"--out=" + out,
+	}
+
+	outStr := captureStdout(t, func() {
+		if err := runSync(args); err != nil {
+			t.Fatalf("runSync() = %v", err)
+		}
+	})
+
+	lines := strings.Split(strings.TrimSpace(outStr), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines of output, want 2: %q", len(lines), outStr)
+	}
+	wantSource := "ollama-local     ok   count=2"
+	if lines[0] != wantSource {
+		t.Fatalf("source line = %q, want %q", lines[0], wantSource)
+	}
+	wantFinal := fmt.Sprintf("wrote 2 records to %s", out)
+	if lines[1] != wantFinal {
+		t.Fatalf("final line = %q, want %q", lines[1], wantFinal)
 	}
 }
 

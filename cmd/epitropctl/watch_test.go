@@ -125,3 +125,45 @@ func TestRunWatchActionDispatchRunOnceAndSeed(t *testing.T) {
 		}
 	})
 }
+
+type watchCustomSentinelErr struct {
+	msg string
+}
+
+func (e *watchCustomSentinelErr) Error() string {
+	return e.msg
+}
+
+func TestFlagErrUnwrap(t *testing.T) {
+	sentinel := &watchCustomSentinelErr{msg: "inner error"}
+	wrapped := flagErr{err: sentinel}
+
+	t.Run("errors.Is matches wrapped sentinel", func(t *testing.T) {
+		if !errors.Is(wrapped, sentinel) {
+			t.Fatalf("errors.Is(wrapped, sentinel) = false, want true")
+		}
+		other := errors.New("other error")
+		if errors.Is(wrapped, other) {
+			t.Fatalf("errors.Is(wrapped, other) = true, want false")
+		}
+	})
+
+	t.Run("errors.As extracts wrapped target pointer", func(t *testing.T) {
+		var target *watchCustomSentinelErr
+		if !errors.As(wrapped, &target) {
+			t.Fatalf("errors.As(wrapped, &target) = false, want true")
+		}
+		if target != sentinel {
+			t.Fatalf("target = %v, want %v", target, sentinel)
+		}
+	})
+
+	t.Run("Error and ExitCode pass-through", func(t *testing.T) {
+		if wrapped.Error() != "inner error" {
+			t.Fatalf("wrapped.Error() = %q, want 'inner error'", wrapped.Error())
+		}
+		if wrapped.ExitCode() != 2 {
+			t.Fatalf("wrapped.ExitCode() = %d, want 2", wrapped.ExitCode())
+		}
+	})
+}

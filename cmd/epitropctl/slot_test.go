@@ -250,9 +250,10 @@ func TestPrintSlotReportSaysWhatBecameOfTheRun(t *testing.T) {
 // The built command knows `slot`: its own refusal comes back, not the one for a command
 // that does not exist.
 func TestCLISlotReachesItsCommandSubprocess(t *testing.T) {
+	bin := buildCLI(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, buildCLI(ctx, t), "slot").CombinedOutput()
+	out, err := exec.CommandContext(ctx, bin, "slot").CombinedOutput()
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
 		t.Fatalf("epitropctl slot = %v, want exit 1\n%s", err, out)

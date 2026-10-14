@@ -56,14 +56,9 @@ func TestRunWatchActionBadFlagsExit2(t *testing.T) {
 }
 
 func TestCLIWatchBadFlagsExit2Subprocess(t *testing.T) {
+	bin := buildCLI(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-
-	bin := filepath.Join(t.TempDir(), "epitropctl")
-	buildCmd := exec.CommandContext(ctx, "go", "build", "-o", bin, ".")
-	if out, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("build epitropctl: %v\n%s", err, out)
-	}
 
 	cmd := exec.CommandContext(ctx, bin, "watch", "run", "--bad-flag")
 	var stdout, stderr bytes.Buffer

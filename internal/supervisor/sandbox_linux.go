@@ -345,6 +345,7 @@ func pastaArgs(path string) []string {
 		"--address", sandboxNetAddress, "--netmask", sandboxNetMask, "--gateway", sandboxNetGateway,
 		"--map-host-loopback", "none",
 		"-t", "none", "-u", "none", "-T", "none", "-U", "none",
+		"-D", "none",
 		"--quiet", "--",
 	}
 }

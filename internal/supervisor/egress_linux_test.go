@@ -94,6 +94,18 @@ func TestSandboxArgvWithoutProxyNamesNoneOfIt(t *testing.T) {
 	}
 }
 
+func TestEgressSandboxArgvDisablesDNS(t *testing.T) {
+	sandbox := proxyTestSandbox(t.TempDir())
+	sandbox.Network = "egress"
+	argv := proxyTestArgv(t, sandbox, sandboxProxy{})
+	wanted := []string{"--map-host-loopback none", "-t none -u none -T none -U none", "-D none", "--quiet --"}
+	for i := 0; i < len(wanted); i++ {
+		if !strings.Contains(argv, wanted[i]) {
+			t.Errorf("argv(network=egress) = %q, want %q", argv, wanted[i])
+		}
+	}
+}
+
 func TestValidateSandboxProxyBothWays(t *testing.T) {
 	binds := proxyTestBinds(t)
 	missing := filepath.Join(t.TempDir(), "missing")
@@ -515,4 +527,29 @@ func TestRequireReadable(t *testing.T) {
 			t.Fatalf("requireReadable(%s) = %v, want error with 'readable:'", f, err)
 		}
 	})
+}
+
+func TestSandboxedJobEgressLogHasNoNameserverWarning(t *testing.T) {
+	requireSystemdUserScope(t)
+	job := sandboxedSupervisorJob(t, "sandbox-egress-dns", untilStopped("", time.Second))
+	job.Sandbox.Network = "egress"
+	requireSandboxToolchain(t, job.Sandbox)
+	sup := testSupervisor(t, job)
+	if err := sup.Start(testContext(t), job.Name); err != nil {
+		t.Fatalf("Start() = %v, want nil", err)
+	}
+	if got := statusOne(t, sup, job.Name).Sandbox; got != "enforce/egress" {
+		t.Errorf("Sandbox = %q, want enforce/egress", got)
+	}
+	if err := sup.Stop(testContext(t), job.Name); err != nil {
+		t.Fatalf("Stop() = %v, want nil", err)
+	}
+	body, err := os.ReadFile(job.LogPath)
+	if err != nil {
+		t.Fatalf("ReadFile(job log) = %v, want nil", err)
+	}
+	const warning = "Couldn't get any nameserver address"
+	if strings.Contains(string(body), warning) {
+		t.Fatalf("job log contains %q: %s", warning, body)
+	}
 }

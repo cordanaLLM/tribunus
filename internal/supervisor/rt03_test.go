@@ -711,7 +711,7 @@ func TestSandboxArgvCarriesNoEnvValues(t *testing.T) {
 		t.Fatalf("EvalSymlinks(/usr/bin/true) = %v, want nil", err)
 	}
 	argv := strings.Join(built.Argv, " ")
-	for _, want := range []string{"-- /usr/bin/env --ignore-signal=TERM /usr/bin/pasta", "--address 192.0.2.2", "--map-host-loopback none", "-T none -U none", "--unsetenv XDG_RUNTIME_DIR", "--unsetenv DBUS_SESSION_BUS_ADDRESS", "--unsetenv INVOCATION_ID", "-- /usr/bin/env --default-signal=TERM " + truePath} {
+	for _, want := range []string{"-- /usr/bin/env --ignore-signal=TERM /usr/bin/pasta", "--address 192.0.2.2", "--map-host-loopback none", "-T none -U none", "-D none", "--unsetenv XDG_RUNTIME_DIR", "--unsetenv DBUS_SESSION_BUS_ADDRESS", "--unsetenv INVOCATION_ID", "-- /usr/bin/env --default-signal=TERM " + truePath} {
 		if !strings.Contains(argv, want) {
 			t.Fatalf("argv = %q, want %q", argv, want)
 		}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -16,17 +17,14 @@ import (
 
 const maxStableReplayTries = 100
 
-// ReplayStable is Replay for a log that other processes append to. An append writes its
-// record and then HEAD; a replay that lands between the two reports a HEAD mismatch that
-// the next try no longer sees. It retries only that case, for at most a second; every
-// other error is returned at once.
-func ReplayStable(ctx context.Context, dir string, pubKeyHex string, limits Limits, reducer Reducer) (State, error) {
+func retryStable[T any](ctx context.Context, op func() (T, error)) (T, error) {
 	deadline := time.Now().Add(time.Second)
 	var last error
+	var zero T
 	for i := 0; i < maxStableReplayTries; i++ {
-		state, err := Replay(ctx, dir, pubKeyHex, limits, reducer)
+		res, err := op()
 		if err == nil || !transientReplayError(err) {
-			return state, err
+			return res, err
 		}
 		last = err
 		if !sleepUntilNextTry(ctx, deadline) {
@@ -34,9 +32,33 @@ func ReplayStable(ctx context.Context, dir string, pubKeyHex string, limits Limi
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return State{}, fmt.Errorf("eventlog: replay: %w", err)
+		return zero, fmt.Errorf("eventlog: replay: %w", err)
 	}
-	return State{}, last
+	return zero, last
+}
+
+// ReplayStable is Replay for a log that other processes append to. An append writes its
+// record and then HEAD; a replay that lands between the two reports a HEAD mismatch that
+// the next try no longer sees. It retries only that case, for at most a second; every
+// other error is returned at once.
+func ReplayStable(ctx context.Context, dir string, pubKeyHex string, limits Limits, reducer Reducer) (State, error) {
+	return retryStable(ctx, func() (State, error) {
+		return Replay(ctx, dir, pubKeyHex, limits, reducer)
+	})
+}
+
+type replayCheckpointedResult struct {
+	state State
+	use   CheckpointUse
+}
+
+// ReplayCheckpointedStable is ReplayCheckpointed with the same retry helper as ReplayStable.
+func ReplayCheckpointedStable(ctx context.Context, dir string, pubKeyHex string, limits Limits, name string, reducer Reducer) (State, CheckpointUse, error) {
+	res, err := retryStable(ctx, func() (replayCheckpointedResult, error) {
+		st, use, rErr := ReplayCheckpointed(ctx, dir, pubKeyHex, limits, name, reducer)
+		return replayCheckpointedResult{state: st, use: use}, rErr
+	})
+	return res.state, res.use, err
 }
 
 func transientReplayError(err error) bool {
@@ -59,42 +81,185 @@ func Replay(ctx context.Context, dir string, pubKeyHex string, limits Limits, re
 		return State{}, err
 	}
 	r := replayRun{eventsDir: eventsDir(dir), pubKeyHex: strings.ToLower(pubKeyHex), limits: normalized, reducer: reducer}
+	st, _, err := r.run()
+	return st, err
+}
+
+// ReplayCheckpointed replays the event log from the newest valid checkpoint of name, or full replay if none.
+func ReplayCheckpointed(ctx context.Context, dir string, pubKeyHex string, limits Limits, name string, reducer Reducer) (State, CheckpointUse, error) {
+	if err := readyContext(ctx, "replay"); err != nil {
+		return State{}, CheckpointUse{}, err
+	}
+	if !validCheckpointName(name) {
+		return State{}, CheckpointUse{}, fmt.Errorf("eventlog: invalid checkpoint name %q", name)
+	}
+	normalized, err := normalizeLimits(limits)
+	if err != nil {
+		return State{}, CheckpointUse{}, err
+	}
+	if err = checkReplayInputs(dir, pubKeyHex, reducer); err != nil {
+		return State{}, CheckpointUse{}, err
+	}
+	r := replayRun{
+		eventsDir:      eventsDir(dir),
+		checkpointsDir: filepath.Join(dir, "checkpoints"),
+		pubKeyHex:      strings.ToLower(pubKeyHex),
+		limits:         normalized,
+		reducer:        reducer,
+		name:           name,
+	}
 	return r.run()
 }
 
 type replayRun struct {
-	eventsDir string
-	pubKeyHex string
-	limits    Limits
-	reducer   Reducer
+	eventsDir      string
+	checkpointsDir string
+	pubKeyHex      string
+	limits         Limits
+	reducer        Reducer
+	name           string
 }
 
-func (r replayRun) run() (State, error) {
+type checkpointResult struct {
+	seq   uint64
+	hash  string
+	state json.RawMessage
+	use   CheckpointUse
+}
+
+const maxCheckpointsScan = 16
+
+func (r replayRun) run() (State, CheckpointUse, error) {
 	entries, err := os.ReadDir(r.eventsDir)
 	if err != nil {
-		return State{}, fmt.Errorf("eventlog: read %s: %w", r.eventsDir, err)
+		return State{}, CheckpointUse{}, fmt.Errorf("eventlog: read %s: %w", r.eventsDir, err)
 	}
 	st := State{Tasks: map[string]Task{}}
-	last, lastHash, err := r.applyRecords(entries, &st)
+	cp := r.findCheckpoint()
+	if cp.seq > 0 {
+		if err = json.Unmarshal(cp.state, &st); err != nil {
+			return State{}, CheckpointUse{}, fmt.Errorf("eventlog: unmarshal checkpoint state: %w", err)
+		}
+	}
+	last, lastHash, err := r.applyRecords(entries, &st, cp.seq, cp.hash)
 	if err != nil {
-		return State{}, err
+		return State{}, CheckpointUse{}, err
 	}
 	headRecord, hasHead, err := r.readHead()
 	if err != nil {
-		return State{}, err
+		return State{}, CheckpointUse{}, err
 	}
 	if err = checkHeadMatchesTail(headRecord, hasHead, last, lastHash); err != nil {
-		return State{}, err
+		return State{}, CheckpointUse{}, err
 	}
-	return st, nil
+	return st, cp.use, nil
 }
 
-func (r replayRun) applyRecords(entries []os.DirEntry, st *State) (uint64, string, error) {
-	var prev string
-	var last uint64
+func (r replayRun) findCheckpoint() checkpointResult {
+	if r.name == "" || r.checkpointsDir == "" {
+		return checkpointResult{}
+	}
+	cpDir := filepath.Join(r.checkpointsDir, r.name)
+	entries, err := os.ReadDir(cpDir)
+	if os.IsNotExist(err) {
+		return checkpointResult{}
+	}
+	if err != nil {
+		// An unreadable checkpoint directory costs speed, not correctness: the full replay
+		// still runs. It is listed so that the slower replay has a named cause.
+		return checkpointResult{use: CheckpointUse{Skipped: []string{fmt.Sprintf("read %s: %v", cpDir, err)}}}
+	}
+	seqs := filterCheckpointSeqs(entries)
+	var use CheckpointUse
+	for i := 0; i < len(seqs) && i < maxCheckpointsScan; i++ {
+		seq := seqs[i]
+		cpPath := filepath.Join(cpDir, checkpointFileName(seq))
+		cp, ok := r.checkCheckpointCandidate(cpPath, &use)
+		if !ok {
+			continue
+		}
+		if div, diverged := r.checkCheckpointAgainstLog(cp, cpPath); diverged {
+			if use.Diverged == nil {
+				use.Diverged = div
+			}
+			continue
+		}
+		use.Seq = cp.Seq
+		return checkpointResult{seq: cp.Seq, hash: cp.Hash, state: cp.State, use: use}
+	}
+	return checkpointResult{use: use}
+}
+
+func filterCheckpointSeqs(entries []os.DirEntry) []uint64 {
+	var seqs []uint64
+	for i := 0; i < len(entries) && i < maxCheckpointEntries; i++ {
+		entry := entries[i]
+		if !entry.IsDir() && isEventRecord(entry.Name()) {
+			if seq, parseErr := seqFromName(entry.Name()); parseErr == nil {
+				seqs = append(seqs, seq)
+			}
+		}
+	}
+	sort.Slice(seqs, func(i, j int) bool { return seqs[i] > seqs[j] })
+	return seqs
+}
+
+func (r replayRun) checkCheckpointCandidate(cpPath string, use *CheckpointUse) (Checkpoint, bool) {
+	data, err := readFileBounded(cpPath, r.limits.MaxRecordBytes)
+	if err != nil {
+		use.Skipped = append(use.Skipped, fmt.Sprintf("%s: %v", filepath.Base(cpPath), err))
+		return Checkpoint{}, false
+	}
+	cp, err := decodeCheckpoint(cpPath, data, r.pubKeyHex)
+	if err != nil {
+		use.Skipped = append(use.Skipped, fmt.Sprintf("%s: %v", filepath.Base(cpPath), err))
+		return Checkpoint{}, false
+	}
+	if cp.Name != r.name {
+		use.Skipped = append(use.Skipped, fmt.Sprintf("%s: name %q does not match %q", filepath.Base(cpPath), cp.Name, r.name))
+		return Checkpoint{}, false
+	}
+	return cp, true
+}
+
+func (r replayRun) divergenceFor(cp Checkpoint, cpPath string, gotHash string) *Divergence {
+	h, _, err := r.readHead()
+	if err != nil {
+		h = head{}
+	}
+	return &Divergence{
+		Checkpoint: DivergedCheckpoint{Name: cp.Name, Seq: cp.Seq, Hash: cp.Hash},
+		Log:        DivergedLog{Seq: h.Seq, Hash: h.Hash, HashAtCheckpointSeq: gotHash},
+		File:       cpPath,
+	}
+}
+
+func (r replayRun) checkCheckpointAgainstLog(cp Checkpoint, cpPath string) (*Divergence, bool) {
+	recPath := eventPath(r.eventsDir, cp.Seq)
+	recData, err := readFileBounded(recPath, r.limits.MaxRecordBytes)
+	if err != nil {
+		return r.divergenceFor(cp, cpPath, ""), true
+	}
+	gotHash := hashHex(recData)
+	if gotHash != cp.Hash {
+		return r.divergenceFor(cp, cpPath, gotHash), true
+	}
+	return nil, false
+}
+
+func (r replayRun) applyRecords(entries []os.DirEntry, st *State, startSeq uint64, startHash string) (uint64, string, error) {
+	prev := startHash
+	last := startSeq
 	count := 0
 	for _, entry := range entries {
 		if !isEventRecord(entry.Name()) {
+			continue
+		}
+		seq, err := seqFromName(entry.Name())
+		if err != nil {
+			return 0, "", err
+		}
+		if seq <= startSeq {
 			continue
 		}
 		count++

@@ -154,8 +154,8 @@ func readSlotInput(path string) ([]byte, error) {
 
 // openSlotRun opens a run under the supervisor: the run's configuration is derived from the
 // slot's template, and the job and the run record are the ones of that configuration.
-func openSlotRun(template string) func(context.Context, slot.Workspace, string) (slot.Job, slot.Recorder, error) {
-	return func(ctx context.Context, ws slot.Workspace, out string) (slot.Job, slot.Recorder, error) {
+func openSlotRun(template string) func(context.Context, slot.Workspace, string) (slot.Job, slot.UnitRecorder, error) {
+	return func(ctx context.Context, ws slot.Workspace, out string) (slot.Job, slot.UnitRecorder, error) {
 		cfg, _, err := slot.RunConfig(ctx, template, ws, out)
 		if err != nil {
 			return nil, nil, err

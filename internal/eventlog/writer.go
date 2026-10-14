@@ -12,42 +12,49 @@ import (
 	corereceipt "github.com/golusoris/golusoris/core/crypto/receipt"
 )
 
+// AppendCheckedWithHash calls check under the event-log lock, then appends the event check returns.
+// It returns the record and its content hash.
+func (w *Writer) AppendCheckedWithHash(ctx context.Context, check func(context.Context) (Event, error)) (Record, string, error) {
+	if err := readyContext(ctx, "append"); err != nil {
+		return Record{}, "", err
+	}
+	if check == nil {
+		return Record{}, "", errors.New("eventlog: check function is required")
+	}
+	if err := os.MkdirAll(w.eventsDir, 0o750); err != nil {
+		return Record{}, "", fmt.Errorf("eventlog: mkdir %s: %w", w.eventsDir, err)
+	}
+	lock, err := acquireLock(ctx, w.eventsDir, w.limits.LockTimeout)
+	if err != nil {
+		return Record{}, "", err
+	}
+	current, err := w.currentHead()
+	if err != nil {
+		if closeErr := lock.Close(); closeErr != nil {
+			return Record{}, "", fmt.Errorf("%w; close lock: %w", err, closeErr)
+		}
+		return Record{}, "", err
+	}
+	ev, err := check(ctx)
+	if err != nil {
+		if closeErr := lock.Close(); closeErr != nil {
+			return Record{}, "", errors.Join(err, fmt.Errorf("eventlog: close lock: %w", closeErr))
+		}
+		return Record{}, "", err
+	}
+	rec, hash, err := w.writeAppend(current, ev)
+	if closeErr := lock.Close(); closeErr != nil {
+		return Record{}, "", errors.Join(err, fmt.Errorf("eventlog: close lock after append: %w", closeErr))
+	}
+	return rec, hash, err
+}
+
 // AppendChecked calls check under the event-log lock, then appends the event check returns.
 // The check runs while the lock is held; it may replay the log (Replay takes no lock).
 // Queued writers wait up to LockTimeout meanwhile, so check must stay short.
 // A check error is returned as is and nothing is appended.
 func (w *Writer) AppendChecked(ctx context.Context, check func(context.Context) (Event, error)) (Record, error) {
-	if err := readyContext(ctx, "append"); err != nil {
-		return Record{}, err
-	}
-	if check == nil {
-		return Record{}, errors.New("eventlog: check function is required")
-	}
-	if err := os.MkdirAll(w.eventsDir, 0o750); err != nil {
-		return Record{}, fmt.Errorf("eventlog: mkdir %s: %w", w.eventsDir, err)
-	}
-	lock, err := acquireLock(ctx, w.eventsDir, w.limits.LockTimeout)
-	if err != nil {
-		return Record{}, err
-	}
-	current, err := w.currentHead()
-	if err != nil {
-		if closeErr := lock.Close(); closeErr != nil {
-			return Record{}, fmt.Errorf("%w; close lock: %w", err, closeErr)
-		}
-		return Record{}, err
-	}
-	ev, err := check(ctx)
-	if err != nil {
-		if closeErr := lock.Close(); closeErr != nil {
-			return Record{}, errors.Join(err, fmt.Errorf("eventlog: close lock: %w", closeErr))
-		}
-		return Record{}, err
-	}
-	rec, err := w.writeAppend(current, ev)
-	if closeErr := lock.Close(); closeErr != nil {
-		return Record{}, errors.Join(err, fmt.Errorf("eventlog: close lock after append: %w", closeErr))
-	}
+	rec, _, err := w.AppendCheckedWithHash(ctx, check)
 	return rec, err
 }
 
@@ -58,10 +65,10 @@ func (w *Writer) Append(ctx context.Context, ev Event) (Record, error) {
 	})
 }
 
-func (w *Writer) writeAppend(current unsignedHead, ev Event) (Record, error) {
+func (w *Writer) writeAppend(current unsignedHead, ev Event) (Record, string, error) {
 	payload, err := canonicalPayload(ev.Payload)
 	if err != nil {
-		return Record{}, fmt.Errorf("eventlog: payload: %w", err)
+		return Record{}, "", fmt.Errorf("eventlog: payload: %w", err)
 	}
 	rec := Record{
 		Seq:     current.Seq + 1,
@@ -76,27 +83,28 @@ func (w *Writer) writeAppend(current unsignedHead, ev Event) (Record, error) {
 	}
 	unsigned, err := canonicalJSON(recordUnsigned(rec))
 	if err != nil {
-		return Record{}, err
+		return Record{}, "", err
 	}
 	signed, err := w.signer.Sign(corereceipt.Run{Command: AppendCommand, Output: unsigned})
 	if err != nil {
-		return Record{}, fmt.Errorf("eventlog: sign record %d: %w", rec.Seq, err)
+		return Record{}, "", fmt.Errorf("eventlog: sign record %d: %w", rec.Seq, err)
 	}
 	rec.Receipt = signed
 	full, err := canonicalJSON(rec)
 	if err != nil {
-		return Record{}, err
+		return Record{}, "", err
 	}
 	if len(full) > w.limits.MaxRecordBytes {
-		return Record{}, fmt.Errorf("%w: seq %d is %d bytes", ErrRecordTooLarge, rec.Seq, len(full))
+		return Record{}, "", fmt.Errorf("%w: seq %d is %d bytes", ErrRecordTooLarge, rec.Seq, len(full))
 	}
 	if err = writeNewRecord(w.eventsDir, rec.Seq, full); err != nil {
-		return Record{}, err
+		return Record{}, "", err
 	}
-	if err = w.writeHead(rec.Seq, hashHex(full)); err != nil {
-		return Record{}, err
+	hash := hashHex(full)
+	if err = w.writeHead(rec.Seq, hash); err != nil {
+		return Record{}, "", err
 	}
-	return rec, nil
+	return rec, hash, nil
 }
 
 func (w *Writer) currentHead() (unsignedHead, error) {

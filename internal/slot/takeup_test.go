@@ -294,3 +294,84 @@ func TestBeginWritesStartFileBeforeImplementingRecord(t *testing.T) {
 		t.Fatalf("digest mismatch: start.json has %s, unit evidence has %s", digestOf(body), unit.Evidence.SHA256)
 	}
 }
+
+func TestTakeUpRefusesPreemptedUnit(t *testing.T) {
+	work := runWork{outcome: OutcomeDone, commit: true}
+	run := newTestRun(t, &work)
+	run.job.waitErr = errors.New("simulated runner crash after start")
+	if _, err := Run(slotCtx(t), run.req); err == nil {
+		t.Fatal("Run() = nil, want crash")
+	}
+	ctx := slotCtx(t)
+	if _, err := run.record.Preempt(ctx, testUnit, "preempted before takeover", "operator"); err != nil {
+		t.Fatalf("Preempt: %v", err)
+	}
+	reqTakeUp := TakeUpRequest{
+		Repo: run.req.Repo,
+		Out:  run.req.Out,
+		Open: func(_ context.Context, _ string) (Job, UnitRecorder, error) {
+			return &standIn{end: JobEnd{Recorded: true}}, run.record, nil
+		},
+	}
+	_, err := TakeUp(ctx, reqTakeUp)
+	if err == nil || !strings.Contains(err.Error(), "unit was preempted: preempted before takeover") {
+		t.Fatalf("TakeUp() = %v, want error mentioning unit was preempted", err)
+	}
+	if _, statErr := os.Lstat(filepath.Join(run.req.Out, ReportFile)); !os.IsNotExist(statErr) {
+		t.Fatalf("report file was written (%v), want none", statErr)
+	}
+}
+
+type waitWorkJob struct {
+	*standIn
+	waitWork func()
+}
+
+func (j *waitWorkJob) Wait(ctx context.Context) (JobEnd, error) {
+	if j.waitWork != nil {
+		j.waitWork()
+	}
+	return j.standIn.Wait(ctx)
+}
+
+func TestTakeUpPreemptedAfterWait(t *testing.T) {
+	work := runWork{outcome: OutcomeDone, commit: true, evidence: true}
+	run := newTestRun(t, &work)
+	run.job.waitErr = errors.New("simulated runner crash after start")
+	if _, err := Run(slotCtx(t), run.req); err == nil {
+		t.Fatal("Run() = nil, want crash")
+	}
+	ctx := slotCtx(t)
+	job2 := &waitWorkJob{
+		standIn: &standIn{end: JobEnd{Recorded: true}},
+		waitWork: func() {
+			if _, preemptErr := run.record.Preempt(ctx, testUnit, "preempted during takeover wait", "operator"); preemptErr != nil {
+				t.Fatalf("Preempt: %v", preemptErr)
+			}
+		},
+	}
+	reqTakeUp := TakeUpRequest{
+		Repo: run.req.Repo,
+		Out:  run.req.Out,
+		Open: func(_ context.Context, _ string) (Job, UnitRecorder, error) {
+			return job2, run.record, nil
+		},
+	}
+	rep, err := TakeUp(ctx, reqTakeUp)
+	if err != nil {
+		t.Fatalf("TakeUp() = %v, want nil", err)
+	}
+	if rep.Outcome != OutcomePreempted {
+		t.Fatalf("rep.Outcome = %s, want %s", rep.Outcome, OutcomePreempted)
+	}
+	if rep.Reason != "preempted during takeover wait" {
+		t.Fatalf("rep.Reason = %q, want preempted during takeover wait", rep.Reason)
+	}
+	if rep.Taken() {
+		t.Fatal("rep.Taken() = true, want false")
+	}
+	u := run.unit(t)
+	if u.Status != "blocked" {
+		t.Fatalf("unit status = %s, want blocked", u.Status)
+	}
+}

@@ -12,8 +12,12 @@ import (
 	"github.com/golusoris/golusoris/core/clock"
 	corereceipt "github.com/golusoris/golusoris/core/crypto/receipt"
 	"github.com/jonboulle/clockwork"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+
 	"github.com/tekmora/epitrop/internal/config"
 	"github.com/tekmora/epitrop/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/telemetry"
 )
 
 const (
@@ -191,14 +195,45 @@ func (s *Supervisor) Preflight(name string) error {
 	return sandboxPreflight(job.Sandbox)
 }
 
-func (s *Supervisor) startOne(ctx context.Context, name string) error {
+func (s *Supervisor) startOne(ctx context.Context, name string) (err error) {
+	ctx, span := telemetry.Default().StartSpan(ctx, "supervisor.job.start", attribute.String("epitrop.job", name))
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
 	job, err := s.job(name)
 	if err != nil {
+		telemetry.Default().JobRun(ctx, "failed")
 		return err
 	}
-	if running, err := s.isRunning(job); err != nil || running {
+	running, err := s.isRunning(job)
+	if err != nil || running {
+		if err != nil {
+			telemetry.Default().JobRun(ctx, "failed")
+		}
 		return err
 	}
+	err = s.spawnAndAwait(ctx, job)
+	s.recordJobRun(ctx, err)
+	return err
+}
+
+func (s *Supervisor) recordJobRun(ctx context.Context, err error) {
+	if err == nil {
+		telemetry.Default().JobRun(ctx, "started")
+		return
+	}
+	if errors.Is(err, ErrRefused) {
+		telemetry.Default().JobRun(ctx, "refused")
+		return
+	}
+	telemetry.Default().JobRun(ctx, "failed")
+}
+
+func (s *Supervisor) spawnAndAwait(ctx context.Context, job config.JobConfig) error {
 	before, err := s.replayState(ctx)
 	if err != nil {
 		return err

@@ -63,6 +63,10 @@ The contract is described by `catalog/snapshot.schema.json`, and
 `epitropctl version` prints the release version, or `dev` for a source build.
 Releases, their signed artefacts and how to verify them are described in [Releasing](docs/releasing.md).
 
+`epitropctl` exports OpenTelemetry traces and metrics over OTLP once
+`OTEL_EXPORTER_OTLP_ENDPOINT` or a signal-specific endpoint is set. With no endpoint set, nothing is exported.
+[Telemetry](docs/telemetry.md) lists the spans and metrics.
+
 ## Documents
 
 - [Agent onboarding](docs/agent-onboarding.md)
@@ -70,6 +74,7 @@ Releases, their signed artefacts and how to verify them are described in [Releas
 - [Catalog data sync](docs/data-sync.md): installing `epitropctl`, the sources and their limits
 - [Releasing](docs/releasing.md)
 - [Architecture](docs/architecture-v2.md)
+- [Telemetry](docs/telemetry.md): spans and metrics, and how to export them
 - [Repository layout](docs/repository-layout-v2.md)
 - [Description](docs/epitrop-description-v2.md)
 - [Sources](docs/sources-list-v2.md)

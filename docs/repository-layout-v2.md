@@ -15,7 +15,7 @@ epitrop/
   internal/sources/          [now]     catalog sources (gateway, local, public)
   internal/sot/              [planned] task graph and state
   internal/mcp/              [planned] MCP bridge
-  internal/telemetry/        [planned] token and resource accounting
+  internal/telemetry/        [now]     spans and metrics for runs, tasks and side effects
   crates/epitrop-graph/     [planned] Rust vector kernel
   ui/                        [planned] Svelte 5 operator UI
   docs/                      [now]

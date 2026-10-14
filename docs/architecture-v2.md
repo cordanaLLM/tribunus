@@ -20,7 +20,7 @@ Status: design draft. Only the catalog exists in code today.
 
 ### Go control plane
 
-Owns task graphs, the event bus and budgets.
+Owns task graphs, the event bus and budgets. Runtime traces and metrics are documented in [telemetry](telemetry.md).
 
 `internal/graph` is the in-memory task graph store. It stages node, edge and
 status edits, validates the staged result with Kahn acyclicity, configured depth

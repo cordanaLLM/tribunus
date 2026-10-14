@@ -632,7 +632,8 @@ func TestReplayStableWaitsOutAnAppendInFlight(t *testing.T) {
 	restored := make(chan error, 1)
 	go func() {
 		time.Sleep(60 * time.Millisecond)
-		restored <- os.WriteFile(head, body, 0o600)
+		// An append replaces HEAD atomically; os.WriteFile would show the replay an empty file.
+		restored <- atomicReplace(filepath.Dir(head), filepath.Base(head), body, 0o600)
 	}()
 	st, err := ReplayStable(testContext(t), dir, signer.PublicKey(), limits, TaskReducer)
 	if writeErr := <-restored; writeErr != nil {

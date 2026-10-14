@@ -70,6 +70,7 @@ type ResumeRow struct {
 	PR        int
 	Lane      string
 	Relaunch  string
+	Evidence  string
 }
 
 // IsValidStatus reports whether s is a status of the task graph's vocabulary, the one

@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/jonboulle/clockwork"
 	"github.com/tekmora/epitrop/internal/config"
 	"github.com/tekmora/epitrop/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/slot"
 	"github.com/tekmora/epitrop/internal/units"
 )
 
@@ -218,7 +220,17 @@ func runUnitsResume(args []string) error {
 	fmt.Println("id\tstatus\tupdated_at\tworktree\tbranch\tpr\tlane\trelaunch")
 	for i := 0; i < len(rows); i++ {
 		r := rows[i]
-		fmt.Printf("%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n", r.ID, r.Status, r.UpdatedAt, r.Worktree, r.Branch, r.PR, r.Lane, r.Relaunch)
+		relaunch := r.Relaunch
+		if r.Status == "implementing" && filepath.Base(r.Evidence) == slot.StartFile {
+			dir := filepath.Dir(r.Evidence)
+			start, readErr := slot.ReadStart(dir)
+			if readErr != nil {
+				relaunch = fmt.Sprintf("no: start file unreadable: %v", readErr)
+			} else {
+				relaunch = fmt.Sprintf("no: take up with slot resume --out %s (job %s, workspace %s)", dir, start.Job, start.Workspace)
+			}
+		}
+		fmt.Printf("%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n", r.ID, r.Status, r.UpdatedAt, r.Worktree, r.Branch, r.PR, r.Lane, relaunch)
 	}
 	return nil
 }

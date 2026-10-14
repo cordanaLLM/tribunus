@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/tekmora/epitrop/internal/config"
 	"github.com/tekmora/epitrop/internal/slot"
 	"github.com/tekmora/epitrop/internal/supervisor"
 )
@@ -26,12 +27,16 @@ var (
 
 func runSlot(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("slot command required: run")
+		return fmt.Errorf("slot command required: run or resume")
 	}
-	if args[0] == "run" {
+	switch args[0] {
+	case "run":
 		return runSlotRun(args[1:])
+	case "resume":
+		return runSlotResume(args[1:])
+	default:
+		return fmt.Errorf("unknown slot command: %s", args[0])
 	}
-	return fmt.Errorf("unknown slot command: %s", args[0])
 }
 
 type slotRunFlags struct {
@@ -189,4 +194,97 @@ func printSlotReport(report slot.Report, out string) {
 			return
 		}
 	}
+}
+
+type slotResumeFlags struct {
+	repo, out *string
+}
+
+// runSlotResume takes up an interrupted run and prints what became of it: the unit with its
+// status and outcome, the branch with its head, the runner's report, and the reason or the
+// run's questions when there are any. It fails when the run's result was not taken.
+func runSlotResume(args []string) error {
+	fs := flag.NewFlagSet("slot resume", flag.ContinueOnError)
+	f := slotResumeFlags{
+		repo: fs.String("repo", ".", "the repository the unit belongs to"),
+		out:  fs.String("out", "", "directory for the run's report, result and evidence"),
+	}
+	pos, err := parseInterspersedFlags(fs, args)
+	if err != nil {
+		return err
+	}
+	req, posUnit, err := slotResumeRequest(f, pos)
+	if err != nil {
+		return err
+	}
+	if posUnit != "" {
+		start, readErr := slot.ReadStart(req.Out)
+		if readErr != nil {
+			return readErr
+		}
+		if posUnit != start.Unit {
+			return fmt.Errorf("slot resume: unit %s does not match %s in %s", posUnit, start.Unit, slot.StartFile)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), slotRunTimeout)
+	defer cancel()
+	report, err := slot.TakeUp(ctx, req)
+	if err != nil {
+		return err
+	}
+	printSlotReport(report, req.Out)
+	if !report.Taken() {
+		return fmt.Errorf("slot resume: %s is %s: %s: %s", report.Unit, report.Status, report.Outcome, report.Reason)
+	}
+	return nil
+}
+
+func slotResumeRequest(f slotResumeFlags, pos []string) (slot.TakeUpRequest, string, error) {
+	if len(pos) > 1 {
+		return slot.TakeUpRequest{}, "", fmt.Errorf("slot resume: at most one unit id is allowed")
+	}
+	if *f.out == "" {
+		return slot.TakeUpRequest{}, "", fmt.Errorf("slot resume: --out is required")
+	}
+	posUnit := ""
+	if len(pos) == 1 {
+		posUnit = pos[0]
+	}
+	paths := []*string{f.repo, f.out}
+	for i := 0; i < len(paths); i++ {
+		abs, absErr := filepath.Abs(*paths[i])
+		if absErr != nil {
+			return slot.TakeUpRequest{}, "", fmt.Errorf("slot resume: %w", absErr)
+		}
+		*paths[i] = abs
+	}
+	return slot.TakeUpRequest{
+		Repo: *f.repo,
+		Out:  *f.out,
+		Open: openSlotResume,
+	}, posUnit, nil
+}
+
+// openSlotResume opens a takeover under the supervisor from the run's existing configuration.
+func openSlotResume(ctx context.Context, out string) (slot.Job, slot.UnitRecorder, error) {
+	cfgPath := filepath.Join(out, slot.ConfigFile)
+	cfg, err := config.Load(ctx, cfgPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("slot resume: %w", err)
+	}
+	if len(cfg.Jobs) != 1 {
+		return nil, nil, fmt.Errorf("slot resume: %s must hold exactly one job", slot.ConfigFile)
+	}
+	if err = slot.CheckRunJob(cfg.Jobs[0]); err != nil {
+		return nil, nil, fmt.Errorf("slot resume: %s: %w", slot.ConfigFile, err)
+	}
+	sup, err := newJobsSupervisor(cfg, supervisor.Options{})
+	if err != nil {
+		return nil, nil, err
+	}
+	record, err := newUnitsService(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	return slot.NewSupervised(sup, cfg.Jobs[0], slotWaitInterval), record, nil
 }

@@ -12,7 +12,12 @@ import (
 	"github.com/golusoris/golusoris/core/clock"
 	corereceipt "github.com/golusoris/golusoris/core/crypto/receipt"
 	"github.com/jonboulle/clockwork"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/tekmora/epitrop/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/telemetry"
 )
 
 var (
@@ -95,22 +100,50 @@ func (l *Ledger) Do(ctx context.Context, key Key, fn func(context.Context) error
 	if fn == nil {
 		return Result{}, errors.New("effects: do: nil effect")
 	}
+	ctx, span := telemetry.Default().StartSpan(ctx, "effects.do", attribute.String("epitrop.effect.key", key.String()))
+	defer span.End()
+
 	st, err := l.Replay(ctx)
 	if err != nil {
-		return Result{}, err
+		return l.recordOutcome(ctx, span, Result{}, "failed", err)
 	}
 	switch st.Effects[key.String()].State {
 	case StateDone:
 		_, err = l.append(ctx, Skipped, key, payload{})
-		return Result{Skipped: err == nil}, err
+		outcome := "skipped"
+		if err != nil {
+			outcome = "failed"
+		}
+		return l.recordOutcome(ctx, span, Result{Skipped: err == nil}, outcome, err)
 	case StateClaimed, StateFailed:
-		return Result{}, unresolved(st.Effects[key.String()])
+		return l.recordOutcome(ctx, span, Result{}, "refused", unresolved(st.Effects[key.String()]))
 	}
+	res, outcome, err := l.claimAndRun(ctx, key, fn)
+	return l.recordOutcome(ctx, span, res, outcome, err)
+}
+
+func (l *Ledger) claimAndRun(ctx context.Context, key Key, fn func(context.Context) error) (Result, string, error) {
 	claimSeq, err := l.claim(ctx, key)
 	if err != nil {
-		return Result{}, err
+		if errors.Is(err, ErrClaimedElsewhere) {
+			return Result{}, "refused", err
+		}
+		return Result{}, "failed", err
 	}
-	return l.run(ctx, key, claimSeq, fn)
+	res, err := l.run(ctx, key, claimSeq, fn)
+	if err != nil {
+		return res, "failed", err
+	}
+	return res, "executed", nil
+}
+
+func (l *Ledger) recordOutcome(ctx context.Context, span trace.Span, res Result, outcome string, err error) (Result, error) {
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+	telemetry.Default().EffectRun(ctx, outcome)
+	return res, err
 }
 
 // claim appends a claim of key and returns its sequence number when the log holds it as the

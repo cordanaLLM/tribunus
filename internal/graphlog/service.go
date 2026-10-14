@@ -14,6 +14,7 @@ import (
 	"github.com/tekmora/epitrop/internal/config"
 	"github.com/tekmora/epitrop/internal/eventlog"
 	"github.com/tekmora/epitrop/internal/graph"
+	"github.com/tekmora/epitrop/internal/telemetry"
 )
 
 // Service is the write path of the task graph: it checks a stage against the graph the log
@@ -115,7 +116,16 @@ func (s *Service) Commit(ctx context.Context, ops []graph.Event) (graph.Snapshot
 	if err != nil {
 		return graph.Snapshot{}, err
 	}
-	return next.Snapshot()
+	snap, err := next.Snapshot()
+	if err != nil {
+		return graph.Snapshot{}, err
+	}
+	counts := make(map[graph.StatusName]int, len(snap.Nodes))
+	for i := 0; i < len(snap.Nodes); i++ {
+		counts[snap.Nodes[i].Status.Name]++
+	}
+	telemetry.Default().GraphTasks(ctx, counts)
+	return snap, nil
 }
 
 // writable returns the graph the log holds, bounded by the configured depth.

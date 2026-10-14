@@ -12,8 +12,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+
 	"github.com/tekmora/epitrop/internal/eventlog"
 	"github.com/tekmora/epitrop/internal/graph"
+	"github.com/tekmora/epitrop/internal/telemetry"
 	"github.com/tekmora/epitrop/internal/units"
 )
 
@@ -124,8 +128,16 @@ func (r Report) Taken() bool {
 // The returned error is nil when the run was recorded, whatever its outcome. An error after
 // the job was started leaves the unit as implementing: the runner does not know then what
 // became of the job.
-func Run(ctx context.Context, req RunRequest) (Report, error) {
-	if err := checkRun(ctx, req); err != nil {
+func Run(ctx context.Context, req RunRequest) (rep Report, err error) {
+	ctx, span := telemetry.Default().StartSpan(ctx, "slot.run", attribute.String("epitrop.unit", req.Unit))
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+	if err = checkRun(ctx, req); err != nil {
 		return Report{}, err
 	}
 	ws, err := Prepare(ctx, req.Request)
@@ -308,5 +320,6 @@ func finish(ctx context.Context, rec Recorder, req RunRequest, report Report) (R
 	if _, err = rec.Record(ctx, req.Unit, units.RecordPayload{Status: report.Status, Evidence: pointer}); err != nil {
 		return report, fmt.Errorf("slot: the run of %s ended as %s, and its record failed: %w", req.Unit, report.Outcome, err)
 	}
+	telemetry.Default().SlotRun(ctx, report.Outcome)
 	return report, nil
 }

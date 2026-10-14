@@ -6,62 +6,94 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
+	golusorisotel "github.com/golusoris/golusoris/otel"
 	"github.com/tekmora/epitrop/internal/egressproxy"
 )
 
 var version = ""
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	if len(os.Args) < 2 {
 		printUsage()
-		os.Exit(1)
+		return 1
 	}
 
-	var err error
 	switch os.Args[1] {
 	case "__job-shim":
-		os.Exit(runJobShim(os.Args[1:]))
+		return runJobShim(os.Args[1:])
 	case egressproxy.RelayCommand:
-		os.Exit(egressproxy.RunRelay(os.Args[1:], os.Stderr))
-	case "sync":
-		err = runSync(os.Args[2:])
-	case "jobs":
-		err = runJobs(os.Args[2:])
-	case "watch":
-		err = runWatch(os.Args[2:])
-	case "units":
-		err = runUnits(os.Args[2:])
-	case "graph":
-		err = runGraph(os.Args[2:])
-	case "effects":
-		err = runEffects(os.Args[2:])
-	case "slot":
-		err = runSlot(os.Args[2:])
-	case "show":
-		err = runShow(os.Args[2:])
-	case "schema":
-		err = runSchema(os.Stdout)
-	case "version":
-		printVersion()
-	case "help", "-h", "--help":
-		printUsage()
-		return
-	default:
-		printUsage()
-		err = fmt.Errorf("unknown command: %s", os.Args[1])
+		return egressproxy.RunRelay(os.Args[1:], os.Stderr)
 	}
 
+	opts := golusorisotel.DefaultOptions()
+	opts.Service.Name = "epitrop"
+	opts.Service.Version = appVersion()
+	opts.Export.Logs = false
+
+	initCtx, initCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	providers, err := golusorisotel.New(initCtx, opts)
+	initCancel()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "telemetry init: %v\n", err)
+	} else if providers != nil {
+		defer func() {
+			sCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if sErr := providers.Shutdown(sCtx); sErr != nil {
+				fmt.Fprintf(os.Stderr, "telemetry shutdown: %v\n", sErr)
+			}
+		}()
+	}
+
+	cmdErr := dispatchCommand(os.Args[1], os.Args[2:])
+	if cmdErr != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", cmdErr)
 		var exitCoder interface{ ExitCode() int }
-		if errors.As(err, &exitCoder) {
-			os.Exit(exitCoder.ExitCode())
+		if errors.As(cmdErr, &exitCoder) {
+			return exitCoder.ExitCode()
 		}
-		os.Exit(1)
+		return 1
+	}
+	return 0
+}
+
+var plainCommands = map[string]func([]string) error{
+	"sync":    runSync,
+	"jobs":    runJobs,
+	"watch":   runWatch,
+	"units":   runUnits,
+	"graph":   runGraph,
+	"effects": runEffects,
+	"slot":    runSlot,
+	"show":    runShow,
+}
+
+func dispatchCommand(cmd string, args []string) error {
+	if fn, ok := plainCommands[cmd]; ok {
+		return fn(args)
+	}
+	switch cmd {
+	case "schema":
+		return runSchema(os.Stdout)
+	case "version":
+		printVersion()
+		return nil
+	case "help", "-h", "--help":
+		printUsage()
+		return nil
+	default:
+		printUsage()
+		return fmt.Errorf("unknown command: %s", cmd)
 	}
 }
 
@@ -81,10 +113,13 @@ func printUsage() {
 	fmt.Println("  epitropctl slot run --config=template --base=rev --brief=file --workspace=dir --out=dir [--repo=dir] [--resume=file] [--decisions=file] <unit id>")
 }
 
-func printVersion() {
-	if version == "" {
-		fmt.Println("dev")
-		return
+func appVersion() string {
+	if version != "" {
+		return version
 	}
-	fmt.Println(version)
+	return "dev"
+}
+
+func printVersion() {
+	fmt.Println(appVersion())
 }

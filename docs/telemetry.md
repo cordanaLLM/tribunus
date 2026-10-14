@@ -36,8 +36,9 @@ Metric definitions are declared in the central catalog with bounded label cardin
 | Name | Kind | Labels | Help |
 | :--- | :--- | :--- | :--- |
 | `epitrop_effect_runs_total` | counter | `outcome` (`executed`, `failed`, `refused`, `skipped`) | Side effect runs through the effects ledger, by outcome. |
-| `epitrop_slot_runs_total` | counter | `outcome` (`blocked`, `done`, `failed`, `not-taken`, `refused`) | Slot runs that were recorded, by outcome. |
+| `epitrop_slot_runs_total` | counter | `outcome` (`blocked`, `done`, `failed`, `not-taken`, `preempted`, `refused`) | Slot runs that were recorded, by outcome. |
 | `epitrop_job_runs_total` | counter | `outcome` (`failed`, `refused`, `started`) | Supervisor job start attempts, by outcome. |
+| `epitrop_checkpoint_writes_total` | counter | `outcome` (`failed`, `written`) | Event log checkpoint write attempts, by outcome. |
 | `epitrop_graph_tasks` | gauge | `status` (`blocked`, `claimed`, `dropped`, `fix-round`, `implementing`, `landed`, `landing`, `proposed`, `queued`, `ready`, `review`) | Tasks in the task graph per status after the last committed change (queue depth). |
 
 Budget accounting metrics will arrive with issue [#6](https://github.com/tekmora/epitrop/issues/6). Admission metrics will arrive with issue [#40](https://github.com/tekmora/epitrop/issues/40).

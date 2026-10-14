@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/tekmora/epitrop/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/graph"
 )
 
 // UnitReducer rebuilds the run record from the shared log. It skips the other known
@@ -37,6 +38,8 @@ func UnitReducer(st eventlog.State, rec eventlog.Record) (eventlog.State, error)
 		return reduceUnitNote(st, rec)
 	case "unit.note_read":
 		return reduceUnitNoteRead(st, rec)
+	case "unit.preempted":
+		return reduceUnitPreempted(st, rec)
 	}
 	return eventlog.State{}, fmt.Errorf("eventlog: seq %d: unknown event type %q", rec.Seq, rec.Type)
 }
@@ -62,6 +65,36 @@ func reduceUnitRecorded(st eventlog.State, rec eventlog.Record) (eventlog.State,
 	unit.Status = payload.Status
 	unit.UpdatedAt = rec.Time
 	applyStickyFields(&unit, payload)
+	if unit.Status != string(graph.StatusBlocked) {
+		unit.Preempted = nil
+	}
+	st.Units[rec.TaskID] = unit
+	return st, nil
+}
+
+func reduceUnitPreempted(st eventlog.State, rec eventlog.Record) (eventlog.State, error) {
+	var payload PreemptPayload
+	if err := json.Unmarshal(rec.Payload, &payload); err != nil {
+		return eventlog.State{}, fmt.Errorf("eventlog: seq %d: payload: %w", rec.Seq, err)
+	}
+	if payload.Reason == "" {
+		return eventlog.State{}, fmt.Errorf("eventlog: seq %d: preempt reason is required", rec.Seq)
+	}
+	unit, exists := st.Units[rec.TaskID]
+	if !exists || !moveAllowed(unit.Status, string(graph.StatusBlocked), false) {
+		st.UnitRecordsIgnored++
+		return st, nil
+	}
+	unit.Status = string(graph.StatusBlocked)
+	unit.UpdatedAt = rec.Time
+	if payload.By != "" {
+		unit.By = payload.By
+	}
+	unit.Preempted = &eventlog.UnitPreemption{
+		Seq:    rec.Seq,
+		Reason: payload.Reason,
+		At:     rec.Time,
+	}
 	st.Units[rec.TaskID] = unit
 	return st, nil
 }

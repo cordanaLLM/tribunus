@@ -30,6 +30,8 @@ const (
 	// OutcomeNotTaken says the run ended and the runner did not take its result: there was
 	// none, it was not valid, or the repository did not take the branch. The reason says which.
 	OutcomeNotTaken = "not-taken"
+	// OutcomePreempted says the unit was preempted before start or after wait.
+	OutcomePreempted = "preempted"
 )
 
 // The files of a run's output directory, which lies outside the workspace.
@@ -114,7 +116,7 @@ type RunRequest struct {
 	// Open opens what the run takes from its configuration: its job and the run record.
 	// It is called when the workspace and the output directory exist, because the run's
 	// configuration names both.
-	Open func(ctx context.Context, ws Workspace, out string) (Job, Recorder, error)
+	Open func(ctx context.Context, ws Workspace, out string) (Job, UnitRecorder, error)
 }
 
 // Report is the runner's account of one run. The run's own claims, its summary and its
@@ -182,6 +184,14 @@ func Run(ctx context.Context, req RunRequest) (rep Report, err error) {
 	if err != nil {
 		return Report{}, errors.Join(err, removeWorkspace(ws.Dir), removeOut(req.Out))
 	}
+	u, err := rec.Show(ctx, req.Unit)
+	if err != nil {
+		return report, fmt.Errorf("slot: read unit %s before start: %w", req.Unit, err)
+	}
+	if u.Preempted != nil {
+		report.Outcome, report.Reason = OutcomePreempted, u.Preempted.Reason
+		return finish(ctx, rec, req, report)
+	}
 	if err = job.Start(ctx); errors.Is(err, ErrNotStarted) {
 		report.Outcome, report.Reason = OutcomeRefused, err.Error()
 		return finish(ctx, rec, req, report)
@@ -193,12 +203,7 @@ func Run(ctx context.Context, req RunRequest) (rep Report, err error) {
 	if err != nil {
 		return report, fmt.Errorf("slot: wait for the job of %s; the unit stays %s: %w", req.Unit, graph.StatusImplementing, err)
 	}
-	report.Job = &end
-	if err = take(ctx, req, ws, &report); err != nil {
-		report = Report{Unit: req.Unit, Workspace: ws.Dir, Branch: ws.Branch, Base: ws.Base, Job: &end}
-		report.Outcome, report.Reason = OutcomeNotTaken, err.Error()
-	}
-	return finish(ctx, rec, req, report)
+	return takeAndFinish(ctx, rec, req, ws, end, report)
 }
 
 func checkRun(ctx context.Context, req RunRequest) error {
@@ -227,7 +232,7 @@ func checkRun(ctx context.Context, req RunRequest) error {
 // begin does what has to hold before the job starts: the output directory exists, the job
 // can be started, and the unit is recorded as implementing. The record comes last and before
 // the start, so that a unit that may not move to implementing starts no job.
-func begin(ctx context.Context, req RunRequest, ws Workspace) (Job, Recorder, error) {
+func begin(ctx context.Context, req RunRequest, ws Workspace) (Job, UnitRecorder, error) {
 	if err := os.Mkdir(req.Out, 0o750); err != nil {
 		return nil, nil, fmt.Errorf("slot: %w", err)
 	}
@@ -347,13 +352,25 @@ func TakeUp(ctx context.Context, req TakeUpRequest) (rep Report, err error) {
 	if err != nil {
 		return report, fmt.Errorf("slot: wait for the job of %s; the unit stays %s: %w", start.Unit, graph.StatusImplementing, err)
 	}
-	report.Job = &end
 	runReq := RunRequest{Request: Request{Repo: req.Repo, Dir: ws.Dir, Base: ws.Base, Unit: start.Unit}, Out: req.Out}
-	if err = take(ctx, runReq, ws, &report); err != nil {
-		report = Report{Unit: start.Unit, Workspace: ws.Dir, Branch: ws.Branch, Base: ws.Base, Job: &end}
+	return takeAndFinish(ctx, rec, runReq, ws, end, report)
+}
+
+func takeAndFinish(ctx context.Context, rec UnitRecorder, req RunRequest, ws Workspace, end JobEnd, report Report) (Report, error) {
+	report.Job = &end
+	u, err := rec.Show(ctx, req.Unit)
+	if err != nil {
+		return report, fmt.Errorf("slot: read unit %s after wait: %w", req.Unit, err)
+	}
+	if u.Preempted != nil {
+		report.Outcome, report.Reason = OutcomePreempted, u.Preempted.Reason
+		return finish(ctx, rec, req, report)
+	}
+	if err = take(ctx, req, ws, &report); err != nil {
+		report = Report{Unit: req.Unit, Workspace: ws.Dir, Branch: ws.Branch, Base: ws.Base, Job: &end}
 		report.Outcome, report.Reason = OutcomeNotTaken, err.Error()
 	}
-	return finish(ctx, rec, runReq, report)
+	return finish(ctx, rec, req, report)
 }
 
 // checkTakeUp reads the start file and refuses a run that was recorded already. The take
@@ -388,6 +405,9 @@ func checkTakeUpUnit(ctx context.Context, rec UnitRecorder, start Start, out str
 	unit, err := rec.Show(ctx, start.Unit)
 	if err != nil {
 		return fmt.Errorf("slot: %w", err)
+	}
+	if unit.Preempted != nil {
+		return fmt.Errorf("slot: cannot take up unit %s: unit was preempted: %s", start.Unit, unit.Preempted.Reason)
 	}
 	startPath := filepath.Join(out, StartFile)
 	if unit.Status != string(graph.StatusImplementing) || unit.Worktree != start.Workspace || unit.Evidence == nil || unit.Evidence.Path != startPath {

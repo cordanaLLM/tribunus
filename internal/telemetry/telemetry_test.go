@@ -56,7 +56,9 @@ func TestMetricsInMemory(t *testing.T) {
 	ctx := context.Background()
 	tel.EffectRun(ctx, "executed")
 	tel.SlotRun(ctx, "done")
+	tel.SlotRun(ctx, "preempted")
 	tel.JobRun(ctx, "started")
+	tel.CheckpointWrite(ctx, "written")
 	tel.GraphTasks(ctx, map[graph.StatusName]int{
 		graph.StatusReady: 4,
 	})
@@ -67,8 +69,15 @@ func TestMetricsInMemory(t *testing.T) {
 	if v := rec.Value(t, MetricSlotRunsTotal, "outcome", "done"); v != 1 {
 		t.Errorf("slot runs done = %d, want 1", v)
 	}
+	// A preempted run is counted under its own outcome, not folded into the overflow value.
+	if v := rec.Value(t, MetricSlotRunsTotal, "outcome", "preempted"); v != 1 {
+		t.Errorf("slot runs preempted = %d, want 1", v)
+	}
 	if v := rec.Value(t, MetricJobRunsTotal, "outcome", "started"); v != 1 {
 		t.Errorf("job runs started = %d, want 1", v)
+	}
+	if v := rec.Value(t, MetricCheckpointWritesTotal, "outcome", "written"); v != 1 {
+		t.Errorf("checkpoint writes written = %d, want 1", v)
 	}
 	if v := rec.Value(t, MetricGraphTasks, "status", "ready"); v != 4 {
 		t.Errorf("graph tasks ready = %d, want 4", v)
@@ -89,8 +98,8 @@ func TestCatalogBuilds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildCatalog: %v", err)
 	}
-	if got := len(c.Defs()); got != 4 {
-		t.Fatalf("defs count = %d, want 4", got)
+	if got := len(c.Defs()); got != 5 {
+		t.Fatalf("defs count = %d, want 5", got)
 	}
 }
 
@@ -105,6 +114,7 @@ func TestCatalogVsExposedNamesBothWays(t *testing.T) {
 	tel.EffectRun(ctx, "executed")
 	tel.SlotRun(ctx, "done")
 	tel.JobRun(ctx, "started")
+	tel.CheckpointWrite(ctx, "written")
 	tel.GraphTasks(ctx, map[graph.StatusName]int{graph.StatusReady: 1})
 
 	mfs, err := reg.Gather()

@@ -20,7 +20,9 @@ func TestSupervisorTelemetryCallSite(t *testing.T) {
 	if err := sup.Start(testContext(t), "daemon"); err != nil {
 		t.Fatalf("Start() = %v, want nil", err)
 	}
-	_ = sup.Stop(testContext(t), "daemon")
+	if err := sup.Stop(testContext(t), "daemon"); err != nil {
+		t.Fatalf("Stop() = %v, want nil", err)
+	}
 
 	spans := rec.Spans()
 	found := false

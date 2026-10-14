@@ -172,7 +172,9 @@ func setupPrometheusTestRegistry(t *testing.T) (*prometheus.Registry, *golusoris
 		// golusoris always installs its composite propagator, so oldProp differs and is set
 		// back unconditionally: a composite propagator is a slice and cannot be compared.
 		otelapi.SetTextMapPropagator(oldProp)
-		_ = providers.Shutdown(context.Background())
+		if err := providers.Shutdown(context.Background()); err != nil {
+			t.Errorf("Shutdown: %v", err)
+		}
 	})
 	return reg, providers
 }
@@ -208,7 +210,11 @@ func parseDocsMetricNames(t *testing.T, docsPath string) map[string]bool {
 	if err != nil {
 		t.Fatalf("Open docs/telemetry.md: %v", err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Errorf("Close docs/telemetry.md: %v", err)
+		}
+	}()
 
 	docsMetrics := make(map[string]bool)
 	scanner := bufio.NewScanner(f)

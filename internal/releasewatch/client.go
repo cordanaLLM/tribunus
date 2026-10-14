@@ -35,8 +35,9 @@ type Client struct {
 	stdout             io.Writer
 	httpClient         *http.Client
 
-	mu        sync.Mutex
-	throttled bool
+	mu               sync.Mutex
+	throttled        bool
+	floorLimitLogged bool
 }
 
 func parseBaseURL(raw string, defaultURL string, name string) (*url.URL, error) {
@@ -173,6 +174,8 @@ func (c *Client) DoRequest(ctx context.Context, req *http.Request, timeout time.
 }
 
 func (c *Client) checkRateLimit(header http.Header) {
+	c.checkFloorLimitWarning(header)
+
 	remainingStr := header.Get("X-RateLimit-Remaining")
 	if remainingStr == "" {
 		return
@@ -192,6 +195,25 @@ func (c *Client) checkRateLimit(header http.Header) {
 	c.throttled = true
 	c.mu.Unlock()
 	c.Logf("release-watch: throttled remaining=%d reset=%s\n", remaining, resetTime.Format(time.RFC3339))
+}
+
+func (c *Client) checkFloorLimitWarning(header http.Header) {
+	limitStr := header.Get("X-RateLimit-Limit")
+	if limitStr == "" {
+		return
+	}
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || c.rateLimitFloor < limit {
+		return
+	}
+	c.mu.Lock()
+	if c.floorLimitLogged {
+		c.mu.Unlock()
+		return
+	}
+	c.floorLimitLogged = true
+	c.mu.Unlock()
+	c.Logf("release-watch: rate_limit_floor=%d is not below the GitHub rate limit=%d; every pass stops GitHub requests after the first answer; set GITHUB_TOKEN or lower rate_limit_floor\n", c.rateLimitFloor, limit)
 }
 
 func (c *Client) Logf(format string, a ...any) {

@@ -15,9 +15,9 @@ jobs:
     # Stop the job when it has run this long; 0 (the default) sets no deadline of its own.
     max_runtime_seconds: 0
     restart:
-      policy: on-failure
-      max_restarts: 3
-      backoff_seconds: 5
+      policy: never
+      max_restarts: 0
+      backoff_seconds: 0
     stop:
       signal: TERM
       grace_seconds: 10
@@ -39,6 +39,17 @@ jobs:
       # memory_high: 1536M
       cpu_weight: 100
       tasks_max: 512
+  # An event-triggered job starts once per matching record in the event log:
+  # - name: notify-on-sync
+  #   command: [/usr/local/bin/epitropctl, notify]
+  #   log_path: /var/log/epitrop/notify.log
+  #   schedule: event
+  #   on_event:
+  #     type: job.exited
+  #     task_id: daily-catalog-sync
+  #   router_alias: cordana/auto
+  #   restart:
+  #     policy: never
 watches:
   - name: catalog-source-change
     trigger: git:internal/sources

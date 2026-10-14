@@ -95,6 +95,30 @@
             "minLength": 0,
             "maxLength": 120
           },
+          "on_event": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "task_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "status": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            }
+          },
           "router_alias": {
             "type": "string",
             "default": "cordana/auto",

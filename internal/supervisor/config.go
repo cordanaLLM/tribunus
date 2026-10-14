@@ -47,6 +47,9 @@ func checkJob(job config.JobConfig) error {
 	if err := checkJobBounds(job); err != nil {
 		return err
 	}
+	if err := config.ValidateJobTrigger(job); err != nil {
+		return err
+	}
 	if err := config.ValidateSandbox(job.Sandbox); err != nil {
 		return fmt.Errorf("sandbox.%w", err)
 	}

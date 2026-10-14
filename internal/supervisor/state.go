@@ -23,13 +23,17 @@ type jobRecord struct {
 var jobRecordReadFile = os.ReadFile
 
 func (s *Supervisor) replayState(ctx context.Context) (eventlog.State, error) {
+	return s.replayStateWithReducer(ctx, JobReducer)
+}
+
+func (s *Supervisor) replayStateWithReducer(ctx context.Context, reducer eventlog.Reducer) (eventlog.State, error) {
 	events := filepath.Join(s.cfg.EventLog.Dir, "events")
 	if _, err := os.Stat(events); os.IsNotExist(err) {
 		return eventlog.State{Jobs: map[string]eventlog.Job{}}, nil
 	} else if err != nil {
 		return eventlog.State{}, fmt.Errorf("supervisor: stat %s: %w", events, err)
 	}
-	return eventlog.ReplayStable(ctx, s.cfg.EventLog.Dir, s.signer.PublicKey(), s.eventLogLimits(), JobReducer)
+	return eventlog.ReplayStable(ctx, s.cfg.EventLog.Dir, s.signer.PublicKey(), s.eventLogLimits(), reducer)
 }
 
 // eventLogLimits are the limits under which the supervisor reads and writes the event log.
@@ -59,6 +63,10 @@ func JobReducer(st eventlog.State, rec eventlog.Record) (eventlog.State, error) 
 		return reduceJobRestarted(st, rec)
 	case "job.stopped":
 		return reduceJobStopped(st, rec)
+	case "job.armed":
+		return reduceJobArmed(st, rec)
+	case "job.triggered":
+		return reduceJobTriggered(st, rec)
 	}
 	return st, nil
 }
@@ -133,6 +141,48 @@ func reduceJobStopped(st eventlog.State, rec eventlog.Record) (eventlog.State, e
 	return st, nil
 }
 
+func reduceJobArmed(st eventlog.State, rec eventlog.Record) (eventlog.State, error) {
+	var payload struct {
+		Trigger string `json:"trigger"`
+		At      string `json:"at"`
+	}
+	if err := json.Unmarshal(rec.Payload, &payload); err != nil {
+		return eventlog.State{}, fmt.Errorf("job payload: %w", err)
+	}
+	job := st.Jobs[rec.TaskID]
+	job.Name, job.LastEvent = rec.TaskID, rec.Type
+	// The armed record's own seq is the anchor: every record before it is history for this
+	// trigger, including records appended in the same reconcile pass after the replay that
+	// decided to arm. A HEAD read before that pass would leave those records to fire the job.
+	job.ArmedTrigger, job.ArmedAt, job.ArmedSeq = payload.Trigger, payload.At, rec.Seq
+	job.LastDue, job.LastTriggerSeq = "", 0
+	st.Jobs[rec.TaskID] = job
+	return st, nil
+}
+
+func reduceJobTriggered(st eventlog.State, rec eventlog.Record) (eventlog.State, error) {
+	var payload struct {
+		Trigger string `json:"trigger"`
+		Outcome string `json:"outcome"`
+		Reason  string `json:"reason,omitempty"`
+		Due     string `json:"due,omitempty"`
+		Seq     uint64 `json:"seq,omitempty"`
+	}
+	if err := json.Unmarshal(rec.Payload, &payload); err != nil {
+		return eventlog.State{}, fmt.Errorf("job payload: %w", err)
+	}
+	job := st.Jobs[rec.TaskID]
+	job.Name, job.LastEvent = rec.TaskID, rec.Type
+	if payload.Due != "" {
+		job.LastDue = payload.Due
+	}
+	if payload.Seq != 0 {
+		job.LastTriggerSeq = payload.Seq
+	}
+	st.Jobs[rec.TaskID] = job
+	return st, nil
+}
+
 func (s *Supervisor) statusFor(job config.JobConfig, replayed eventlog.Job) JobStatus {
 	rec, hasRecord := readJobRecord(s.recordPath(job.Name))
 	running := false
@@ -184,10 +234,25 @@ func (s *Supervisor) appendJobEvent(ctx context.Context, typ string, name string
 	return err
 }
 
-func (s *Supervisor) reconcileJob(ctx context.Context, job config.JobConfig, st eventlog.Job) error {
-	if job.Schedule != "always" {
+func (s *Supervisor) reconcileJob(ctx context.Context, job config.JobConfig, st eventlog.Job, matches []uint64, replayHead uint64) error {
+	switch job.Schedule {
+	case "always":
+		return s.reconcileAlwaysJob(ctx, job, st)
+	case "once":
 		return nil
 	}
+	// Every other schedule is "event" or a cron expression; config validation refuses the rest.
+	armedState, err := s.ensureArmed(ctx, job, st, replayHead)
+	if err != nil {
+		return err
+	}
+	if job.Schedule == "event" {
+		return s.reconcileEventJob(ctx, job, armedState, matches)
+	}
+	return s.reconcileCronJob(ctx, job, armedState)
+}
+
+func (s *Supervisor) reconcileAlwaysJob(ctx context.Context, job config.JobConfig, st eventlog.Job) error {
 	status := s.statusFor(job, st)
 	if status.State == StateRunning {
 		return s.adoptIfFreshStart(ctx, job, st, status)

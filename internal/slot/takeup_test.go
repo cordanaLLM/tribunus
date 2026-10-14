@@ -45,8 +45,14 @@ func TestTakeUpEqualsUninterruptedRun(t *testing.T) {
 	if unitB.Status != unitA.Status || unitB.Status != "review" {
 		t.Fatalf("unit B status = %s, want %s (review)", unitB.Status, unitA.Status)
 	}
-	if repB.Outcome != repA.Outcome || repB.Status != repA.Status || repB.Published != repA.Published || repB.Head == "" || repB.Head != repA.Head {
+	if repB.Outcome != repA.Outcome || repB.Status != repA.Status || repB.Published != repA.Published || repB.Head == "" {
 		t.Fatalf("report B = %+v, want equal to report A %+v", repB, repA)
+	}
+	// The two runs use separate repositories made at different times, so their commit ids differ
+	// whenever the runs cross a second; the published trees must be the same.
+	treeA := gitIn(t, runA.repo, "rev-parse", repA.Head+"^{tree}")
+	if treeB := gitIn(t, runB.repo, "rev-parse", repB.Head+"^{tree}"); treeB != treeA {
+		t.Fatalf("published tree B = %s, want tree A %s (heads %s, %s)", treeB, treeA, repB.Head, repA.Head)
 	}
 	wantPath := filepath.Join(runB.req.Out, ReportFile)
 	if unitB.Evidence == nil || unitB.Evidence.Path != wantPath {

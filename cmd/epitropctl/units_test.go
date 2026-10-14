@@ -112,22 +112,12 @@ func TestRunUnitsBadFlagsExit2(t *testing.T) {
 	}
 }
 
-// buildCLI builds the command into a directory of the test and returns its path.
-func buildCLI(ctx context.Context, t *testing.T) string {
-	t.Helper()
-	bin := filepath.Join(t.TempDir(), "epitropctl")
-	buildCmd := exec.CommandContext(ctx, "go", "build", "-o", bin, ".")
-	if out, err := buildCmd.CombinedOutput(); err != nil {
-		t.Fatalf("build epitropctl: %v\n%s", err, out)
-	}
-	return bin
-}
-
 func TestCLIUnitsBadFlagsExit2Subprocess(t *testing.T) {
+	bin := buildCLI(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, buildCLI(ctx, t), "units", "set", "--bad-flag")
+	cmd := exec.CommandContext(ctx, bin, "units", "set", "--bad-flag")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

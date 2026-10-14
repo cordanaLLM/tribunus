@@ -164,7 +164,7 @@ type testRun struct {
 	base   string
 	record *units.Service
 	// recorder is what the run records through; a test replaces it to plant a failure.
-	recorder Recorder
+	recorder UnitRecorder
 	job      *standIn
 	req      RunRequest
 }
@@ -175,7 +175,7 @@ func newTestRun(t *testing.T, w *runWork) *testRun {
 	run := &testRun{repo: repo, base: second, record: runRecord(t), job: &standIn{end: JobEnd{Recorded: true}}}
 	run.req = RunRequest{Request: request(t, repo, second), Out: filepath.Join(t.TempDir(), "out")}
 	run.recorder = run.record
-	run.req.Open = func(_ context.Context, ws Workspace, out string) (Job, Recorder, error) {
+	run.req.Open = func(_ context.Context, ws Workspace, out string) (Job, UnitRecorder, error) {
 		if w != nil {
 			run.job.work = func() { doWork(t, ws, out, *w) }
 		}
@@ -384,15 +384,15 @@ func TestRunLeavesNothingWhenItCannotBegin(t *testing.T) {
 		want string
 	}{
 		{"a configuration that cannot be opened", func(r *testRun) {
-			r.req.Open = func(context.Context, Workspace, string) (Job, Recorder, error) {
+			r.req.Open = func(context.Context, Workspace, string) (Job, UnitRecorder, error) {
 				return nil, nil, errors.New("planted: no configuration")
 			}
 		}, "planted: no configuration"},
 		{"no job", func(r *testRun) {
-			r.req.Open = func(context.Context, Workspace, string) (Job, Recorder, error) { return nil, r.record, nil }
+			r.req.Open = func(context.Context, Workspace, string) (Job, UnitRecorder, error) { return nil, r.record, nil }
 		}, "has no job or no run record"},
 		{"no run record", func(r *testRun) {
-			r.req.Open = func(context.Context, Workspace, string) (Job, Recorder, error) { return r.job, nil, nil }
+			r.req.Open = func(context.Context, Workspace, string) (Job, UnitRecorder, error) { return r.job, nil, nil }
 		}, "has no job or no run record"},
 		{"a failed preflight", func(r *testRun) { r.job.preflightErr = errors.New("planted: the slot is busy") }, "cannot start: planted: the slot is busy"},
 		{"a unit that cannot be recorded as implementing", func(r *testRun) {
@@ -812,4 +812,92 @@ func TestRunTakesNoBranchItCannotRead(t *testing.T) {
 	checkNotTaken(t, "a head that cannot be read", runWork{outcome: OutcomeDone, commit: true}, "read the fetched "+Branch(testUnit))
 	failing("cat-file", "")
 	checkNotTaken(t, "a head whose kind cannot be read", runWork{outcome: OutcomeDone, commit: true}, "read what the fetched "+Branch(testUnit))
+}
+
+type preemptBeforeStartRecorder struct {
+	UnitRecorder
+	preemptReason string
+}
+
+func (r preemptBeforeStartRecorder) Record(ctx context.Context, id string, payload units.RecordPayload) (eventlog.Unit, error) {
+	u, err := r.UnitRecorder.Record(ctx, id, payload)
+	if err != nil {
+		return u, err
+	}
+	if payload.Status == "implementing" {
+		if svc, ok := r.UnitRecorder.(*units.Service); ok {
+			return svc.Preempt(ctx, id, r.preemptReason, "operator")
+		}
+	}
+	return u, nil
+}
+
+func TestRunPreemptedBeforeStart(t *testing.T) {
+	run := newTestRun(t, nil)
+	run.recorder = preemptBeforeStartRecorder{UnitRecorder: run.record, preemptReason: "priority halt"}
+	report, err := Run(slotCtx(t), run.req)
+	if err != nil {
+		t.Fatalf("Run() = %v, want nil", err)
+	}
+	if report.Outcome != OutcomePreempted {
+		t.Fatalf("report.Outcome = %s, want %s", report.Outcome, OutcomePreempted)
+	}
+	if report.Reason != "priority halt" {
+		t.Fatalf("report.Reason = %q, want priority halt", report.Reason)
+	}
+	if report.Taken() {
+		t.Fatal("report.Taken() = true, want false")
+	}
+	if run.job.started != 0 {
+		t.Fatalf("run.job.started = %d, want 0", run.job.started)
+	}
+	u := run.unit(t)
+	if u.Status != "blocked" {
+		t.Fatalf("unit status = %s, want blocked", u.Status)
+	}
+	if u.Preempted == nil || u.Preempted.Reason != "priority halt" {
+		t.Fatalf("unit.Preempted = %+v, want priority halt", u.Preempted)
+	}
+	if u.Evidence == nil || filepath.Base(u.Evidence.Path) != ReportFile {
+		t.Fatalf("unit.Evidence = %+v, want pointer to %s", u.Evidence, ReportFile)
+	}
+}
+
+func TestRunPreemptedAfterWait(t *testing.T) {
+	work := runWork{outcome: OutcomeDone, commit: true, evidence: true}
+	run := newTestRun(t, &work)
+	origOpen := run.req.Open
+	run.req.Open = func(ctx context.Context, ws Workspace, out string) (Job, UnitRecorder, error) {
+		job, rec, err := origOpen(ctx, ws, out)
+		if err != nil {
+			return nil, nil, err
+		}
+		run.job.work = func() {
+			doWork(t, ws, out, work)
+			if _, preemptErr := run.record.Preempt(ctx, testUnit, "stopped while waiting", "operator"); preemptErr != nil {
+				t.Fatalf("Preempt: %v", preemptErr)
+			}
+		}
+		return job, rec, nil
+	}
+	report, err := Run(slotCtx(t), run.req)
+	if err != nil {
+		t.Fatalf("Run() = %v, want nil", err)
+	}
+	if report.Outcome != OutcomePreempted {
+		t.Fatalf("report.Outcome = %s, want %s", report.Outcome, OutcomePreempted)
+	}
+	if report.Taken() {
+		t.Fatal("report.Taken() = true, want false")
+	}
+	if report.Published {
+		t.Fatal("report.Published = true, want false (no branch published on preemption)")
+	}
+	if report.Result != nil {
+		t.Fatalf("report.Result = %+v, want nil (no result taken)", report.Result)
+	}
+	u := run.unit(t)
+	if u.Status != "blocked" {
+		t.Fatalf("unit status = %s, want blocked", u.Status)
+	}
 }

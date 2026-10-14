@@ -24,6 +24,8 @@ const (
 	MetricSlotRunsTotal = "epitrop_slot_runs_total"
 	// MetricJobRunsTotal counts supervisor job start attempts by outcome.
 	MetricJobRunsTotal = "epitrop_job_runs_total"
+	// MetricCheckpointWritesTotal counts event log checkpoint write attempts by outcome.
+	MetricCheckpointWritesTotal = "epitrop_checkpoint_writes_total"
 	// MetricGraphTasks tracks tasks in the task graph per status.
 	MetricGraphTasks = "epitrop_graph_tasks"
 )
@@ -66,6 +68,7 @@ func runMetricDefs() []metricdef.Def {
 						"done",
 						"failed",
 						"not-taken",
+						"preempted",
 						"refused",
 					},
 				},
@@ -79,6 +82,17 @@ func runMetricDefs() []metricdef.Def {
 			Limits: map[string]metricdef.LabelLimit{
 				"outcome": {
 					Allow: []string{"failed", "refused", "started"},
+				},
+			},
+		},
+		{
+			Name:   MetricCheckpointWritesTotal,
+			Help:   "Event log checkpoint write attempts, by outcome.",
+			Kind:   metricdef.KindCounter,
+			Labels: []string{"outcome"},
+			Limits: map[string]metricdef.LabelLimit{
+				"outcome": {
+					Allow: []string{"failed", "written"},
 				},
 			},
 		},

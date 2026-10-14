@@ -13,6 +13,11 @@ import (
 	corereceipt "github.com/golusoris/golusoris/core/crypto/receipt"
 	"github.com/jonboulle/clockwork"
 	"github.com/tekmora/epitrop/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/graph"
+	"github.com/tekmora/epitrop/internal/telemetry"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type Service struct {
@@ -38,28 +43,78 @@ func NewService(dir string, signer *corereceipt.Signer, clk clock.Clock, limits 
 // Replay rebuilds the run record. A log directory that holds no events yet is an empty
 // record, not an error.
 func (s *Service) Replay(ctx context.Context) (eventlog.State, error) {
+	st, _, err := s.ReplayCheckpointed(ctx)
+	return st, err
+}
+
+// ReplayCheckpointed rebuilds the run record, using checkpoints when available.
+func (s *Service) ReplayCheckpointed(ctx context.Context) (eventlog.State, eventlog.CheckpointUse, error) {
 	if err := readyContext(ctx, "replay"); err != nil {
-		return eventlog.State{}, err
+		return eventlog.State{}, eventlog.CheckpointUse{}, err
 	}
+	events := filepath.Join(s.dir, "events")
+	if _, err := os.Stat(events); os.IsNotExist(err) {
+		return eventlog.State{Units: map[string]eventlog.Unit{}}, eventlog.CheckpointUse{}, nil
+	} else if err != nil {
+		return eventlog.State{}, eventlog.CheckpointUse{}, fmt.Errorf("units: stat %s: %w", events, err)
+	}
+	st, use, err := eventlog.ReplayCheckpointedStable(ctx, s.dir, s.signer.PublicKey(), s.limits, "units", UnitReducer)
+	if err != nil {
+		return eventlog.State{}, eventlog.CheckpointUse{}, err
+	}
+	if use.Diverged != nil {
+		if dErr := s.handleDivergence(ctx, use.Diverged); dErr != nil {
+			return eventlog.State{}, eventlog.CheckpointUse{}, dErr
+		}
+	}
+	return st, use, nil
+}
+
+func (s *Service) replayRaw(ctx context.Context) (eventlog.State, error) {
 	events := filepath.Join(s.dir, "events")
 	if _, err := os.Stat(events); os.IsNotExist(err) {
 		return eventlog.State{Units: map[string]eventlog.Unit{}}, nil
 	} else if err != nil {
 		return eventlog.State{}, fmt.Errorf("units: stat %s: %w", events, err)
 	}
-	return eventlog.ReplayStable(ctx, s.dir, s.signer.PublicKey(), s.limits, UnitReducer)
+	st, _, err := eventlog.ReplayCheckpointedStable(ctx, s.dir, s.signer.PublicKey(), s.limits, "units", UnitReducer)
+	return st, err
 }
 
-// appendChecked opens an eventlog writer and appends the event returned by build.
-// The check runs under the log's lock (#108).
-func (s *Service) appendChecked(ctx context.Context, build func(eventlog.State) (eventlog.Event, error)) (eventlog.State, error) {
+func (s *Service) handleDivergence(ctx context.Context, div *eventlog.Divergence) error {
+	body, err := json.Marshal(div)
+	if err != nil {
+		return fmt.Errorf("units: marshal log.diverged: %w", err)
+	}
+	_, _, _, err = s.appendCheckedRecord(ctx, func(eventlog.State) (eventlog.Event, error) {
+		// The rename runs under the log's lock. A second replay that saw the same checkpoint
+		// before the first one renamed it finds the file gone and appends nothing, so the
+		// divergence is logged once.
+		refused := div.File + ".refused"
+		if renErr := os.Rename(div.File, refused); os.IsNotExist(renErr) {
+			return eventlog.Event{}, errDivergenceLogged
+		} else if renErr != nil {
+			return eventlog.Event{}, fmt.Errorf("units: rename %s to %s: %w", div.File, refused, renErr)
+		}
+		return eventlog.Event{Type: "log.diverged", TaskID: "log", Payload: body}, nil
+	})
+	if errors.Is(err, errDivergenceLogged) {
+		return nil
+	}
+	return err
+}
+
+// errDivergenceLogged says another writer has logged and renamed the diverged checkpoint.
+var errDivergenceLogged = errors.New("units: diverged checkpoint already logged")
+
+func (s *Service) appendCheckedRecord(ctx context.Context, build func(eventlog.State) (eventlog.Event, error)) (eventlog.State, eventlog.Record, string, error) {
 	writer, err := eventlog.Open(s.dir, s.signer, s.limits)
 	if err != nil {
-		return eventlog.State{}, err
+		return eventlog.State{}, eventlog.Record{}, "", err
 	}
 	var capturedSt eventlog.State
-	rec, err := writer.AppendChecked(ctx, func(cctx context.Context) (eventlog.Event, error) {
-		st, replayErr := s.Replay(cctx)
+	rec, recHash, err := writer.AppendCheckedWithHash(ctx, func(cctx context.Context) (eventlog.Event, error) {
+		st, replayErr := s.replayRaw(cctx)
 		if replayErr != nil {
 			return eventlog.Event{}, replayErr
 		}
@@ -71,27 +126,48 @@ func (s *Service) appendChecked(ctx context.Context, build func(eventlog.State) 
 		return ev, nil
 	})
 	if err != nil {
-		return eventlog.State{}, err
+		return eventlog.State{}, eventlog.Record{}, "", err
 	}
-	return UnitReducer(capturedSt, rec)
+	nextSt, err := UnitReducer(capturedSt, rec)
+	return nextSt, rec, recHash, err
+}
+
+// appendChecked opens an eventlog writer and appends the event returned by build.
+// The check runs under the log's lock (#108).
+func (s *Service) appendChecked(ctx context.Context, build func(eventlog.State) (eventlog.Event, error)) (eventlog.State, error) {
+	st, _, _, err := s.appendCheckedRecord(ctx, build)
+	return st, err
 }
 
 // Record appends one status record and returns the unit as it stands after it.
-func (s *Service) Record(ctx context.Context, id string, payload RecordPayload) (eventlog.Unit, error) {
-	if err := readyContext(ctx, "record"); err != nil {
+func (s *Service) Record(ctx context.Context, id string, payload RecordPayload) (u eventlog.Unit, err error) {
+	ctx, span := telemetry.Default().StartSpan(ctx, "units.record", attribute.String("epitrop.unit", id))
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+	if err = readyContext(ctx, "record"); err != nil {
 		return eventlog.Unit{}, err
 	}
 	if !IsValidID(id) {
 		return eventlog.Unit{}, fmt.Errorf("units: invalid unit id %q", id)
 	}
-	if err := validateRecordPayload(payload); err != nil {
+	if err = validateRecordPayload(payload); err != nil {
 		return eventlog.Unit{}, err
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return eventlog.Unit{}, fmt.Errorf("units: marshal payload: %w", err)
 	}
-	st, err := s.appendChecked(ctx, func(st eventlog.State) (eventlog.Event, error) {
+	var statusChanged bool
+	st, rec, recHash, err := s.appendCheckedRecord(ctx, func(st eventlog.State) (eventlog.Event, error) {
+		existing, exists := st.Units[id]
+		if !exists || existing.Status != payload.Status {
+			statusChanged = true
+		}
 		if valErr := validateRecordState(st, id, payload.Status, payload.Reopen); valErr != nil {
 			return eventlog.Event{}, valErr
 		}
@@ -99,6 +175,70 @@ func (s *Service) Record(ctx context.Context, id string, payload RecordPayload) 
 	})
 	if err != nil {
 		return eventlog.Unit{}, err
+	}
+	if statusChanged {
+		s.writeCheckpointSafe(ctx, span, rec.Seq, recHash, st)
+	}
+	return st.Units[id], nil
+}
+
+func (s *Service) writeCheckpointSafe(ctx context.Context, span trace.Span, seq uint64, hash string, st eventlog.State) {
+	writer, err := eventlog.Open(s.dir, s.signer, s.limits)
+	if err != nil {
+		span.RecordError(err)
+		telemetry.Default().CheckpointWrite(ctx, "failed")
+		return
+	}
+	if err = writer.WriteCheckpoint(ctx, "units", seq, hash, st); err != nil {
+		span.RecordError(err)
+		telemetry.Default().CheckpointWrite(ctx, "failed")
+		return
+	}
+	telemetry.Default().CheckpointWrite(ctx, "written")
+}
+
+// Preempt marks an active unit as preempted with a reason and actor.
+func (s *Service) Preempt(ctx context.Context, id string, reason string, by string) (u eventlog.Unit, err error) {
+	ctx, span := telemetry.Default().StartSpan(ctx, "units.preempt", attribute.String("epitrop.unit", id))
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+	if err = readyContext(ctx, "preempt"); err != nil {
+		return eventlog.Unit{}, err
+	}
+	if err = validatePreemptInput(id, reason, by); err != nil {
+		return eventlog.Unit{}, err
+	}
+	body, err := json.Marshal(PreemptPayload{Reason: reason, By: by})
+	if err != nil {
+		return eventlog.Unit{}, fmt.Errorf("units: marshal preempt payload: %w", err)
+	}
+	var statusChanged bool
+	st, rec, recHash, err := s.appendCheckedRecord(ctx, func(st eventlog.State) (eventlog.Event, error) {
+		existing, exists := st.Units[id]
+		if !exists {
+			return eventlog.Event{}, fmt.Errorf("units: unit %q does not exist", id)
+		}
+		if valErr := transitionRefusal(existing.Status, string(graph.StatusBlocked), false); valErr != nil {
+			if IsTerminalStatus(existing.Status) {
+				return eventlog.Event{}, fmt.Errorf("units: %q is %s; cannot preempt", id, existing.Status)
+			}
+			return eventlog.Event{}, fmt.Errorf("units: %q: %w", id, valErr)
+		}
+		if existing.Status != string(graph.StatusBlocked) {
+			statusChanged = true
+		}
+		return eventlog.Event{Type: "unit.preempted", TaskID: id, Payload: body}, nil
+	})
+	if err != nil {
+		return eventlog.Unit{}, err
+	}
+	if statusChanged {
+		s.writeCheckpointSafe(ctx, span, rec.Seq, recHash, st)
 	}
 	return st.Units[id], nil
 }

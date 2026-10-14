@@ -23,13 +23,17 @@ func TestSlotTelemetryCallSite(t *testing.T) {
 	}
 
 	spans := rec.Spans()
-	if len(spans) != 1 {
-		t.Fatalf("spans count = %d, want 1", len(spans))
+	var slotSpanIdx = -1
+	for i := 0; i < len(spans); i++ {
+		if spans[i].Name == "slot.run" {
+			slotSpanIdx = i
+			break
+		}
 	}
-	if spans[0].Name != "slot.run" {
-		t.Errorf("span name = %s, want slot.run", spans[0].Name)
+	if slotSpanIdx < 0 {
+		t.Fatalf("span slot.run not found in spans (%d total)", len(spans))
 	}
-	if val, ok := rec.SpanAttr(spans[0], "epitrop.unit"); !ok || val != testUnit {
+	if val, ok := rec.SpanAttr(spans[slotSpanIdx], "epitrop.unit"); !ok || val != testUnit {
 		t.Errorf("epitrop.unit attribute %q (ok=%v), want %s", val, ok, testUnit)
 	}
 
@@ -52,11 +56,12 @@ func TestSlotOutcomesMatchTelemetryCatalog(t *testing.T) {
 		catalogAllowed[a] = true
 	}
 	expected := map[string]bool{
-		OutcomeDone:     true,
-		OutcomeBlocked:  true,
-		OutcomeFailed:   true,
-		OutcomeRefused:  true,
-		OutcomeNotTaken: true,
+		OutcomeDone:      true,
+		OutcomeBlocked:   true,
+		OutcomeFailed:    true,
+		OutcomeRefused:   true,
+		OutcomeNotTaken:  true,
+		OutcomePreempted: true,
 	}
 	for exp := range expected {
 		if !catalogAllowed[exp] {

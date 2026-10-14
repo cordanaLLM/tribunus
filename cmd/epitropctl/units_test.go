@@ -73,7 +73,7 @@ func TestRunUnitsRejectsMissingAndUnknownCommand(t *testing.T) {
 }
 
 func TestRunUnitsRequiresConfig(t *testing.T) {
-	for _, action := range []string{"resume", "set", "note", "inbox"} {
+	for _, action := range []string{"resume", "set", "note", "inbox", "preempt"} {
 		t.Run(action, func(t *testing.T) {
 			var args []string
 			if action == "resume" {
@@ -86,6 +86,8 @@ func TestRunUnitsRequiresConfig(t *testing.T) {
 				args = append(args, "--status=ready")
 			case "note":
 				args = append(args, "--from=alice", "hello")
+			case "preempt":
+				args = append(args, "--reason=emergency")
 			}
 			err := runUnits(args)
 			if err == nil || !strings.Contains(err.Error(), "--config is required") {
@@ -96,7 +98,7 @@ func TestRunUnitsRequiresConfig(t *testing.T) {
 }
 
 func TestRunUnitsBadFlagsExit2(t *testing.T) {
-	for _, action := range []string{"set", "resume", "show", "note", "inbox"} {
+	for _, action := range []string{"set", "resume", "show", "note", "inbox", "preempt"} {
 		t.Run(action, func(t *testing.T) {
 			err := runUnits([]string{action, "-bad-flag"})
 			if err == nil || !strings.Contains(err.Error(), "flag provided") {
@@ -412,5 +414,37 @@ func TestRunUnitsResumeWithStartFileEvidence(t *testing.T) {
 	}
 	if lineWithout == "" || !strings.HasSuffix(lineWithout, "\tsafe") {
 		t.Fatalf("row for unit without pointer = %q, want safe relaunch", lineWithout)
+	}
+}
+
+func TestRunUnitsPreemptAndResume(t *testing.T) {
+	cfgPath, _ := writeUnitsConfig(t)
+	id := "tekmora/epitrop#33"
+
+	if err := runUnits([]string{"set", "--config=" + cfgPath, id, "--status=implementing"}); err != nil {
+		t.Fatalf("runUnits set: %v", err)
+	}
+
+	if err := runUnits([]string{"preempt", "--config=" + cfgPath, id}); err == nil {
+		t.Fatal("preempt without --reason succeeded, want error")
+	}
+
+	out := captureStdoutUnits(t, func() {
+		err := runUnits([]string{"preempt", "--config=" + cfgPath, id, "--reason=shift priority", "--by=alice"})
+		if err != nil {
+			t.Fatalf("runUnits preempt: %v", err)
+		}
+	})
+	if !strings.Contains(out, `"status": "blocked"`) || !strings.Contains(out, `"reason": "shift priority"`) {
+		t.Fatalf("preempt output = %q, want blocked status and preemption reason", out)
+	}
+
+	resumeOut := captureStdoutUnits(t, func() {
+		if err := runUnits([]string{"resume", "--config=" + cfgPath}); err != nil {
+			t.Fatalf("runUnits resume: %v", err)
+		}
+	})
+	if !strings.Contains(resumeOut, id+"\tblocked\t") || !strings.Contains(resumeOut, "no: preempted: shift priority") {
+		t.Fatalf("resume output = %q, want blocked with preempted relaunch reason", resumeOut)
 	}
 }

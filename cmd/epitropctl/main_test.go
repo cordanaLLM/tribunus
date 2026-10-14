@@ -11,10 +11,11 @@ import (
 )
 
 func TestHelpOutputFramesEpitropAsGraphRouter(t *testing.T) {
+	bin := buildCLI(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
-	output, err := exec.CommandContext(ctx, "go", "run", ".", "--help").CombinedOutput()
+	output, err := exec.CommandContext(ctx, bin, "--help").CombinedOutput()
 	if err != nil {
 		t.Fatalf("epitropctl --help: %v\n%s", err, output)
 	}
@@ -33,10 +34,11 @@ func TestHelpOutputFramesEpitropAsGraphRouter(t *testing.T) {
 }
 
 func TestSchemaCommandPrintsSnapshotSchema(t *testing.T) {
+	bin := buildCLI(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
-	output, err := exec.CommandContext(ctx, "go", "run", ".", "schema").CombinedOutput()
+	output, err := exec.CommandContext(ctx, bin, "schema").CombinedOutput()
 	if err != nil {
 		t.Fatalf("epitropctl schema: %v\n%s", err, output)
 	}
@@ -49,14 +51,15 @@ func TestSchemaCommandPrintsSnapshotSchema(t *testing.T) {
 }
 
 func TestVersionOutputUsesInjectedVersion(t *testing.T) {
+	bin := buildCLI(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
-	output, err := exec.CommandContext(ctx, "go", "run", "-ldflags=-X main.version=v9.8.7", ".", "version").CombinedOutput()
+	output, err := exec.CommandContext(ctx, bin, "version").CombinedOutput()
 	if err != nil {
 		t.Fatalf("epitropctl version: %v\n%s", err, output)
 	}
-	if want := []byte("v9.8.7\n"); !bytes.Equal(output, want) {
+	if want := []byte(cliTestVersion + "\n"); !bytes.Equal(output, want) {
 		t.Fatalf("epitropctl version = %q, want %q", output, want)
 	}
 }

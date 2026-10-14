@@ -77,7 +77,7 @@ exceptions:
     expires: "2027-01-11"
   - rule: declared-linters
     tool: semgrep
-    reason: the fleet semgrep rule set (praetor .config/semgrep/hiss-invariants.yml at 3bbde0734) has no Go rule, so a job here would match nothing; gosec and golangci-lint run in ci.yml
+    reason: the fleet semgrep rule set (praetor .config/semgrep/hiss-invariants.yml at b161971b437e) has no Go rule, so a job here would match nothing; gosec and golangci-lint run in ci.yml
     expires: "2027-01-11"
   - rule: declared-linters
     tool: spectral

@@ -239,8 +239,12 @@ func (s *Service) Resume(ctx context.Context) ([]ResumeRow, int, error) {
 		if safe, reason := RelaunchRule(u); !safe {
 			relaunch = "no: " + reason
 		}
+		evidence := ""
+		if u.Evidence != nil {
+			evidence = u.Evidence.Path
+		}
 		rows = append(rows, ResumeRow{ID: u.ID, Status: u.Status, UpdatedAt: u.UpdatedAt, Worktree: u.Worktree,
-			Branch: u.Branch, PR: u.PR, Lane: u.Lane, Relaunch: relaunch})
+			Branch: u.Branch, PR: u.PR, Lane: u.Lane, Relaunch: relaunch, Evidence: evidence})
 	}
 	return rows, st.UnitRecordsIgnored, nil
 }

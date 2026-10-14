@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -33,6 +34,8 @@ const (
 
 // The files of a run's output directory, which lies outside the workspace.
 const (
+	// StartFile is the runner's record of the run before its job starts.
+	StartFile = "start.json"
 	// ReportFile is the runner's own report of the run. The unit's evidence pointer names it.
 	ReportFile = "run.json"
 	// ResultCopy is the run's result as it was checked.
@@ -40,6 +43,16 @@ const (
 	// EvidenceCopies holds the evidence files as they were checked.
 	EvidenceCopies = "evidence"
 )
+
+// Start is the record of one prepared run before its job starts.
+type Start struct {
+	Unit       string `json:"unit"`
+	Workspace  string `json:"workspace"`
+	Branch     string `json:"branch"`
+	Base       string `json:"base"`
+	Job        string `json:"job"`
+	PreparedAt string `json:"prepared_at"`
+}
 
 // ErrNotStarted is what a Job's Start wraps when the run's job did not start and no job of
 // the slot was started by this call. The runner then records the unit as blocked. Any other
@@ -58,6 +71,8 @@ type JobEnd struct {
 
 // Job is the supervised, sandboxed job of one run.
 type Job interface {
+	// Name returns the job's name.
+	Name() string
 	// Preflight reports why the job cannot be started now, without starting anything.
 	Preflight(ctx context.Context) error
 	// Start starts the job and returns when its start is recorded.
@@ -66,9 +81,27 @@ type Job interface {
 	Wait(ctx context.Context) (JobEnd, error)
 }
 
+// Adopter is what a job that can be adopted by a takeover implements.
+type Adopter interface {
+	Adopt(ctx context.Context, preparedAt string) error
+}
+
 // Recorder is the run record.
 type Recorder interface {
 	Record(ctx context.Context, id string, payload units.RecordPayload) (eventlog.Unit, error)
+}
+
+// UnitRecorder is the run record and its getter.
+type UnitRecorder interface {
+	Recorder
+	Show(ctx context.Context, id string) (eventlog.Unit, error)
+}
+
+// TakeUpRequest names one takeover of an interrupted run.
+type TakeUpRequest struct {
+	Repo string
+	Out  string
+	Open func(ctx context.Context, out string) (Job, UnitRecorder, error)
 }
 
 // RunRequest names one run.
@@ -205,14 +238,162 @@ func begin(ctx context.Context, req RunRequest, ws Workspace) (Job, Recorder, er
 	if job == nil || rec == nil {
 		return nil, nil, errors.New("slot: the run has no job or no run record")
 	}
+	start := Start{
+		Unit:       req.Unit,
+		Workspace:  ws.Dir,
+		Branch:     ws.Branch,
+		Base:       ws.Base,
+		Job:        job.Name(),
+		PreparedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	pointer, err := writeStart(req.Out, start)
+	if err != nil {
+		return nil, nil, err
+	}
 	if err = job.Preflight(ctx); err != nil {
 		return nil, nil, fmt.Errorf("slot: the job of %s cannot start: %w", req.Unit, err)
 	}
-	payload := units.RecordPayload{Status: string(graph.StatusImplementing), Worktree: &ws.Dir, Branch: &ws.Branch}
+	payload := units.RecordPayload{
+		Status:   string(graph.StatusImplementing),
+		Worktree: &ws.Dir,
+		Branch:   &ws.Branch,
+		Evidence: pointer,
+	}
 	if _, err = rec.Record(ctx, req.Unit, payload); err != nil {
 		return nil, nil, err
 	}
 	return job, rec, nil
+}
+
+func writeStart(out string, start Start) (*eventlog.UnitEvidence, error) {
+	body, err := json.MarshalIndent(start, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("slot: marshal %s: %w", StartFile, err)
+	}
+	body = append(body, '\n')
+	path := filepath.Join(out, StartFile)
+	if err = writeNew(path, body); err != nil {
+		return nil, err
+	}
+	return &eventlog.UnitEvidence{Path: path, SHA256: digestOf(body), Lines: bytes.Count(body, []byte("\n"))}, nil
+}
+
+// ReadStart reads and validates the start file of a run.
+func ReadStart(out string) (Start, error) {
+	path := filepath.Join(out, StartFile)
+	body, err := readRegular(path, MaxInputBytes)
+	if err != nil {
+		return Start{}, fmt.Errorf("slot: read %s: %w", StartFile, err)
+	}
+	var s Start
+	if err = json.Unmarshal(body, &s); err != nil {
+		return Start{}, fmt.Errorf("slot: %s is not valid: %w", StartFile, err)
+	}
+	if err = validateStart(s); err != nil {
+		return Start{}, fmt.Errorf("slot: %s: %w", StartFile, err)
+	}
+	return s, nil
+}
+
+func validateStart(s Start) error {
+	if s.Unit == "" || !units.IsValidID(s.Unit) {
+		return errors.New("unit id is missing or invalid")
+	}
+	if s.Workspace == "" || s.Branch == "" || s.Base == "" || s.Job == "" {
+		return errors.New("workspace, branch, base, or job is missing")
+	}
+	if s.PreparedAt == "" {
+		return errors.New("prepared_at is missing")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, s.PreparedAt); err != nil {
+		return fmt.Errorf("prepared_at: %w", err)
+	}
+	return nil
+}
+
+// TakeUp takes up an interrupted run whose job started and records what became of it.
+func TakeUp(ctx context.Context, req TakeUpRequest) (rep Report, err error) {
+	ctx, span := telemetry.Default().StartSpan(ctx, "slot.run")
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+	}()
+	start, err := checkTakeUp(ctx, req)
+	if err != nil {
+		return Report{}, err
+	}
+	span.SetAttributes(attribute.String("epitrop.unit", start.Unit))
+	job, rec, err := req.Open(ctx, req.Out)
+	if err != nil {
+		return Report{}, err
+	}
+	if job == nil || rec == nil {
+		return Report{}, errors.New("slot: the run has no job or no run record")
+	}
+	if err = checkTakeUpUnit(ctx, rec, start, req.Out); err != nil {
+		return Report{}, err
+	}
+	if adopter, ok := job.(Adopter); ok {
+		if err = adopter.Adopt(ctx, start.PreparedAt); err != nil {
+			return Report{}, fmt.Errorf("slot: adopt the job of %s: %w", start.Unit, err)
+		}
+	}
+	ws := Workspace{Dir: start.Workspace, Branch: start.Branch, Base: start.Base}
+	report := Report{Unit: start.Unit, Workspace: ws.Dir, Branch: ws.Branch, Base: ws.Base}
+	end, err := job.Wait(ctx)
+	if err != nil {
+		return report, fmt.Errorf("slot: wait for the job of %s; the unit stays %s: %w", start.Unit, graph.StatusImplementing, err)
+	}
+	report.Job = &end
+	runReq := RunRequest{Request: Request{Repo: req.Repo, Dir: ws.Dir, Base: ws.Base, Unit: start.Unit}, Out: req.Out}
+	if err = take(ctx, runReq, ws, &report); err != nil {
+		report = Report{Unit: start.Unit, Workspace: ws.Dir, Branch: ws.Branch, Base: ws.Base, Job: &end}
+		report.Outcome, report.Reason = OutcomeNotTaken, err.Error()
+	}
+	return finish(ctx, rec, runReq, report)
+}
+
+// checkTakeUp reads the start file and refuses a run that was recorded already. The take
+// runs git in the repository, so it needs a deadline as a prepared run does.
+func checkTakeUp(ctx context.Context, req TakeUpRequest) (Start, error) {
+	if ctx == nil {
+		return Start{}, errors.New("slot: take up: nil context")
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		return Start{}, errors.New("slot: take up requires a context deadline")
+	}
+	if req.Open == nil {
+		return Start{}, errors.New("slot: take up needs a way to open its job and the run record")
+	}
+	if !filepath.IsAbs(req.Repo) || !filepath.IsAbs(req.Out) {
+		return Start{}, errors.New("slot: repository and output directory are absolute paths")
+	}
+	start, err := ReadStart(req.Out)
+	if err != nil {
+		return Start{}, err
+	}
+	report := filepath.Join(req.Out, ReportFile)
+	if _, err = os.Lstat(report); err == nil {
+		return Start{}, errors.New("slot: the run was recorded already; nothing to take up")
+	} else if !os.IsNotExist(err) {
+		return Start{}, fmt.Errorf("slot: %s: %w", report, err)
+	}
+	return start, nil
+}
+
+func checkTakeUpUnit(ctx context.Context, rec UnitRecorder, start Start, out string) error {
+	unit, err := rec.Show(ctx, start.Unit)
+	if err != nil {
+		return fmt.Errorf("slot: %w", err)
+	}
+	startPath := filepath.Join(out, StartFile)
+	if unit.Status != string(graph.StatusImplementing) || unit.Worktree != start.Workspace || unit.Evidence == nil || unit.Evidence.Path != startPath {
+		return fmt.Errorf("slot: cannot take up unit %s with status %q and worktree %q", start.Unit, unit.Status, unit.Worktree)
+	}
+	return nil
 }
 
 func removeOut(out string) error {

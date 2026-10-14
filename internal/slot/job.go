@@ -59,7 +59,7 @@ func RunConfig(ctx context.Context, template string, ws Workspace, out string) (
 	if err != nil {
 		return config.Config{}, "", fmt.Errorf("slot: template %s gives no valid configuration: %w", template, err)
 	}
-	if err = checkRunJob(cfg.Jobs[0]); err != nil {
+	if err = CheckRunJob(cfg.Jobs[0]); err != nil {
 		return config.Config{}, "", fmt.Errorf("slot: template %s: %w", template, err)
 	}
 	return cfg, path, nil
@@ -101,10 +101,10 @@ func completeTemplate(doc map[string]any, ws Workspace, out string) error {
 	return nil
 }
 
-// checkRunJob refuses a job that a slot may not run: one without a sandbox, because a run
+// CheckRunJob refuses a job that a slot may not run: one without a sandbox, because a run
 // is not trusted, and one without a deadline of its own, because nothing else ends a run
 // that never ends.
-func checkRunJob(job config.JobConfig) error {
+func CheckRunJob(job config.JobConfig) error {
 	if job.Sandbox.Mode != "enforce" {
 		return fmt.Errorf("its job has sandbox.mode %q, a slot's job runs sandboxed", job.Sandbox.Mode)
 	}
@@ -129,6 +129,29 @@ type Supervised struct {
 	polls    int
 	interval time.Duration
 	since    string
+}
+
+// Name returns the job's name.
+func (j *Supervised) Name() string { return j.name }
+
+// Adopt makes the job the one an earlier runner prepared at preparedAt, so that Wait
+// reports its exit without a second start. The supervisor keeps only the job's last
+// recorded start; one from before preparedAt belongs to an earlier run of the same job, and
+// its exit is not counted as this run's.
+func (j *Supervised) Adopt(ctx context.Context, preparedAt string) error {
+	rec, err := j.sup.Recorded(ctx, j.name)
+	if err != nil {
+		return err
+	}
+	prepTime, err := time.Parse(time.RFC3339Nano, preparedAt)
+	if err != nil {
+		return fmt.Errorf("slot: parse prepared_at: %w", err)
+	}
+	sinceTime, err := time.Parse(time.RFC3339Nano, rec.Since)
+	if err == nil && sinceTime.Compare(prepTime) >= 0 {
+		j.since = rec.Since
+	}
+	return nil
 }
 
 // NewSupervised returns the job of one run. The job is the one job of the run's

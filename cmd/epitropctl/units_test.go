@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/tekmora/epitrop/internal/config"
 	"github.com/tekmora/epitrop/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/slot"
 )
 
 func writeUnitsConfig(t *testing.T) (string, string) {
@@ -360,5 +362,55 @@ func TestRunUnitsSetNamesTheMissingStatus(t *testing.T) {
 	err := runUnits([]string{"set", "tekmora/epitrop#1", "--config=" + cfgPath})
 	if err == nil || !strings.Contains(err.Error(), "--status is required") {
 		t.Fatalf("units set without --status = %v, want the flag named", err)
+	}
+}
+
+func TestRunUnitsResumeWithStartFileEvidence(t *testing.T) {
+	cfgPath, _ := writeUnitsConfig(t)
+	idWithStart := "tekmora/epitrop#10"
+	idWithoutStart := "tekmora/epitrop#11"
+
+	outDir := filepath.Join(t.TempDir(), "out")
+	if err := os.MkdirAll(outDir, 0o750); err != nil {
+		t.Fatalf("MkdirAll(outDir): %v", err)
+	}
+	startBody := []byte("{\n  \"unit\": \"" + idWithStart + "\",\n  \"workspace\": \"/workspaces/slot-ws\",\n  \"branch\": \"unit/takeup\",\n  \"base\": \"abcd1234\",\n  \"job\": \"slot-harness\",\n  \"prepared_at\": \"2026-10-14T10:00:00Z\"\n}\n")
+	startPath := filepath.Join(outDir, slot.StartFile)
+	if err := os.WriteFile(startPath, startBody, 0o600); err != nil {
+		t.Fatalf("WriteFile(start.json): %v", err)
+	}
+	h := sha256.Sum256(startBody)
+	digest := hex.EncodeToString(h[:])
+	pointer := fmt.Sprintf("%s sha256:%s lines:8", startPath, digest)
+
+	setArgs1 := []string{"set", idWithStart, "--status=implementing", "--evidence=" + pointer, "--config=" + cfgPath}
+	if err := runUnits(setArgs1); err != nil {
+		t.Fatalf("runUnits set 1: %v", err)
+	}
+	setArgs2 := []string{"set", idWithoutStart, "--status=implementing", "--config=" + cfgPath}
+	if err := runUnits(setArgs2); err != nil {
+		t.Fatalf("runUnits set 2: %v", err)
+	}
+
+	out := captureStdoutUnits(t, func() {
+		if err := runUnits([]string{"resume", "--config=" + cfgPath}); err != nil {
+			t.Fatalf("runUnits resume: %v", err)
+		}
+	})
+
+	wantTakeUp := fmt.Sprintf("no: take up with slot resume --out %s (job slot-harness, workspace /workspaces/slot-ws)", outDir)
+	if !strings.Contains(out, idWithStart) || !strings.Contains(out, wantTakeUp) {
+		t.Fatalf("resume output = %q, want take up relaunch text %q", out, wantTakeUp)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	var lineWithout string
+	for i := 0; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], idWithoutStart+"\t") {
+			lineWithout = lines[i]
+			break
+		}
+	}
+	if lineWithout == "" || !strings.HasSuffix(lineWithout, "\tsafe") {
+		t.Fatalf("row for unit without pointer = %q, want safe relaunch", lineWithout)
 	}
 }

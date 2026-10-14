@@ -20,13 +20,23 @@ import (
 // standIn is the job of a test run. Its work is done in Start, by the test's own function,
 // directly in the workspace: what a sandboxed harness would do, without the sandbox.
 type standIn struct {
+	name         string
 	preflightErr error
 	startErr     error
 	waitErr      error
+	adoptErr     error
 	end          JobEnd
 	work         func()
 	started      int
 	waited       int
+	adopted      int
+}
+
+func (j *standIn) Name() string {
+	if j.name != "" {
+		return j.name
+	}
+	return "slot-1"
 }
 
 func (j *standIn) Preflight(context.Context) error { return j.preflightErr }
@@ -45,6 +55,11 @@ func (j *standIn) Start(context.Context) error {
 func (j *standIn) Wait(context.Context) (JobEnd, error) {
 	j.waited++
 	return j.end, j.waitErr
+}
+
+func (j *standIn) Adopt(context.Context, string) error {
+	j.adopted++
+	return j.adoptErr
 }
 
 // failingRecorder is the run record with one planted failure: the record with this status.
@@ -348,8 +363,8 @@ func TestRunLeavesTheUnitImplementingWhenTheJobIsOutOfSight(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), cases[i].want) || !strings.Contains(err.Error(), "stays implementing") {
 			t.Errorf("%s: Run() = %v, want an error that says the unit stays implementing", cases[i].name, err)
 		}
-		if unit := run.unit(t); unit.Status != "implementing" || unit.Evidence != nil {
-			t.Errorf("%s: unit = %+v, want implementing without a pointer", cases[i].name, unit)
+		if unit := run.unit(t); unit.Status != "implementing" || unit.Evidence == nil || unit.Evidence.Path != filepath.Join(run.req.Out, StartFile) {
+			t.Errorf("%s: unit = %+v, want implementing with a pointer to %s", cases[i].name, unit, StartFile)
 		}
 		if _, statErr := os.Lstat(filepath.Join(run.req.Out, ReportFile)); !os.IsNotExist(statErr) {
 			t.Errorf("%s: a report was written (%v), want none", cases[i].name, statErr)
@@ -652,8 +667,8 @@ func TestRunRecordsNothingWithoutItsReport(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "file exists") {
 		t.Fatalf("Run() = %v, want the error of the report that could not be written", err)
 	}
-	if unit := run.unit(t); unit.Status != "implementing" || unit.Evidence != nil {
-		t.Fatalf("unit = %+v, want implementing without a pointer", unit)
+	if unit := run.unit(t); unit.Status != "implementing" || unit.Evidence == nil || unit.Evidence.Path != filepath.Join(run.req.Out, StartFile) {
+		t.Fatalf("unit = %+v, want implementing with a pointer to %s", unit, StartFile)
 	}
 	if body := readFile(t, filepath.Join(run.req.Out, ReportFile)); body != "{}\n" {
 		t.Fatalf("the file that was in the report's place = %q, want it as it was", body)

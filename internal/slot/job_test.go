@@ -283,3 +283,42 @@ func TestNewSupervisedWaitsJustBeyondTheJobsDeadline(t *testing.T) {
 		t.Fatalf("NewSupervised(every 500ms) = %d looks every %s, want %d: the same wait in shorter steps", quick.polls, quick.interval, want)
 	}
 }
+
+func TestSupervisedAdoptBoundary(t *testing.T) {
+	prepTime := "2026-10-14T10:00:00.000000000Z"
+
+	earlier := supervisor.RecordedJob{Since: "2026-10-14T09:59:59.999999999Z", LastEvent: "job.exited"}
+	supEarlier := &fakeSupervisor{running: []bool{false}, recorded: earlier}
+	jobEarlier := supervised(supEarlier, 1)
+	if err := jobEarlier.Adopt(slotCtx(t), prepTime); err != nil {
+		t.Fatalf("Adopt(earlier) = %v, want nil", err)
+	}
+	if jobEarlier.since != "" {
+		t.Fatalf("jobEarlier.since = %q, want empty", jobEarlier.since)
+	}
+	endEarlier, err := jobEarlier.Wait(slotCtx(t))
+	if err != nil || endEarlier.Recorded {
+		t.Fatalf("Wait(earlier) = %+v, %v; want not recorded", endEarlier, err)
+	}
+
+	equal := supervisor.RecordedJob{Since: prepTime, LastEvent: "job.exited"}
+	supEqual := &fakeSupervisor{running: []bool{false}, recorded: equal}
+	jobEqual := supervised(supEqual, 1)
+	if err := jobEqual.Adopt(slotCtx(t), prepTime); err != nil {
+		t.Fatalf("Adopt(equal) = %v, want nil", err)
+	}
+	if jobEqual.since != prepTime {
+		t.Fatalf("jobEqual.since = %q, want %q", jobEqual.since, prepTime)
+	}
+
+	laterTime := "2026-10-14T10:00:00.000000001Z"
+	later := supervisor.RecordedJob{Since: laterTime, LastEvent: "job.exited"}
+	supLater := &fakeSupervisor{running: []bool{false}, recorded: later}
+	jobLater := supervised(supLater, 1)
+	if err := jobLater.Adopt(slotCtx(t), prepTime); err != nil {
+		t.Fatalf("Adopt(later) = %v, want nil", err)
+	}
+	if jobLater.since != laterTime {
+		t.Fatalf("jobLater.since = %q, want %q", jobLater.since, laterTime)
+	}
+}

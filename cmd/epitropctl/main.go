@@ -111,6 +111,7 @@ func printUsage() {
 	fmt.Println("  epitropctl graph show|apply --config=file [--file=stage.json]")
 	fmt.Println("  epitropctl effects list|resolve --config=file [--outcome=done|retry --by=name <task id> <action type>]")
 	fmt.Println("  epitropctl slot run --config=template --base=rev --brief=file --workspace=dir --out=dir [--repo=dir] [--resume=file] [--decisions=file] <unit id>")
+	fmt.Println("  epitropctl slot resume --out=dir [--repo=dir] [unit id]")
 }
 
 func appVersion() string {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	urlPkg "net/url"
@@ -14,6 +15,26 @@ import (
 	"github.com/tekmora/epitrop/internal/config"
 )
 
+type searchStatusError struct {
+	repo   string
+	status int
+}
+
+func (e *searchStatusError) Error() string {
+	return fmt.Sprintf("search issues in %s returned HTTP %d", e.repo, e.status)
+}
+
+func wrapMissingTokenError(err error, repo string, token string) error {
+	var statusErr *searchStatusError
+	if errors.As(err, &statusErr) && token == "" {
+		switch statusErr.status {
+		case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+			return fmt.Errorf("%w: search in %s returned HTTP %d without a token", ErrMissingToken, repo, statusErr.status)
+		}
+	}
+	return err
+}
+
 func DeliverGitHubIssue(ctx context.Context, client *Client, state *State, sink *config.GitHubIssueSink, item ReleaseItem) (bool, error) {
 	marker := issueMarker(item.ID)
 	firstLabel := ""
@@ -22,7 +43,7 @@ func DeliverGitHubIssue(ctx context.Context, client *Client, state *State, sink 
 	}
 	found, err := searchExistingIssueMarker(ctx, client, sink.Repo, firstLabel, marker)
 	if err != nil {
-		return false, err
+		return false, wrapMissingTokenError(err, sink.Repo, client.GitHubToken())
 	}
 	if found {
 		state.MarkSeen(item.ID)
@@ -75,7 +96,7 @@ func searchExistingIssueMarker(ctx context.Context, client *Client, repo string,
 			return false, fmt.Errorf("search issues in %s page %d: %w", repo, page, err)
 		}
 		if status != http.StatusOK {
-			return false, fmt.Errorf("search issues in %s returned HTTP %d", repo, status)
+			return false, &searchStatusError{repo: repo, status: status}
 		}
 		var issues []GitHubIssueResponse
 		if err = json.Unmarshal(body, &issues); err != nil {

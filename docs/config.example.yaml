@@ -75,6 +75,8 @@ event_log:
 # the first `watch run`, or the first pass files an issue for every release it can see,
 # within the caps. Give the job GITHUB_TOKEN: unauthenticated GitHub allows 60 requests an
 # hour, below the default rate_limit_floor, so every pass would stop after one request.
+# If the floor is at or above that limit, the run logs both numbers once and keeps going,
+# with its GitHub requests throttled.
 release_watch:
   state_dir: /var/tmp/epitrop/release-watch
   rate_limit_floor: 100

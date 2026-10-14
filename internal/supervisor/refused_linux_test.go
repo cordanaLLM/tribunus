@@ -242,9 +242,32 @@ func TestRefusedJobThatHadStartedIsKilled(t *testing.T) {
 	after := zombieChildren(t)
 	for pid := range after {
 		if !before[pid] {
-			t.Fatalf("pid %d is a new zombie child after the refusal, want the refused job collected", pid)
+			comm, ppid, state := zombieChildDiagnostic(pid)
+			t.Fatalf("pid %d (%s) is a new zombie child after the refusal (PPid %s, State %s), want the refused job collected", pid, comm, ppid, state)
 		}
 	}
+}
+
+// zombieChildDiagnostic returns comm, ppid and state from /proc/<pid>/status for error messages.
+func zombieChildDiagnostic(pid int) (comm, ppid, state string) {
+	body, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "status"))
+	if err != nil {
+		return "unknown", "?", "?"
+	}
+	status := string(body)
+	comm = procStatusField(status, "Name:")
+	if comm == "" {
+		comm = "unknown"
+	}
+	ppid = procStatusField(status, "PPid:")
+	if ppid == "" {
+		ppid = "?"
+	}
+	state = procStatusField(status, "State:")
+	if state == "" {
+		state = "?"
+	}
+	return comm, ppid, state
 }
 
 // zombieChildren returns the uncollected children of the test process.

@@ -56,16 +56,6 @@ func TestSupervisorCollectsItsShims(t *testing.T) {
 	waitForShimWaiters(t, sup, 0)
 }
 
-// waitForShimWaiters waits until the supervisor has collected its shims down to want. A shim
-// that has recorded its start still appends job.exited, with a sync to disk, before it
-// exits, so the wait is as long as that append may take, not a guess at a fast disk.
-func waitForShimWaiters(t *testing.T, sup *Supervisor, want int32) {
-	t.Helper()
-	if !waitUntil(func() bool { return sup.shimWaiters.Load() == want }) {
-		t.Fatalf("shim waiters = %d after %s, want %d: a shim was not collected", sup.shimWaiters.Load(), testWaitBound, want)
-	}
-}
-
 func TestStartRefusesAShimBeyondTheWaiterBound(t *testing.T) {
 	job := testJob("bound", []string{"/bin/true"})
 	sup := testSupervisor(t, job)
@@ -130,5 +120,27 @@ func TestCollectShimReportsOnlyAWaitThatFails(t *testing.T) {
 	}
 	if waiting := sup.shimWaiters.Load(); waiting != 0 {
 		t.Fatalf("shim waiters = %d after two collections, want 0", waiting)
+	}
+}
+
+// TestSupervisorCleanupReapsAllShims: after a test using testSupervisor finishes and its
+// cleanup runs, all shims started by the supervisor have been reaped and none remain.
+func TestSupervisorCleanupReapsAllShims(t *testing.T) {
+	job := testJob("cleanup", longJobCommand(t))
+	var sup *Supervisor
+	var shimPID int
+	t.Run("supervised", func(t *testing.T) {
+		sup = testSupervisor(t, job)
+		if err := sup.Start(testContext(t), job.Name); err != nil {
+			t.Fatalf("Start() = %v, want nil", err)
+		}
+		shimPID = eventlogJob(t, sup, job.Name).ShimPID
+	})
+	if waiting := sup.shimWaiters.Load(); waiting != 0 {
+		t.Fatalf("shim waiters = %d after supervisor cleanup, want 0: a shim was left uncollected", waiting)
+	}
+	if zombieChildOfThisProcess(shimPID) {
+		comm, ppid, state := zombieChildDiagnostic(shimPID)
+		t.Fatalf("shim %d (%s) is a zombie child after supervisor cleanup (PPid %s, State %s), want collected", shimPID, comm, ppid, state)
 	}
 }

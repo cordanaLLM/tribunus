@@ -44,7 +44,7 @@ var unitsStdin io.Reader = os.Stdin
 
 func runUnits(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("units command required: set, resume, show, note, or inbox")
+		return fmt.Errorf("units command required: set, resume, show, note, inbox, or preempt")
 	}
 	switch args[0] {
 	case "set":
@@ -57,6 +57,8 @@ func runUnits(args []string) error {
 		return runUnitsNote(args[1:])
 	case "inbox":
 		return runUnitsInbox(args[1:])
+	case "preempt":
+		return runUnitsPreempt(args[1:])
 	}
 	return fmt.Errorf("unknown units command: %s", args[0])
 }
@@ -281,6 +283,37 @@ func runUnitsInbox(args []string) error {
 		return err
 	}
 	printNotes(unread)
+	return nil
+}
+
+type unitsPreemptFlags struct {
+	reason *string
+	by     *string
+}
+
+func runUnitsPreempt(args []string) error {
+	fs := flag.NewFlagSet("units preempt", flag.ContinueOnError)
+	f := unitsPreemptFlags{
+		reason: fs.String("reason", "", "reason for preemption"),
+		by:     fs.String("by", "", "actor who preempted the unit"),
+	}
+	svc, pos, ctx, cancel, err := unitsCall(fs, args, "id")
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	if *f.reason == "" {
+		return fmt.Errorf("units preempt: --reason is required")
+	}
+	unit, err := svc.Preempt(ctx, pos[0], *f.reason, *f.by)
+	if err != nil {
+		return err
+	}
+	body, err := json.MarshalIndent(unit, "", "  ")
+	if err != nil {
+		return fmt.Errorf("units preempt: marshal: %w", err)
+	}
+	fmt.Println(string(body))
 	return nil
 }
 

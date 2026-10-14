@@ -114,6 +114,9 @@ func moveAllowed(from string, to string, reopen bool) bool {
 func RelaunchRule(u eventlog.Unit) (bool, string) {
 	status := graph.StatusName(u.Status)
 	if status == graph.StatusBlocked {
+		if u.Preempted != nil {
+			return false, "preempted: " + u.Preempted.Reason
+		}
 		return false, "blocked"
 	}
 	if u.PR != 0 {
@@ -126,6 +129,25 @@ func RelaunchRule(u eventlog.Unit) (bool, string) {
 		return false, "proposed; not ready to start"
 	}
 	return false, "in " + u.Status
+}
+
+// PreemptPayload is the payload of unit.preempted.
+type PreemptPayload struct {
+	Reason string `json:"reason"`
+	By     string `json:"by,omitempty"`
+}
+
+func validatePreemptInput(id string, reason string, by string) error {
+	if !IsValidID(id) {
+		return fmt.Errorf("units: invalid unit id %q", id)
+	}
+	if len(strings.TrimSpace(reason)) < 1 || len(reason) > MaxNoteBytes {
+		return fmt.Errorf("units: preempt reason must be 1..%d bytes", MaxNoteBytes)
+	}
+	if by != "" && !senderRegex.MatchString(by) {
+		return fmt.Errorf("units: invalid sender %q", by)
+	}
+	return nil
 }
 
 // validateRecordPayload checks everything about a record that does not depend on the log.

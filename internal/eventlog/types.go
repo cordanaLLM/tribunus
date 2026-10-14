@@ -12,8 +12,11 @@ import (
 )
 
 const (
-	AppendCommand  = "epitrop event-log append"
-	MaxRecordBytes = 64 * 1024
+	AppendCommand = "epitrop event-log append"
+	// CheckpointCommand signs checkpoints. It differs from AppendCommand so that a receipt
+	// over a record or HEAD can never pass as one over a checkpoint, or the other way round.
+	CheckpointCommand = "epitrop event-log checkpoint"
+	MaxRecordBytes    = 64 * 1024
 
 	defaultLockTimeout = 5 * time.Second
 	defaultReplayCap   = 100000
@@ -140,6 +143,14 @@ type Unit struct {
 	Notes         []UnitNote      `json:"notes,omitempty"`
 	ReadUpto      uint64          `json:"read_upto,omitempty"`
 	Evidence      *UnitEvidence   `json:"evidence,omitempty"`
+	Preempted     *UnitPreemption `json:"preempted,omitempty"`
+}
+
+// UnitPreemption records why a unit was preempted, at which log sequence number and when.
+type UnitPreemption struct {
+	Seq    uint64 `json:"seq"`
+	Reason string `json:"reason"`
+	At     string `json:"at"`
 }
 
 // UnitEvidence points at what proves a unit's result: a file, the digest of its content and
@@ -187,7 +198,8 @@ func KnownDomain(eventType string) bool {
 		strings.HasPrefix(eventType, "job.") ||
 		strings.HasPrefix(eventType, "unit.") ||
 		strings.HasPrefix(eventType, "graph.") ||
-		strings.HasPrefix(eventType, "effect.")
+		strings.HasPrefix(eventType, "effect.") ||
+		strings.HasPrefix(eventType, "log.")
 }
 
 func TaskReducer(st State, rec Record) (State, error) {

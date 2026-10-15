@@ -33,7 +33,8 @@ var (
 // naming the first line without its exception comment, the first expired rule, or a line the
 // reader does not allow inside the rules block.
 func Check(config string, today time.Time) (int, error) {
-	lines := strings.Split(config, "\n")
+	// A Windows checkout ends lines with CRLF; the rules read LF lines.
+	lines := strings.Split(strings.ReplaceAll(config, "\r\n", "\n"), "\n")
 	start, err := rulesStart(lines)
 	if err != nil {
 		return 0, err

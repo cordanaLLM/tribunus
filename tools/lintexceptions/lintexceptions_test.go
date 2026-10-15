@@ -7,6 +7,7 @@ package lintexceptions
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -56,6 +57,17 @@ func TestCheckAcceptsDatedRules(t *testing.T) {
 	rules, err := Check(config, day(t, "2026-10-15"))
 	if err != nil || rules != 2 {
 		t.Fatalf("Check = %d, %v; want 2, nil", rules, err)
+	}
+}
+
+func TestCheckReadsCRLFLines(t *testing.T) {
+	config := strings.ReplaceAll(header+
+		"      # category C, expires 2026-10-25, #133\n"+
+		"      - path: ^a\\.go$\n"+
+		"        linters: [gocyclo]\n", "\n", "\r\n")
+	rules, err := Check(config, day(t, "2026-10-15"))
+	if err != nil || rules != 1 {
+		t.Fatalf("Check = %d, %v; want 1, nil", rules, err)
 	}
 }
 

@@ -77,16 +77,7 @@ linters:
       - path: ^cmd/epitropctl/units_test\.go$
         linters: [gocyclo]
       # category C, expires 2026-10-25, #133
-      - path: ^internal/config/config\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/config/config\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
       - path: ^internal/config/config_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/config/home\.go$
         linters: [gocyclo]
       # category C, expires 2026-10-25, #133
       - path: ^internal/config/home_test\.go$

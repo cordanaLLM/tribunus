@@ -139,6 +139,27 @@ jobs:
         run: >-
           tools/spectral/node_modules/.bin/spectral lint -F warn --ruleset .spectral.yaml
           'internal/sources/*/testdata/upstream/*-openapi.yaml'
+      # trivy, declared by the framework profile: misconfiguration and secret scans of the tree.
+      # The release tarball is pinned by its sha256 from the upstream checksums file; the
+      # self-test plants a HIGH Dockerfile finding and a CRITICAL token and must see both.
+      # Dependency vulnerabilities stay with govulncheck above.
+      - name: Install trivy
+        env:
+          TRIVY_VERSION: 0.75.0
+          TRIVY_SHA256: c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f
+        run: |
+          mkdir -p "$RUNNER_TEMP/trivy"
+          curl -fsSL --max-time 120 -o "$RUNNER_TEMP/trivy.tar.gz" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  $RUNNER_TEMP/trivy.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/trivy.tar.gz" -C "$RUNNER_TEMP/trivy" trivy
+          echo "$RUNNER_TEMP/trivy" >> "$GITHUB_PATH"
+      - name: trivy self-test (planted findings must fail)
+        run: bash tools/linterselftest/selftest.sh trivy
+      - name: trivy scan
+        run: >-
+          trivy fs --scanners misconfig,secret --exit-code 1 --severity HIGH,CRITICAL
+          --skip-version-check --disable-telemetry .
       - name: Documentation drift
         env:
           EVENT_NAME: ${{ github.event_name }}

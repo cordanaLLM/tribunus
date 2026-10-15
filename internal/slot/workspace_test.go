@@ -82,20 +82,30 @@ func TestPrepareMakesTheUnitsBranchAtTheBaseWithTheInputs(t *testing.T) {
 	if ws.Dir != req.Dir || ws.Branch != "unit/epitrop=unit-1" || ws.Base != first {
 		t.Fatalf("workspace = %+v, want %s on unit/epitrop=unit-1 at %s", ws, req.Dir, first)
 	}
+	assertWorkspaceBranchAndFiles(t, ws, first)
+	assertWorkspaceInputsAndEvidence(t, ws.Dir)
+}
+
+func assertWorkspaceBranchAndFiles(t *testing.T, ws Workspace, first string) {
+	t.Helper()
 	if head, branch := gitIn(t, ws.Dir, "rev-parse", "HEAD"), gitIn(t, ws.Dir, "branch", "--show-current"); head != first || branch != ws.Branch {
 		t.Fatalf("clone is at %s on %q, want %s on %s", head, branch, first, ws.Branch)
 	}
 	if got := readFile(t, filepath.Join(ws.Dir, "first.txt")); got != "first\n" {
 		t.Fatalf("first.txt = %q, want the base's file", got)
 	}
-	if _, err = os.Stat(filepath.Join(ws.Dir, "second.txt")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(ws.Dir, "second.txt")); !os.IsNotExist(err) {
 		t.Fatalf("second.txt: %v, want it absent: it came after the base", err)
 	}
-	in := func(name string) string { return readFile(t, filepath.Join(ws.Dir, filepath.FromSlash(name))) }
+}
+
+func assertWorkspaceInputsAndEvidence(t *testing.T, dir string) {
+	t.Helper()
+	in := func(name string) string { return readFile(t, filepath.Join(dir, filepath.FromSlash(name))) }
 	if in(BriefFile) != "# Unit\nAdd the retry.\n" || in(ResumeFile) != "main is green.\n" || in(DecisionsFile) != "epitrop-port\ta) 8080\nepitrop-retries\t3\n" {
 		t.Fatalf("inputs = %q / %q / %q, want what the request held", in(BriefFile), in(ResumeFile), in(DecisionsFile))
 	}
-	entries, err := os.ReadDir(filepath.Join(ws.Dir, filepath.FromSlash(EvidenceDir)))
+	entries, err := os.ReadDir(filepath.Join(dir, filepath.FromSlash(EvidenceDir)))
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("evidence directory = %d entries, %v; want it there and empty", len(entries), err)
 	}
@@ -112,37 +122,52 @@ func TestPrepareMakesACloneThatSharesNothingWithItsRepository(t *testing.T) {
 	if remotes := gitIn(t, ws.Dir, "remote"); remotes != "" {
 		t.Fatalf("remotes = %q, want none", remotes)
 	}
+	assertCloneObjectsNotShared(t, ws.Dir, repo)
+	if status := gitIn(t, ws.Dir, "status", "--porcelain"); status != "" {
+		t.Fatalf("status of the fresh workspace = %q, want it clean: the contract's files are excluded", status)
+	}
+	assertCloneCommitUntouchedRepo(t, ws.Dir, repo, second)
+}
+
+func checkCloneObjectFile(t *testing.T, path string, d os.DirEntry, walkErr error, wsDir, repo string, objects *int) error {
+	t.Helper()
+	if walkErr != nil || d.IsDir() {
+		return walkErr
+	}
+	rel, relErr := filepath.Rel(wsDir, path)
+	if relErr != nil {
+		return relErr
+	}
+	mine, statErr := os.Stat(path)
+	if statErr != nil {
+		return statErr
+	}
+	*objects++
+	if theirs, sourceErr := os.Stat(filepath.Join(repo, rel)); sourceErr == nil && os.SameFile(mine, theirs) {
+		t.Errorf("%s is the same file as the repository's: a hard link, want a copy", rel)
+	}
+	return nil
+}
+
+func assertCloneObjectsNotShared(t *testing.T, wsDir, repo string) {
+	t.Helper()
 	objects := 0
-	err = filepath.WalkDir(filepath.Join(ws.Dir, ".git", "objects"), func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil || d.IsDir() {
-			return walkErr
-		}
-		rel, relErr := filepath.Rel(ws.Dir, path)
-		if relErr != nil {
-			return relErr
-		}
-		mine, statErr := os.Stat(path)
-		if statErr != nil {
-			return statErr
-		}
-		objects++
-		if theirs, sourceErr := os.Stat(filepath.Join(repo, rel)); sourceErr == nil && os.SameFile(mine, theirs) {
-			t.Errorf("%s is the same file as the repository's: a hard link, want a copy", rel)
-		}
-		return nil
+	err := filepath.WalkDir(filepath.Join(wsDir, ".git", "objects"), func(path string, d os.DirEntry, walkErr error) error {
+		return checkCloneObjectFile(t, path, d, walkErr, wsDir, repo, &objects)
 	})
 	if err != nil || objects == 0 {
 		t.Fatalf("walk of the clone's objects = %d files, %v; want its own copies", objects, err)
 	}
-	if status := gitIn(t, ws.Dir, "status", "--porcelain"); status != "" {
-		t.Fatalf("status of the fresh workspace = %q, want it clean: the contract's files are excluded", status)
-	}
-	if err = os.WriteFile(filepath.Join(ws.Dir, "third.txt"), []byte("third\n"), 0o600); err != nil {
+}
+
+func assertCloneCommitUntouchedRepo(t *testing.T, wsDir, repo, second string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(wsDir, "third.txt"), []byte("third\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile() = %v, want nil", err)
 	}
-	gitIn(t, ws.Dir, "add", "--all")
-	gitIn(t, ws.Dir, "commit", "--quiet", "--message", "the unit's work")
-	if files := gitIn(t, ws.Dir, "show", "--name-only", "--format=", "HEAD"); files != "third.txt" {
+	gitIn(t, wsDir, "add", "--all")
+	gitIn(t, wsDir, "commit", "--quiet", "--message", "the unit's work")
+	if files := gitIn(t, wsDir, "show", "--name-only", "--format=", "HEAD"); files != "third.txt" {
 		t.Fatalf("the run's commit holds %q, want third.txt alone", files)
 	}
 	if head := gitIn(t, repo, "rev-parse", "HEAD"); head != second {
@@ -333,17 +358,29 @@ func TestParseDecisionsReadsTheFormTheWorkspaceGets(t *testing.T) {
 	if got, err = ParseDecisions(nil); err != nil || len(got) != 0 {
 		t.Fatalf("ParseDecisions(empty) = %+v, %v; want none", got, err)
 	}
-	for _, body := range []string{"no tab here\n", "\tanswer without an id\n", "ok\tyes\nbroken\n"} {
-		if _, err = ParseDecisions([]byte(body)); err == nil || !strings.Contains(err.Error(), "is not an id, a tab and an answer") {
+	checkParseDecisionsRefusalsAndLimits(t)
+	assertParseDecisionsRoundTrip(t, want)
+}
+
+func checkParseDecisionsRefusalsAndLimits(t *testing.T) {
+	t.Helper()
+	bodies := []string{"no tab here\n", "\tanswer without an id\n", "ok\tyes\nbroken\n"}
+	for i := 0; i < len(bodies); i++ {
+		body := bodies[i]
+		if _, err := ParseDecisions([]byte(body)); err == nil || !strings.Contains(err.Error(), "is not an id, a tab and an answer") {
 			t.Errorf("ParseDecisions(%q) = %v, want it refused", body, err)
 		}
 	}
-	if _, err = ParseDecisions([]byte(strings.Repeat("id\tanswer\n", MaxDecisions))); err != nil {
+	if _, err := ParseDecisions([]byte(strings.Repeat("id\tanswer\n", MaxDecisions))); err != nil {
 		t.Fatalf("ParseDecisions(%d lines) = %v, want nil", MaxDecisions, err)
 	}
-	if _, err = ParseDecisions([]byte(strings.Repeat("id\tanswer\n", MaxDecisions+1))); err == nil || !strings.Contains(err.Error(), "at most 256 decisions") {
+	if _, err := ParseDecisions([]byte(strings.Repeat("id\tanswer\n", MaxDecisions+1))); err == nil || !strings.Contains(err.Error(), "at most 256 decisions") {
 		t.Fatalf("ParseDecisions(%d lines) = %v, want it refused", MaxDecisions+1, err)
 	}
+}
+
+func assertParseDecisionsRoundTrip(t *testing.T, want []Decision) {
+	t.Helper()
 	// What is parsed is what Prepare writes: the file reads back as itself.
 	repo, first, _ := testRepo(t)
 	req := request(t, repo, first)

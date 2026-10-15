@@ -17,11 +17,28 @@ import (
 
 const templateJob = `"name": "slot-1", "command": ["/usr/bin/true"], "max_runtime_seconds": 600, "stop": {"signal": "TERM", "grace_seconds": 5}`
 
-// writeTemplate writes a slot's template: one job with the given fields.
+// testRoot is the directory every temporary directory of the test lies in, the run's
+// workspace among them: the sandbox_input_roots entry of a test's template.
+func testRoot(t *testing.T) string {
+	t.Helper()
+	return filepath.Dir(t.TempDir())
+}
+
+// writeTemplate writes a slot's template: the given document, with the test's directory as
+// its sandbox_input_roots entry.
 func writeTemplate(t *testing.T, document string) string {
 	t.Helper()
+	root, err := json.Marshal([]string{testRoot(t)})
+	if err != nil {
+		t.Fatalf("marshal the roots: %v", err)
+	}
+	rest := strings.TrimPrefix(document, "{")
+	if !strings.HasPrefix(rest, "}") {
+		rest = ", " + rest
+	}
+	document = `{"sandbox_input_roots": ` + string(root) + rest
 	path := filepath.Join(t.TempDir(), "slot.json")
-	if err := os.WriteFile(path, []byte(document+"\n"), 0o600); err != nil {
+	if err = os.WriteFile(path, []byte(document+"\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile(template) = %v, want nil", err)
 	}
 	return path
@@ -78,7 +95,7 @@ func TestRunConfigCompletesTheTemplateForOneRun(t *testing.T) {
 func TestRunConfigTakesAYAMLTemplate(t *testing.T) {
 	ws, out := runDirs(t)
 	template := filepath.Join(t.TempDir(), "slot.yaml")
-	body := "jobs:\n  - name: slot-1\n    command: [/usr/bin/true]\n    max_runtime_seconds: 600\n    sandbox:\n      network: none\n"
+	body := "sandbox_input_roots: [" + testRoot(t) + "]\njobs:\n  - name: slot-1\n    command: [/usr/bin/true]\n    max_runtime_seconds: 600\n    sandbox:\n      network: none\n"
 	if err := os.WriteFile(template, []byte(body), 0o600); err != nil {
 		t.Fatalf("WriteFile(template) = %v, want nil", err)
 	}

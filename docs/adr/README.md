@@ -12,3 +12,4 @@ record that supersedes it.
 | [0005](0005-sandboxed-job-runner.md) | 2026-10-10 | Sandbox job execution with a systemd scope, bubblewrap and pasta | Accepted |
 | [0006](0006-proxy-socket-egress.md) | 2026-10-11 | Reach declared destinations from a sandbox without a network through a proxy socket | Proposed |
 | [0007](0007-job-arguments-unchanged.md) | 2026-10-11 | Start a sandboxed job with its arguments unchanged | Proposed |
+| [0008](0008-sandbox-input-roots.md) | 2026-10-15 | Allow sandbox paths only inside declared roots | Proposed |

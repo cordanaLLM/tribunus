@@ -6,6 +6,7 @@ package units
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -209,6 +210,15 @@ func TestDivergedCopyRefusal(t *testing.T) {
 
 	svcRestart, _, _, _ := newTestServiceInDir(t, fix.dirA)
 	st, use, err := svcRestart.ReplayCheckpointed(ctx)
+	checkDivergedCheckpointFiles(t, fix, st, use, err)
+
+	eventsDir := filepath.Join(fix.dirA, "events")
+	headSeqAfterDiverged := checkDivergedRecordContent(t, eventsDir, fix)
+	checkSecondReplayAppendsNothing(t, svcRestart, ctx, eventsDir, headSeqAfterDiverged)
+}
+
+func checkDivergedCheckpointFiles(t *testing.T, fix divergedFixture, st eventlog.State, use eventlog.CheckpointUse, err error) {
+	t.Helper()
 	if err != nil {
 		t.Fatalf("ReplayCheckpointed on diverged log = %v", err)
 	}
@@ -222,8 +232,10 @@ func TestDivergedCopyRefusal(t *testing.T) {
 		t.Fatalf("checkpoint %s.refused missing: %v", fix.ckptPath, err)
 	}
 	assertStatesEqual(t, 0, st, fix.fullStB)
+}
 
-	eventsDir := filepath.Join(fix.dirA, "events")
+func checkDivergedRecordContent(t *testing.T, eventsDir string, fix divergedFixture) uint64 {
+	t.Helper()
 	headSeqAfterDiverged := readHeadSeq(t, eventsDir)
 	if headSeqAfterDiverged != 2 {
 		t.Fatalf("headSeq after log.diverged = %d, want 2", headSeqAfterDiverged)
@@ -236,7 +248,11 @@ func TestDivergedCopyRefusal(t *testing.T) {
 	if div.Log.Seq != 1 || div.Log.Hash != fix.hashB1 || div.Log.HashAtCheckpointSeq != fix.hashB1 {
 		t.Fatalf("log.diverged log = %+v, want seq 1 hash %s at checkpoint seq", div.Log, fix.hashB1)
 	}
+	return headSeqAfterDiverged
+}
 
+func checkSecondReplayAppendsNothing(t *testing.T, svcRestart *Service, ctx context.Context, eventsDir string, headSeqAfterDiverged uint64) {
+	t.Helper()
 	// Second Replay appends nothing more.
 	_, use2, err := svcRestart.ReplayCheckpointed(ctx)
 	if err != nil {

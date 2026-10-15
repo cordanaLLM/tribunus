@@ -19,6 +19,7 @@ import (
 func TestLoadPositiveFullFile(t *testing.T) {
 	cfg, err := Load(testContext(t), writeConfig(t, `{
   "graph": {"max_depth": 24},
+  "sandbox_input_roots": ["/var/tmp"],
   "budgets": {"default": {"tokens": 300000, "wall_clock_seconds": 7200}},
   "jobs": [{
     "name": "daily-catalog-sync",
@@ -240,12 +241,12 @@ func TestConfigSchemaDefaultsAgreeWithGoTypes(t *testing.T) {
 
 func TestLoadJobDefaults(t *testing.T) {
 	workspace := t.TempDir()
-	cfg, err := Load(testContext(t), writeConfig(t, fmt.Sprintf(`{"jobs": [{
+	cfg, err := Load(testContext(t), writeConfig(t, fmt.Sprintf(`{"sandbox_input_roots": [%q], "jobs": [{
   "name": "daemon",
   "command": ["/bin/true"],
   "log_path": "/tmp/daemon.log",
   "sandbox": {"workspace": %q}
-}]}`, workspace)))
+}]}`, workspace, workspace)))
 	if err != nil {
 		t.Fatalf("Load() = %v, want nil", err)
 	}
@@ -578,7 +579,8 @@ func TestValidateSandboxProxyRules(t *testing.T) {
 
 func proxyJobConfig(t *testing.T, sandbox string) string {
 	t.Helper()
-	return writeConfig(t, fmt.Sprintf(`{"jobs": [{"name": "slot", "command": ["/bin/true"], "log_path": "/tmp/slot.log", "sandbox": {"workspace": %q, %s}}]}`, t.TempDir(), sandbox))
+	workspace := t.TempDir()
+	return writeConfig(t, fmt.Sprintf(`{"sandbox_input_roots": [%q], "jobs": [{"name": "slot", "command": ["/bin/true"], "log_path": "/tmp/slot.log", "sandbox": {"workspace": %q, %s}}]}`, workspace, workspace, sandbox))
 }
 
 // TestLoadProxySandbox: the file's schema and the Go rules accept and refuse the same
@@ -640,7 +642,12 @@ type sandboxPathWorld struct {
 
 func newSandboxPathWorld(t *testing.T) sandboxPathWorld {
 	t.Helper()
-	root := t.TempDir()
+	// The loader resolves symlinks, so the world does too: its paths then read as the
+	// loader's messages print them (on macOS the temporary directory is behind /var).
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks(temporary directory) = %v, want nil", err)
+	}
 	w := sandboxPathWorld{root: root, events: filepath.Join(root, "state", "events"), keys: filepath.Join(root, "keys"),
 		confDir: filepath.Join(root, "conf"), home: filepath.Join(root, "home", "user"), file: filepath.Join(root, "file")}
 	w.key = filepath.Join(w.keys, "seed")
@@ -666,13 +673,24 @@ func newSandboxPathWorld(t *testing.T) sandboxPathWorld {
 	return w
 }
 
+// load loads a configuration whose roots are the world's workspace and the jobs directory
+// below its HOME.
 func (w sandboxPathWorld) load(t *testing.T, workspace string, inputs []string) error {
+	t.Helper()
+	return w.loadWithRoots(t, []string{filepath.Join(w.root, "ws"), filepath.Join(w.home, "jobs")}, workspace, inputs)
+}
+
+func (w sandboxPathWorld) loadWithRoots(t *testing.T, roots []string, workspace string, inputs []string) error {
 	t.Helper()
 	sandbox, err := json.Marshal(map[string]any{"workspace": workspace, "inputs": inputs})
 	if err != nil {
 		t.Fatalf("marshal sandbox: %v", err)
 	}
-	body := fmt.Sprintf(`{"event_log": {"dir": %q, "signing_key_path": %q}, "jobs": [{"name": "daemon", "command": ["/bin/true"], "log_path": "/tmp/daemon.log", "sandbox": %s}]}`, w.events, w.key, sandbox)
+	rootList, err := json.Marshal(roots)
+	if err != nil {
+		t.Fatalf("marshal roots: %v", err)
+	}
+	body := fmt.Sprintf(`{"sandbox_input_roots": %s, "event_log": {"dir": %q, "signing_key_path": %q}, "jobs": [{"name": "daemon", "command": ["/bin/true"], "log_path": "/tmp/daemon.log", "sandbox": %s}]}`, rootList, w.events, w.key, sandbox)
 	path := filepath.Join(w.confDir, "config.json")
 	if err = os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("WriteFile(config) = %v, want nil", err)

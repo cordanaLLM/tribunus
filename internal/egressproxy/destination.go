@@ -120,12 +120,16 @@ func validLabel(label string) bool {
 		return false
 	}
 	for i := 0; i < len(label); i++ {
-		c := label[i]
-		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+		if !labelByte(label[i]) {
 			return false
 		}
 	}
 	return true
+}
+
+// labelByte reports whether c is allowed in a label.
+func labelByte(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'
 }
 
 func allDigits(label string) bool {

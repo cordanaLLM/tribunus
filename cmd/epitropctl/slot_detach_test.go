@@ -57,6 +57,17 @@ func TestSlotRunDetachStartsAServiceWithTheTemplatesLimits(t *testing.T) {
 	}
 	argv := (*started)[0]
 	unit := slotServiceName(run.out)
+	checkDetachServiceArgv(t, argv, unit, run)
+	if want := "service\t" + unit + "\nout\t" + run.out + "\n"; printed != want {
+		t.Fatalf("printed %q, want %q", printed, want)
+	}
+	if _, statErr := os.Lstat(run.out); !os.IsNotExist(statErr) {
+		t.Fatalf("the caller made the output directory (%v): the runner makes it", statErr)
+	}
+}
+
+func checkDetachServiceArgv(t *testing.T, argv []string, unit string, run slotRun) {
+	t.Helper()
 	head := []string{"systemd-run", "--user", "--quiet", "--collect", "--expand-environment=no", "--unit=" + unit, "-p", "MemoryMax=512M", "-p", "MemoryHigh=384M"}
 	if !slices.Equal(argv[:len(head)], head) {
 		t.Fatalf("command line starts %q, want %q", argv[:len(head)], head)
@@ -78,12 +89,6 @@ func TestSlotRunDetachStartsAServiceWithTheTemplatesLimits(t *testing.T) {
 	}
 	if !slices.Equal(runner[len(runner)-2:], []string{"--", slotTestUnit}) {
 		t.Fatalf("runner ends %q, want -- and the unit", runner[len(runner)-2:])
-	}
-	if want := "service\t" + unit + "\nout\t" + run.out + "\n"; printed != want {
-		t.Fatalf("printed %q, want %q", printed, want)
-	}
-	if _, statErr := os.Lstat(run.out); !os.IsNotExist(statErr) {
-		t.Fatalf("the caller made the output directory (%v): the runner makes it", statErr)
 	}
 }
 

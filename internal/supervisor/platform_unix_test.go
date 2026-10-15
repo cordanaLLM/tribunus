@@ -132,17 +132,7 @@ func TestStopDoesNotEscalateWhenTermStopsWithinGrace(t *testing.T) {
 }
 
 func TestHoldLockErrorAndStateBranches(t *testing.T) {
-	fileParent := filepath.Join(t.TempDir(), "state-file")
-	if err := os.WriteFile(fileParent, []byte("x"), 0o600); err != nil {
-		t.Fatalf("WriteFile(state-file) = %v, want nil", err)
-	}
-	if _, err := holdLock(filepath.Join(fileParent, "daemon.lock")); err == nil || !strings.Contains(err.Error(), "mkdir lock dir") {
-		t.Fatalf("holdLock(file parent) = %v, want mkdir error", err)
-	}
-	dirPath := t.TempDir()
-	if _, err := holdLock(dirPath); err == nil || !strings.Contains(err.Error(), "open lock") {
-		t.Fatalf("holdLock(directory) = %v, want open error", err)
-	}
+	checkHoldLockInvalidPathErrors(t)
 	lockPath := filepath.Join(t.TempDir(), "daemon.lock")
 	lock, err := holdLock(lockPath)
 	if err != nil {
@@ -160,15 +150,35 @@ func TestHoldLockErrorAndStateBranches(t *testing.T) {
 	}()
 	select {
 	case err = <-done:
-		if err == nil || !strings.Contains(err.Error(), "flock") {
-			t.Fatalf("holdLock(contended) = %v, want flock error", err)
-		}
+		checkHoldLockContendedResult(t, err)
 	case <-time.After(200 * time.Millisecond):
 		if closeErr := lock.Close(); closeErr != nil {
 			t.Fatalf("Close(lock after blocked contender) = %v, want nil", closeErr)
 		}
 		err = <-done
 		t.Fatalf("holdLock(contended) = %v after blocking wait, want nonblocking flock error", err)
+	}
+}
+
+func checkHoldLockInvalidPathErrors(t *testing.T) {
+	t.Helper()
+	fileParent := filepath.Join(t.TempDir(), "state-file")
+	if err := os.WriteFile(fileParent, []byte("x"), 0o600); err != nil {
+		t.Fatalf("WriteFile(state-file) = %v, want nil", err)
+	}
+	if _, err := holdLock(filepath.Join(fileParent, "daemon.lock")); err == nil || !strings.Contains(err.Error(), "mkdir lock dir") {
+		t.Fatalf("holdLock(file parent) = %v, want mkdir error", err)
+	}
+	dirPath := t.TempDir()
+	if _, err := holdLock(dirPath); err == nil || !strings.Contains(err.Error(), "open lock") {
+		t.Fatalf("holdLock(directory) = %v, want open error", err)
+	}
+}
+
+func checkHoldLockContendedResult(t *testing.T, err error) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), "flock") {
+		t.Fatalf("holdLock(contended) = %v, want flock error", err)
 	}
 }
 
@@ -204,9 +214,15 @@ func TestSignalValidationAndDeliveryErrors(t *testing.T) {
 	}
 	err := signalProcessGroup(testSignalTarget(0, os.Getpid()), "BOGUS")
 	assertRefusedWithoutSignal(t, err, "unsupported signal", rec)
+	checkSignalTargetValidation(t)
+	checkArgHelpers(t)
+}
+
+func checkSignalTargetValidation(t *testing.T) {
+	t.Helper()
 	cmd := startSleep(t, true)
 	target := testSignalTarget(cmd.Process.Pid, cmd.Process.Pid)
-	err = validateSignalTarget(target)
+	err := validateSignalTarget(target)
 	if err == nil || !strings.Contains(err.Error(), "pid equals shim_pid") {
 		t.Fatalf("validateSignalTarget(pid equals shim) = %v, want refusal", err)
 	}
@@ -218,6 +234,10 @@ func TestSignalValidationAndDeliveryErrors(t *testing.T) {
 	if _, err = linuxProcessParent(99999999); err == nil {
 		t.Fatal("linuxProcessParent(missing) = nil, want error")
 	}
+}
+
+func checkArgHelpers(t *testing.T) {
+	t.Helper()
 	args := []string{"__job-shim", "--name", "daemon", "--lock", "/lock", "--record", "/record"}
 	if !hasArg(args, "__job-shim") || hasArg(args, "missing") {
 		t.Fatalf("hasArg(%q) returned wrong membership", args)
@@ -301,14 +321,7 @@ func TestLockAndProcReadersPropagateExactErrors(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "mkdir lock dir") {
 		t.Fatalf("validateSignalShim(lock error) = %v, want lock error", err)
 	}
-	withProcStatusBody(t, "Name:\ttest\n")
-	if _, err = linuxProcessParent(123); err == nil || !strings.Contains(err.Error(), "PPid missing") {
-		t.Fatalf("linuxProcessParent(missing PPid) = %v, want missing PPid", err)
-	}
-	withProcCmdlineError(t, os.ErrPermission)
-	if _, err = shimCmdlineMismatch(target); err == nil || !strings.Contains(err.Error(), "permission denied") {
-		t.Fatalf("shimCmdlineMismatch(read error) = %v, want permission error", err)
-	}
+	checkProcReadersPropagateErrors(t, target)
 	target.LockPath = filepath.Join(t.TempDir(), "daemon.lock")
 	lock, err := holdLock(target.LockPath)
 	if err != nil {
@@ -321,6 +334,18 @@ func TestLockAndProcReadersPropagateExactErrors(t *testing.T) {
 	}()
 	if err = validateSignalShim(target); err == nil || !strings.Contains(err.Error(), "permission denied") {
 		t.Fatalf("validateSignalShim(cmdline read error) = %v, want permission error", err)
+	}
+}
+
+func checkProcReadersPropagateErrors(t *testing.T, target jobSignalTarget) {
+	t.Helper()
+	withProcStatusBody(t, "Name:\ttest\n")
+	if _, err := linuxProcessParent(123); err == nil || !strings.Contains(err.Error(), "PPid missing") {
+		t.Fatalf("linuxProcessParent(missing PPid) = %v, want missing PPid", err)
+	}
+	withProcCmdlineError(t, os.ErrPermission)
+	if _, err := shimCmdlineMismatch(target); err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("shimCmdlineMismatch(read error) = %v, want permission error", err)
 	}
 }
 
@@ -441,6 +466,17 @@ func TestKillAndCollectLeavesNoZombie(t *testing.T) {
 	if err := killAndCollect(cmd, cause); !errors.Is(err, cause) || err.Error() != cause.Error() {
 		t.Fatalf("killAndCollect() = %v, want the cause and nothing added", err)
 	}
+	checkKilledJobState(t, cmd)
+	// A job that was collected already cannot be collected again: that is reported, joined
+	// with the cause.
+	err := killAndCollect(cmd, cause)
+	if !errors.Is(err, cause) || !strings.Contains(err.Error(), "job-shim: collect the killed job: ") {
+		t.Fatalf("killAndCollect(collected job) = %v, want the cause joined with the wait error", err)
+	}
+}
+
+func checkKilledJobState(t *testing.T, cmd *exec.Cmd) {
+	t.Helper()
 	if cmd.ProcessState == nil {
 		t.Fatalf("killAndCollect() did not collect the job, want its exit status taken")
 	}
@@ -449,12 +485,6 @@ func TestKillAndCollectLeavesNoZombie(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join("/proc", strconv.Itoa(cmd.Process.Pid))); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("/proc entry of the killed job: %v, want it gone", err)
-	}
-	// A job that was collected already cannot be collected again: that is reported, joined
-	// with the cause.
-	err := killAndCollect(cmd, cause)
-	if !errors.Is(err, cause) || !strings.Contains(err.Error(), "job-shim: collect the killed job: ") {
-		t.Fatalf("killAndCollect(collected job) = %v, want the cause joined with the wait error", err)
 	}
 }
 

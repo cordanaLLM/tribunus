@@ -64,13 +64,14 @@ func Check(config string, today time.Time) (int, error) {
 }
 
 // rulesStart returns the index of the first line after "    rules:" inside "  exclusions:".
+// An empty list, "    rules: []", holds no rules; the line after it ends the block.
 func rulesStart(lines []string) (int, error) {
 	inExclusions := false
 	for i := 0; i < len(lines) && i < maxLines; i++ {
 		switch {
 		case lines[i] == "  exclusions:":
 			inExclusions = true
-		case inExclusions && lines[i] == "    rules:":
+		case inExclusions && (lines[i] == "    rules:" || lines[i] == "    rules: []"):
 			return i + 1, nil
 		}
 	}

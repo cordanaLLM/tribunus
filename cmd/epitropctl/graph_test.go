@@ -79,20 +79,40 @@ func mustShow(t *testing.T, cfg string) string {
 
 func TestRunGraphApplyThenShowEndToEnd(t *testing.T) {
 	cfg, _, _ := graphConfig(t, 12)
+	checkGraphShowEmpty(t, cfg)
+	applyGraphInitialStage(t, cfg)
+	applyGraphStdinStage(t, cfg)
+	checkGraphFinalShow(t, cfg)
+}
+
+func checkGraphShowEmpty(t *testing.T, cfg string) {
+	t.Helper()
 	out, errOut, err := graphRun(t, "", "show", "--config", cfg)
 	if err != nil || len(shownNodes(t, out)) != 0 || errOut != "" {
 		t.Fatalf("show(no log yet) = %q, %q, %v; want an empty graph", out, errOut, err)
 	}
+}
+
+func applyGraphInitialStage(t *testing.T, cfg string) {
+	t.Helper()
 	stage := stageFile(t, `{"ops":[`+nodeOp("a")+`,`+nodeOp("b")+`,`+edgeOp("b", "a")+`]}`)
-	out, _, err = graphRun(t, "", "apply", "--config", cfg, "--file", stage)
+	out, _, err := graphRun(t, "", "apply", "--config", cfg, "--file", stage)
 	if err != nil || len(shownNodes(t, out)) != 2 {
 		t.Fatalf("apply(file) = %q, %v; want the graph with two nodes", out, err)
 	}
+}
+
+func applyGraphStdinStage(t *testing.T, cfg string) {
+	t.Helper()
 	fromStdin := `{"ops":[{"type":"graph.status_changed","node_id":"a","status":{"name":"ready"}}]}`
-	if _, _, err = graphRun(t, fromStdin, "apply", "--config", cfg, "--file", "-"); err != nil {
+	if _, _, err := graphRun(t, fromStdin, "apply", "--config", cfg, "--file", "-"); err != nil {
 		t.Fatalf("apply(stdin) = %v, want nil", err)
 	}
-	out, errOut, err = graphRun(t, "", "show", "--config", cfg)
+}
+
+func checkGraphFinalShow(t *testing.T, cfg string) {
+	t.Helper()
+	out, errOut, err := graphRun(t, "", "show", "--config", cfg)
 	nodes := shownNodes(t, out)
 	if err != nil || errOut != "" || len(nodes) != 2 || nodes[0].Status.Name != graph.StatusReady || len(nodes[1].DependsOn) != 1 {
 		t.Fatalf("show = %q, %q, %v; want a ready and b depending on a", out, errOut, err)

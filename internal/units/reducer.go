@@ -31,6 +31,11 @@ func UnitReducer(st eventlog.State, rec eventlog.Record) (eventlog.State, error)
 	if !IsValidID(rec.TaskID) {
 		return eventlog.State{}, fmt.Errorf("eventlog: seq %d: invalid unit id %q", rec.Seq, rec.TaskID)
 	}
+	return reduceUnitEvent(st, rec)
+}
+
+// reduceUnitEvent applies one record of the unit domain by its type.
+func reduceUnitEvent(st eventlog.State, rec eventlog.Record) (eventlog.State, error) {
 	switch rec.Type {
 	case "unit.recorded":
 		return reduceUnitRecorded(st, rec)

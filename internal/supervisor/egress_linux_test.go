@@ -85,7 +85,7 @@ func TestSandboxArgvWithoutProxyNamesNoneOfIt(t *testing.T) {
 		sandbox := proxyTestSandbox(t.TempDir())
 		sandbox.Network = networks[i]
 		argv := proxyTestArgv(t, sandbox, sandboxProxy{})
-		refused := []string{"/run/epitrop", "__egress-relay", "_PROXY", "_proxy", "3128", "GOMAXPROCS", "--unset="}
+		refused := []string{"/run/epitrop", "__egress-relay", "_PROXY", "_proxy", sandboxProxyListen, sandboxProxyURL, "GOMAXPROCS", "--unset="}
 		for j := 0; j < len(refused); j++ {
 			if strings.Contains(argv, refused[j]) {
 				t.Errorf("argv(network=%s) = %q, want no %q", networks[i], argv, refused[j])

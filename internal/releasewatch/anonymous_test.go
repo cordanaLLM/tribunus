@@ -20,37 +20,42 @@ import (
 func TestAnonymousSinkSearchFailsWithMissingToken(t *testing.T) {
 	for _, status := range []int{http.StatusNotFound, http.StatusUnauthorized, http.StatusForbidden} {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {
-			gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(status)
-			}))
-			defer gh.Close()
-
-			client, err := NewClient(ClientOptions{
-				GitHubBase: gh.URL,
-				LookupEnv:  func(string) (string, bool) { return "", false },
-			})
-			if err != nil {
-				t.Fatalf("NewClient: %v", err)
-			}
-			state, err := LoadState(t.TempDir())
-			if err != nil {
-				t.Fatalf("LoadState: %v", err)
-			}
-			sink := &config.GitHubIssueSink{Repo: "owner/consumer"}
-			item := ReleaseItem{ID: "github:owner/upstream@v1.0.0"}
-
-			_, err = DeliverGitHubIssue(context.Background(), client, state, sink, item)
-			if err == nil {
-				t.Fatal("DeliverGitHubIssue = nil error, want ErrMissingToken")
-			}
-			if !errors.Is(err, ErrMissingToken) {
-				t.Fatalf("errors.Is(err, ErrMissingToken) = false, err = %v", err)
-			}
-			msg := err.Error()
-			if !strings.Contains(msg, "owner/consumer") || !strings.Contains(msg, strconv.Itoa(status)) {
-				t.Fatalf("err %q does not contain repo and status %d", msg, status)
-			}
+			testAnonymousSinkSearchMissingTokenForStatus(t, status)
 		})
+	}
+}
+
+func testAnonymousSinkSearchMissingTokenForStatus(t *testing.T, status int) {
+	t.Helper()
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+	}))
+	defer gh.Close()
+
+	client, err := NewClient(ClientOptions{
+		GitHubBase: gh.URL,
+		LookupEnv:  func(string) (string, bool) { return "", false },
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	state, err := LoadState(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	sink := &config.GitHubIssueSink{Repo: "owner/consumer"}
+	item := ReleaseItem{ID: "github:owner/upstream@v1.0.0"}
+
+	_, err = DeliverGitHubIssue(context.Background(), client, state, sink, item)
+	if err == nil {
+		t.Fatal("DeliverGitHubIssue = nil error, want ErrMissingToken")
+	}
+	if !errors.Is(err, ErrMissingToken) {
+		t.Fatalf("errors.Is(err, ErrMissingToken) = false, err = %v", err)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "owner/consumer") || !strings.Contains(msg, strconv.Itoa(status)) {
+		t.Fatalf("err %q does not contain repo and status %d", msg, status)
 	}
 }
 

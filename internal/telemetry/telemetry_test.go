@@ -237,27 +237,31 @@ func parseDocsMetricNames(t *testing.T, docsPath string) map[string]bool {
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, "| Name |") {
-			inTable = true
-			continue
-		}
-		if !inTable {
-			continue
-		}
-		if !strings.HasPrefix(line, "|") {
-			if len(docsMetrics) > 0 {
-				break
-			}
-			continue
-		}
-		if name := parseMetricRow(line); name != "" {
-			docsMetrics[name] = true
+		if processDocsMetricLine(line, &inTable, docsMetrics) {
+			break
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		t.Fatalf("scan docs: %v", err)
 	}
 	return docsMetrics
+}
+
+func processDocsMetricLine(line string, inTable *bool, docsMetrics map[string]bool) bool {
+	if strings.HasPrefix(line, "| Name |") {
+		*inTable = true
+		return false
+	}
+	if !*inTable {
+		return false
+	}
+	if !strings.HasPrefix(line, "|") {
+		return len(docsMetrics) > 0
+	}
+	if name := parseMetricRow(line); name != "" {
+		docsMetrics[name] = true
+	}
+	return false
 }
 
 func parseMetricRow(line string) string {

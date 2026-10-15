@@ -32,22 +32,7 @@ func TestIssueMarkerEncodesCommentTerminators(t *testing.T) {
 // TestFiledIssueFencesNotesAndEncodesMarker checks the body actually sent to GitHub.
 func TestFiledIssueFencesNotesAndEncodesMarker(t *testing.T) {
 	var posted string
-	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/releases"):
-			testWrite(w, `[{"tag_name":"v1-->x","html_url":"https://example.invalid/r","body":"cc @maintainer, see #99"}]`)
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/issues"):
-			testWrite(w, `[]`)
-		case r.Method == http.MethodPost:
-			var payload GitHubIssuePayload
-			body, _ := io.ReadAll(r.Body) //nolint:errcheck // test capture
-			if err := json.Unmarshal(body, &payload); err == nil {
-				posted = payload.Body
-			}
-			w.WriteHeader(http.StatusCreated)
-			testWrite(w, `{"number":7}`)
-		}
-	}))
+	gh := newFencedIssueServer(&posted)
 	defer gh.Close()
 	svc, err := NewService(oneRouteConfig(t, 100), ClientOptions{GitHubBase: gh.URL, Stdout: &bytes.Buffer{}, LookupEnv: func(string) (string, bool) { return "tok", true }})
 	if err != nil {
@@ -62,6 +47,25 @@ func TestFiledIssueFencesNotesAndEncodesMarker(t *testing.T) {
 	if !strings.Contains(posted, "```text\ncc @maintainer, see #99\n```") {
 		t.Fatalf("posted body = %q, want the notes inside a code fence", posted)
 	}
+}
+
+func newFencedIssueServer(posted *string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/releases"):
+			testWrite(w, `[{"tag_name":"v1-->x","html_url":"https://example.invalid/r","body":"cc @maintainer, see #99"}]`)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/issues"):
+			testWrite(w, `[]`)
+		case r.Method == http.MethodPost:
+			var payload GitHubIssuePayload
+			body, _ := io.ReadAll(r.Body) //nolint:errcheck // test capture
+			if err := json.Unmarshal(body, &payload); err == nil {
+				*posted = payload.Body
+			}
+			w.WriteHeader(http.StatusCreated)
+			testWrite(w, `{"number":7}`)
+		}
+	}))
 }
 
 func TestTruncateRunesKeepsWholeRunes(t *testing.T) {

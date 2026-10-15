@@ -123,31 +123,43 @@ func TestCopyHalfEndsOfOneDirection(t *testing.T) {
 		{"closed by this side, one side can end alone", true, net.ErrClosed, nil, 0, 1},
 	}
 	for i := 0; i < len(tests); i++ {
-		src := &endConn{}
-		half := &halfEndConn{}
-		whole := &endConn{}
-		var dst net.Conn = whole
-		got := whole
-		if tests[i].canHalfClose {
-			dst, got = half, &half.endConn
-		}
-		var reader io.Reader = strings.NewReader("ping")
-		if tests[i].readErr != nil {
-			reader = &failingReader{text: reader, err: tests[i].readErr}
-		}
-		err := copyHalf(dst, reader, src)
-		if !errors.Is(err, tests[i].wantErr) || (tests[i].wantErr == nil && err != nil) {
-			t.Errorf("%s: copyHalf() = %v, want %v", tests[i].name, err, tests[i].wantErr)
-		}
-		if got.sink.String() != "ping" {
-			t.Errorf("%s: copied %q, want ping", tests[i].name, got.sink.String())
-		}
-		if half.halfCloses != tests[i].wantHalfClose {
-			t.Errorf("%s: %d ends of the writing side, want %d", tests[i].name, half.halfCloses, tests[i].wantHalfClose)
-		}
-		if got.closes != tests[i].wantCloses || src.closes != tests[i].wantCloses {
-			t.Errorf("%s: %d and %d closes of the two connections, want %d each", tests[i].name, got.closes, src.closes, tests[i].wantCloses)
-		}
+		runCopyHalfEndsCase(t, tests[i])
+	}
+}
+
+func runCopyHalfEndsCase(t *testing.T, tc struct {
+	name          string
+	canHalfClose  bool
+	readErr       error
+	wantErr       error
+	wantHalfClose int
+	wantCloses    int
+}) {
+	t.Helper()
+	src := &endConn{}
+	half := &halfEndConn{}
+	whole := &endConn{}
+	var dst net.Conn = whole
+	got := whole
+	if tc.canHalfClose {
+		dst, got = half, &half.endConn
+	}
+	var reader io.Reader = strings.NewReader("ping")
+	if tc.readErr != nil {
+		reader = &failingReader{text: reader, err: tc.readErr}
+	}
+	err := copyHalf(dst, reader, src)
+	if !errors.Is(err, tc.wantErr) || (tc.wantErr == nil && err != nil) {
+		t.Errorf("%s: copyHalf() = %v, want %v", tc.name, err, tc.wantErr)
+	}
+	if got.sink.String() != "ping" {
+		t.Errorf("%s: copied %q, want ping", tc.name, got.sink.String())
+	}
+	if half.halfCloses != tc.wantHalfClose {
+		t.Errorf("%s: %d ends of the writing side, want %d", tc.name, half.halfCloses, tc.wantHalfClose)
+	}
+	if got.closes != tc.wantCloses || src.closes != tc.wantCloses {
+		t.Errorf("%s: %d and %d closes of the two connections, want %d each", tc.name, got.closes, src.closes, tc.wantCloses)
 	}
 }
 

@@ -27,8 +27,9 @@ func stagedRef(ws Workspace) string {
 // The head has to be a commit: the workspace can serve a ref of the branch's name that names
 // a tag, and git would refuse that only when it is brought among the branches. It has to be
 // the one the result names, when it names one, and it has to descend from the base: a
-// branch that shares no history with its base is not this unit's work.
-func stageBranch(ctx context.Context, repo string, ws Workspace, claimed string) (string, error) {
+// branch that shares no history with its base is not this unit's work. No commit may touch
+// the job's home or hand back a bound file (checkBranchContent).
+func stageBranch(ctx context.Context, repo string, ws Workspace, claimed string, bound []string) (string, error) {
 	args := append([]string{"-c", "fetch.fsckObjects=true"}, fetchFlags...)
 	args = append(args, "--", ws.Dir, "+refs/heads/"+ws.Branch+":"+stagedRef(ws))
 	if _, err := git(ctx, repo, args...); err != nil {
@@ -50,6 +51,9 @@ func stageBranch(ctx context.Context, repo string, ws Workspace, claimed string)
 	}
 	if _, err = git(ctx, repo, "merge-base", "--is-ancestor", ws.Base, head); err != nil {
 		return "", fmt.Errorf("the branch %s at %s does not descend from its base %s: %w", ws.Branch, head, ws.Base, err)
+	}
+	if err = checkBranchContent(ctx, repo, ws.Base, head, bound); err != nil {
+		return "", fmt.Errorf("the branch %s: %w", ws.Branch, err)
 	}
 	return head, nil
 }

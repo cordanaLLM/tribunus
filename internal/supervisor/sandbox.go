@@ -3,6 +3,7 @@ package supervisor
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/tekmora/epitrop/internal/config"
 )
@@ -32,6 +33,9 @@ type sandboxBuildOptions struct {
 	Tools sandboxTools
 	Env   func(string) (string, bool)
 	Proxy sandboxProxy
+	// Until is the latest time the job can still run, stop grace included; a home's bound
+	// token has to outlast it.
+	Until time.Time
 }
 
 func sandboxStatus(sandbox config.SandboxConfig) string {
@@ -63,7 +67,7 @@ func sandboxFlagArgs(sandbox config.SandboxConfig) []string {
 	for i := 0; i < len(sandbox.Destinations); i++ {
 		args = append(args, "--sandbox-destination", sandbox.Destinations[i])
 	}
-	return args
+	return append(args, homeFlagArgs(sandbox.Home)...)
 }
 
 // jobCommand is the argv and environment the shim execs. Env nil means the shim's own

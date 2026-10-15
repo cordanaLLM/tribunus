@@ -206,6 +206,9 @@ type SandboxConfig struct {
 	MemoryHigh string `koanf:"memory_high" json:"memory_high"`
 	CPUWeight  int    `koanf:"cpu_weight" json:"cpu_weight"`
 	TasksMax   int    `koanf:"tasks_max" json:"tasks_max"`
+	// Home is the client home the shim makes in the workspace before each start; nil for
+	// none.
+	Home *SandboxHome `koanf:"home" json:"home,omitempty"`
 }
 
 type WatchConfig struct {
@@ -399,7 +402,10 @@ func ValidateSandbox(sandbox SandboxConfig) error {
 	if err := validateSandboxLimits(sandbox); err != nil {
 		return err
 	}
-	return validateSandboxEnv(sandbox.EnvAllow)
+	if err := validateSandboxEnv(sandbox.EnvAllow); err != nil {
+		return err
+	}
+	return validateSandboxHome(sandbox)
 }
 
 func readyContext(ctx context.Context) error {
@@ -507,6 +513,13 @@ func validateJobSandbox(job *JobConfig, guard protectedPaths) error {
 	if err := validateSandboxEnv(job.Sandbox.EnvAllow); err != nil {
 		return err
 	}
+	if err := validateSandboxHome(job.Sandbox); err != nil {
+		return err
+	}
+	// A bound login has to outlast the run, and only a deadline says how long that is.
+	if job.Sandbox.Home != nil && job.MaxRuntimeSeconds == 0 {
+		return fmt.Errorf("home: needs the job's max_runtime_seconds")
+	}
 	if job.Sandbox.Mode == "off" {
 		return nil
 	}
@@ -522,7 +535,7 @@ func validateJobSandbox(job *JobConfig, guard protectedPaths) error {
 		return err
 	}
 	job.Sandbox.Workspace, job.Sandbox.Inputs = workspace, inputs
-	return nil
+	return resolveSandboxHome(&job.Sandbox, guard)
 }
 
 func validateSandboxMode(sandbox SandboxConfig) error {

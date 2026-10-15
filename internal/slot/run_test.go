@@ -511,7 +511,12 @@ func TestRunTakesNoResultItCannotStandBehind(t *testing.T) {
 // and the unit is blocked with a pointer to the report.
 func checkNotTaken(t *testing.T, name string, work runWork, want string) {
 	t.Helper()
-	run := newTestRun(t, &work)
+	checkRunNotTaken(t, name, newTestRun(t, &work), want)
+}
+
+// checkRunNotTaken is checkNotTaken for a prepared run.
+func checkRunNotTaken(t *testing.T, name string, run *testRun, want string) {
+	t.Helper()
 	before := repoRefs(t, run.repo)
 	report, err := Run(slotCtx(t), run.req)
 	if err != nil {

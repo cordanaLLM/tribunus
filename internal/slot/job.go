@@ -129,6 +129,7 @@ type Supervised struct {
 	polls    int
 	interval time.Duration
 	since    string
+	sandbox  config.SandboxConfig
 }
 
 // Name returns the job's name.
@@ -163,7 +164,34 @@ func NewSupervised(sup Supervisor, job config.JobConfig, interval time.Duration)
 		interval = WaitInterval
 	}
 	wait := time.Duration(job.MaxRuntimeSeconds+job.Stop.GraceSeconds+waitMarginSeconds) * time.Second
-	return &Supervised{sup: sup, name: job.Name, polls: int(wait/interval) + 1, interval: interval}
+	return &Supervised{sup: sup, name: job.Name, polls: int(wait/interval) + 1, interval: interval, sandbox: job.Sandbox}
+}
+
+// Binds returns what the job's sandbox makes visible to the job: the workspace, the inputs
+// and the files of its home. A job without a sandbox sees what its user sees; it has none.
+func (j *Supervised) Binds() []Bind {
+	sandbox := j.sandbox
+	if sandbox.Mode != "enforce" {
+		return nil
+	}
+	binds := []Bind{{Source: sandbox.Workspace, Target: sandbox.Workspace, Mode: BindWrite}}
+	for i := 0; i < len(sandbox.Inputs); i++ {
+		binds = append(binds, Bind{Source: sandbox.Inputs[i], Target: sandbox.Inputs[i], Mode: BindRead})
+	}
+	home := sandbox.Home
+	if home == nil {
+		return binds
+	}
+	dir := filepath.Join(sandbox.Workspace, filepath.FromSlash(config.SandboxHomeDir))
+	for i := 0; i < len(home.Copy); i++ {
+		file := home.Copy[i].File
+		binds = append(binds, Bind{Source: filepath.Join(home.Source, file), Target: filepath.Join(dir, file), Mode: BindCopy, SHA256: home.Copy[i].SHA256})
+	}
+	for i := 0; i < len(home.Bind); i++ {
+		file := home.Bind[i].File
+		binds = append(binds, Bind{Source: filepath.Join(home.Source, file), Target: filepath.Join(dir, file), Mode: BindRead})
+	}
+	return binds
 }
 
 // Preflight refuses a slot whose job runs already, and a host that cannot start the job's

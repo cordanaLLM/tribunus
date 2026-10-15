@@ -54,17 +54,22 @@ func assertRefusedStart(t *testing.T, sup *Supervisor, name string, logPath stri
 		t.Fatalf("Start(%s) = %v, want ErrRefused with reason %q", name, err, wantReason)
 	}
 	job := eventlogJob(t, sup, name)
+	checkRefusedJobEventLog(t, job, wantReason)
+	log, err := os.ReadFile(logPath)
+	if err != nil || !strings.Contains(string(log), "epitrop: job-shim: "+name+" refused: "+wantReason) {
+		t.Fatalf("job log = %q, %v, want the refusal line", log, err)
+	}
+	waitForUnlock(t, sup, mustJob(t, sup, name))
+}
+
+func checkRefusedJobEventLog(t *testing.T, job eventlog.Job, wantReason string) {
+	t.Helper()
 	if job.LastEvent != "job.refused" || job.State != string(StateDead) || !strings.HasPrefix(job.LastReason, wantReason) {
 		t.Fatalf("event log holds %+v, want job.refused, dead, reason %q", job, wantReason)
 	}
 	if job.Since != "" || job.ShimPID != 0 || job.RefusedShimPID == 0 || job.RefusedAt == "" {
 		t.Fatalf("event log holds %+v, want the refusal's shim and time and no start", job)
 	}
-	log, err := os.ReadFile(logPath)
-	if err != nil || !strings.Contains(string(log), "epitrop: job-shim: "+name+" refused: "+wantReason) {
-		t.Fatalf("job log = %q, %v, want the refusal line", log, err)
-	}
-	waitForUnlock(t, sup, mustJob(t, sup, name))
 }
 
 func mustJob(t *testing.T, sup *Supervisor, name string) config.JobConfig {
@@ -141,17 +146,27 @@ func TestJobRefusedKeepsTheLastRecordedStart(t *testing.T) {
 		}
 	}
 	job := st.Jobs["daemon"]
+	checkRefusedJobKeptStart(t, job)
+	checkRefusedJobRefusalFields(t, job)
+	if _, err = JobReducer(st, eventlog.Record{Seq: 4, Type: "job.refused", TaskID: "daemon", Payload: json.RawMessage(`{`)}); err == nil {
+		t.Fatalf("JobReducer(job.refused, broken payload) = nil, want an error")
+	}
+}
+
+func checkRefusedJobKeptStart(t *testing.T, job eventlog.Job) {
+	t.Helper()
 	if job.ShimPID != 20 || job.Since != "t1" || job.PID != 21 {
 		t.Fatalf("after job.refused the last start is %+v, want shim 20 since t1 kept", job)
-	}
-	if job.State != "dead" || job.LastEvent != "job.refused" || job.LastReason != "no scope" || job.LastExitCode != nil || job.RefusedShimPID != 30 || job.RefusedAt != "t3" {
-		t.Fatalf("after job.refused the job is %+v, want dead, the reason, no exit code, shim 30 at t3", job)
 	}
 	if startedBy(job, eventlog.Job{}, 30) {
 		t.Fatalf("startedBy(refusing shim) = true, want a refusal never read as a start")
 	}
-	if _, err = JobReducer(st, eventlog.Record{Seq: 4, Type: "job.refused", TaskID: "daemon", Payload: json.RawMessage(`{`)}); err == nil {
-		t.Fatalf("JobReducer(job.refused, broken payload) = nil, want an error")
+}
+
+func checkRefusedJobRefusalFields(t *testing.T, job eventlog.Job) {
+	t.Helper()
+	if job.State != "dead" || job.LastEvent != "job.refused" || job.LastReason != "no scope" || job.LastExitCode != nil || job.RefusedShimPID != 30 || job.RefusedAt != "t3" {
+		t.Fatalf("after job.refused the job is %+v, want dead, the reason, no exit code, shim 30 at t3", job)
 	}
 }
 
@@ -174,27 +189,34 @@ func TestRefuseJobReportsWhatItCouldNotRecord(t *testing.T) {
 		t.Fatalf("recorded refusal = %s shim %d reason of %d bytes, want job.refused by this process with the reason cut at %d", got.LastEvent, got.RefusedShimPID, len(got.LastReason), maxRefusalReasonBytes)
 	}
 
-	// The event log cannot be written: the refusal still returns its cause and says so.
+	checkRefuseJobEventLogUnwritable(t, cause)
+	checkRefuseJobJobLogUnwritable(t, cause)
+}
+
+func checkRefuseJobEventLogUnwritable(t *testing.T, cause error) {
+	t.Helper()
 	broken := validShimConfig(t, "broken")
-	if err = os.WriteFile(filepath.Join(broken.EventLogDir, "events"), []byte("file"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(broken.EventLogDir, "events"), []byte("file"), 0o600); err != nil {
 		t.Fatalf("WriteFile(events file) = %v, want nil", err)
 	}
-	log.Reset()
-	err = refuseJob(broken, &log, cause)
+	var log bytes.Buffer
+	err := refuseJob(broken, &log, cause)
 	if !errors.Is(err, cause) || !strings.Contains(err.Error(), "job-shim: record refusal: ") {
 		t.Fatalf("refuseJob(event log unwritable) = %.200v, want the cause joined with the recording error", err)
 	}
 	if log.Len() == 0 {
 		t.Fatalf("job log is empty after a refusal that could not be recorded, want the refusal line")
 	}
+}
 
-	// The job log cannot be written: the refusal is still recorded as an event.
+func checkRefuseJobJobLogUnwritable(t *testing.T, cause error) {
+	t.Helper()
 	deaf := validShimConfig(t, "deaf")
-	err = refuseJob(deaf, failingWriter{}, cause)
+	err := refuseJob(deaf, failingWriter{}, cause)
 	if !errors.Is(err, cause) || !strings.Contains(err.Error(), "job-shim: write refusal to the job log: ") {
 		t.Fatalf("refuseJob(job log unwritable) = %.200v, want the cause joined with the write error", err)
 	}
-	state, err = eventlog.Replay(testContext(t), deaf.EventLogDir, shimPublicKey(t, deaf), eventlog.Limits{Clock: clockwork.NewRealClock()}, JobReducer)
+	state, err := eventlog.Replay(testContext(t), deaf.EventLogDir, shimPublicKey(t, deaf), eventlog.Limits{Clock: clockwork.NewRealClock()}, JobReducer)
 	if err != nil || state.Jobs["deaf"].LastEvent != "job.refused" {
 		t.Fatalf("after a refusal with an unwritable job log: %+v, %v, want job.refused recorded", state.Jobs["deaf"], err)
 	}

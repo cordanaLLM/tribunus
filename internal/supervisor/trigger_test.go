@@ -95,6 +95,13 @@ func TestIntervalTrigger_T1(t *testing.T) {
 	sup := testSupervisorWithClock(t, rt, clk, job)
 	ctx := testContext(t)
 
+	checkIntervalTriggerArmed(t, sup, rt, ctx)
+	checkIntervalTriggerFired(t, sup, rt, clk, ctx)
+	checkIntervalTriggerNoDuplicate(t, sup, clk, ctx)
+}
+
+func checkIntervalTriggerArmed(t *testing.T, sup *Supervisor, rt testRuntimeConfig, ctx context.Context) {
+	t.Helper()
 	// Step 1: clock at 01:59:00 -> arms, starts nothing.
 	if err := sup.Reconcile(ctx); err != nil {
 		t.Fatalf("Reconcile(01:59) = %v, want nil", err)
@@ -105,7 +112,10 @@ func TestIntervalTrigger_T1(t *testing.T) {
 	if starts := countEvents(t, rt.EventLogDir, "job.started"); starts != 0 {
 		t.Fatalf("job.started events at 01:59 = %d, want 0", starts)
 	}
+}
 
+func checkIntervalTriggerFired(t *testing.T, sup *Supervisor, rt testRuntimeConfig, clk *clockwork.FakeClock, ctx context.Context) {
+	t.Helper()
 	// Step 2: clock at 02:00:30 -> one job.triggered started (due 02:00) and one start.
 	clk.Advance(90 * time.Second)
 	if err := sup.Reconcile(ctx); err != nil {
@@ -118,13 +128,16 @@ func TestIntervalTrigger_T1(t *testing.T) {
 	if starts := countEvents(t, rt.EventLogDir, "job.started"); starts != 1 {
 		t.Fatalf("job.started events at 02:00:30 = %d, want 1", starts)
 	}
+}
 
+func checkIntervalTriggerNoDuplicate(t *testing.T, sup *Supervisor, clk *clockwork.FakeClock, ctx context.Context) {
+	t.Helper()
 	// Step 3: Reconcile again at 02:01:00 -> no second start.
 	clk.Advance(30 * time.Second)
 	if err := sup.Reconcile(ctx); err != nil {
 		t.Fatalf("Reconcile(02:01:00) = %v, want nil", err)
 	}
-	triggers = collectTriggeredEvents(t, sup, "cron-t1")
+	triggers := collectTriggeredEvents(t, sup, "cron-t1")
 	if len(triggers) != 1 {
 		t.Fatalf("triggers after 02:01:00 = %d, want 1 (no duplicate)", len(triggers))
 	}
@@ -243,6 +256,15 @@ func TestEventTriggerReplayDeduplication_T5(t *testing.T) {
 		t.Fatalf("Reconcile() = %v, want nil", err)
 	}
 
+	appendAndReconcileEventTriggers(t, sup, ctx)
+
+	// Restart supervisor on same log: starts nothing more.
+	supRestart := testSupervisorWithClock(t, rt, clk, jobA, jobB)
+	checkReplayDeduplicationTriggers(t, sup, supRestart, ctx)
+}
+
+func appendAndReconcileEventTriggers(t *testing.T, sup *Supervisor, ctx context.Context) {
+	t.Helper()
 	// Append two job.exited records for job-a.
 	if err := sup.appendJobEvent(ctx, "job.exited", "job-a", map[string]any{"exit_code": 0}); err != nil {
 		t.Fatalf("appendJobEvent(1) = %v, want nil", err)
@@ -262,7 +284,10 @@ func TestEventTriggerReplayDeduplication_T5(t *testing.T) {
 		t.Fatalf("Reconcile(second event) = %v, want nil", err)
 	}
 	waitForState(t, sup, "job-b", StateDead)
+}
 
+func checkReplayDeduplicationTriggers(t *testing.T, sup *Supervisor, supRestart *Supervisor, ctx context.Context) {
+	t.Helper()
 	triggers := collectTriggeredEvents(t, sup, "job-b")
 	if len(triggers) != 2 {
 		t.Fatalf("triggers count = %d, want 2", len(triggers))
@@ -271,8 +296,6 @@ func TestEventTriggerReplayDeduplication_T5(t *testing.T) {
 		t.Fatalf("triggers order/outcome invalid: %+v", triggers)
 	}
 
-	// Restart supervisor on same log: starts nothing more.
-	supRestart := testSupervisorWithClock(t, rt, clk, jobA, jobB)
 	if err := supRestart.Reconcile(ctx); err != nil {
 		t.Fatalf("Reconcile(restart) = %v, want nil", err)
 	}

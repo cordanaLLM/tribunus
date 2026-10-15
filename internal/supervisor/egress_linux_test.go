@@ -239,6 +239,20 @@ func TestStartJobProxyListensUntilStopped(t *testing.T) {
 		t.Fatalf("startJobProxy() = %v, want nil", err)
 	}
 	binds := proxy.binds()
+	checkJobProxyBinds(t, binds)
+	if err = proxy.stop(); err != nil {
+		t.Fatalf("stop() = %v, want nil", err)
+	}
+	if _, err = os.Stat(filepath.Dir(binds.Socket)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Stat(socket directory after stop) = %v, want it gone", err)
+	}
+	if log.Len() != 0 {
+		t.Errorf("job log = %q, want nothing from a proxy nobody asked", log.String())
+	}
+}
+
+func checkJobProxyBinds(t *testing.T, binds sandboxProxy) {
+	t.Helper()
 	info, err := os.Stat(binds.Socket)
 	if err != nil || info.Mode()&os.ModeSocket == 0 {
 		t.Errorf("Stat(%s) = %v, %v, want a socket", binds.Socket, info, err)
@@ -252,15 +266,6 @@ func TestStartJobProxyListensUntilStopped(t *testing.T) {
 	}
 	if err = validateSandboxProxy(config.SandboxConfig{Network: "proxy"}, binds); err != nil {
 		t.Errorf("validateSandboxProxy(binds of a started proxy) = %v, want nil", err)
-	}
-	if err = proxy.stop(); err != nil {
-		t.Fatalf("stop() = %v, want nil", err)
-	}
-	if _, err = os.Stat(filepath.Dir(binds.Socket)); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("Stat(socket directory after stop) = %v, want it gone", err)
-	}
-	if log.Len() != 0 {
-		t.Errorf("job log = %q, want nothing from a proxy nobody asked", log.String())
 	}
 }
 

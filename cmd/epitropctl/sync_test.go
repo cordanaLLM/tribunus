@@ -110,15 +110,7 @@ func TestRunSync_Positive(t *testing.T) {
 	}))
 	defer litellmPrices.Close()
 
-	sessionsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(sessionsDir, "session.jsonl"), []byte(fixtureRateLimitsLine), 0o600); err != nil {
-		t.Fatalf("setup fixture: %v", err)
-	}
-
-	tokenFile := filepath.Join(t.TempDir(), "token")
-	if err := os.WriteFile(tokenFile, []byte("tok"), 0o600); err != nil {
-		t.Fatalf("setup token: %v", err)
-	}
+	sessionsDir, tokenFile := setupSyncFixtures(t)
 
 	out := filepath.Join(t.TempDir(), "out.json")
 	args := []string{
@@ -134,6 +126,25 @@ func TestRunSync_Positive(t *testing.T) {
 		t.Fatalf("runSync() = %v", err)
 	}
 
+	checkSyncSnapshot(t, out)
+}
+
+func setupSyncFixtures(t *testing.T) (string, string) {
+	t.Helper()
+	sessionsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sessionsDir, "session.jsonl"), []byte(fixtureRateLimitsLine), 0o600); err != nil {
+		t.Fatalf("setup fixture: %v", err)
+	}
+
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("tok"), 0o600); err != nil {
+		t.Fatalf("setup token: %v", err)
+	}
+	return sessionsDir, tokenFile
+}
+
+func checkSyncSnapshot(t *testing.T, out string) {
+	t.Helper()
 	data, err := os.ReadFile(out)
 	if err != nil {
 		t.Fatalf("read snapshot: %v", err)

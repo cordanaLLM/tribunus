@@ -290,15 +290,26 @@ func TestProcessGoneCountsAZombie(t *testing.T) {
 		t.Fatalf("Start(sleep) = %v, want nil", err)
 	}
 	pid := cmd.Process.Pid
+	checkRunningChildState(t, pid)
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("Kill(child) = %v, want nil", err)
+	}
+	checkZombieChildState(t, pid)
+	checkCollectedChildState(t, cmd, pid)
+}
+
+func checkRunningChildState(t *testing.T, pid int) {
+	t.Helper()
 	if gone, err := processGone(pid); err != nil || gone {
 		t.Fatalf("processGone(running child) = %v, %v, want false", gone, err)
 	}
 	if !processExists(pid) {
 		t.Fatalf("processExists(running child) = false, want true")
 	}
-	if err := cmd.Process.Kill(); err != nil {
-		t.Fatalf("Kill(child) = %v, want nil", err)
-	}
+}
+
+func checkZombieChildState(t *testing.T, pid int) {
+	t.Helper()
 	zombie := false
 	for i := 0; i < 200 && !zombie; i++ {
 		body, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "status"))
@@ -317,6 +328,10 @@ func TestProcessGoneCountsAZombie(t *testing.T) {
 	if processExists(pid) {
 		t.Fatalf("processExists(zombie) = true, want false")
 	}
+}
+
+func checkCollectedChildState(t *testing.T, cmd *exec.Cmd, pid int) {
+	t.Helper()
 	var killed *exec.ExitError
 	if err := cmd.Wait(); !errors.As(err, &killed) {
 		t.Fatalf("Wait(killed child) = %v, want its kill status: processGone must not collect the child", err)
@@ -345,15 +360,22 @@ func TestProcessGoneReportsUnreadableState(t *testing.T) {
 	if gone, err := processGone(4242); !gone || err != nil {
 		t.Fatalf("processGone(dead) = %v, %v, want true", gone, err)
 	}
-	// A zombie line with threads left is a process that still runs: one that execs from a
-	// thread other than its first, or whose first thread has ended.
+	checkProcessGoneThreadsLeft(t)
+	checkProcessGoneKernelOverrides(t)
+}
+
+func checkProcessGoneThreadsLeft(t *testing.T) {
+	t.Helper()
 	for _, status := range []string{"State:\tZ (zombie)\nThreads:\t3\n", "State:\tZ (zombie)\nThreads:\t0\n", "State:\tZ (zombie)\n", "State:\tX (dead)\nThreads:\t2\n"} {
 		procStatusReadFile = func(string) ([]byte, error) { return []byte("Name:\tx\n" + status), nil }
 		if gone, err := processGone(4242); gone || err != nil {
 			t.Fatalf("processGone(%q) = %v, %v, want false: threads are left", status, gone, err)
 		}
 	}
-	// What the kernel says about a child is final, whatever /proc shows.
+}
+
+func checkProcessGoneKernelOverrides(t *testing.T) {
+	t.Helper()
 	procStatusReadFile = func(string) ([]byte, error) { return []byte("Name:\tx\nState:\tZ (zombie)\nThreads:\t1\n"), nil }
 	childExitProbe = func(int) (bool, bool, error) { return false, true, nil }
 	if gone, err := processGone(4242); gone || err != nil {
@@ -380,49 +402,62 @@ func TestProcessGoneIsNotFooledByAnExecWithThreads(t *testing.T) {
 	}
 	sawZombieLine := 0
 	for run := 0; run < 5; run++ {
-		cmd := exec.CommandContext(t.Context(), self, "--user", "--", "/usr/bin/sleep", "30") // #nosec G204 -- the test binary as the stand-in scope command.
-		cmd.Env = append(os.Environ(), fakeScopeEnv+"=1")
-		if err = cmd.Start(); err != nil {
-			t.Fatalf("Start(stand-in) = %v, want nil", err)
-		}
-		pid := cmd.Process.Pid
-		status := filepath.Join("/proc", strconv.Itoa(pid), "status")
-		execed := time.Time{}
-		for i := 0; i < 2_000_000 && (execed.IsZero() || time.Since(execed) < 20*time.Millisecond); i++ {
-			gone, goneErr := processGone(pid)
-			if gone || goneErr != nil {
-				t.Fatalf("processGone(child that only execs) = %v, %v on poll %d, want false: it never exited", gone, goneErr, i)
-			}
-			if body, readErr := os.ReadFile(status); readErr == nil && strings.HasPrefix(procStatusField(string(body), "State:"), "Z") {
-				sawZombieLine++
-			}
-			if execed.IsZero() && strings.HasSuffix(processImage(pid), "sleep") {
-				execed = time.Now()
-			}
-		}
-		if execed.IsZero() {
-			t.Fatalf("stand-in %d never became sleep", pid)
-		}
-		if err = cmd.Process.Kill(); err != nil {
-			t.Fatalf("Kill(stand-in) = %v, want nil", err)
-		}
-		if err = awaitExitUncollected(pid); err != nil {
-			t.Fatalf("awaitExitUncollected(killed stand-in) = %v, want nil", err)
-		}
-		if gone, goneErr := processGone(pid); !gone || goneErr != nil {
-			t.Fatalf("processGone(killed, uncollected child) = %v, %v, want true", gone, goneErr)
-		}
-		// The check must leave the child for its parent to collect: a kill status, not "no child".
-		var killed *exec.ExitError
-		if err = cmd.Wait(); !errors.As(err, &killed) {
-			t.Fatalf("Wait(killed stand-in) = %v, want its kill status: processGone must not collect the child", err)
-		}
+		sawZombieLine += runExecWithThreadsIteration(t, self)
 	}
 	// Without this the test would prove nothing on a machine where the moment is never seen.
 	t.Logf("/proc showed the running child as a zombie on %d polls over 5 runs", sawZombieLine)
 	if sawZombieLine == 0 {
 		t.Skipf("/proc never showed the zombie line during the exec; the case was not exercised here")
 	}
+}
+
+func runExecWithThreadsIteration(t *testing.T, self string) int {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), self, "--user", "--", "/usr/bin/sleep", "30") // #nosec G204 -- the test binary as the stand-in scope command.
+	cmd.Env = append(os.Environ(), fakeScopeEnv+"=1")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("Start(stand-in) = %v, want nil", err)
+	}
+	pid := cmd.Process.Pid
+	status := filepath.Join("/proc", strconv.Itoa(pid), "status")
+	sawZombie, becameSleep := pollProcessDuringExec(t, pid, status)
+	if !becameSleep {
+		t.Fatalf("stand-in %d never became sleep", pid)
+	}
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("Kill(stand-in) = %v, want nil", err)
+	}
+	if err := awaitExitUncollected(pid); err != nil {
+		t.Fatalf("awaitExitUncollected(killed stand-in) = %v, want nil", err)
+	}
+	if gone, goneErr := processGone(pid); !gone || goneErr != nil {
+		t.Fatalf("processGone(killed, uncollected child) = %v, %v, want true", gone, goneErr)
+	}
+	// The check must leave the child for its parent to collect: a kill status, not "no child".
+	var killed *exec.ExitError
+	if err := cmd.Wait(); !errors.As(err, &killed) {
+		t.Fatalf("Wait(killed stand-in) = %v, want its kill status: processGone must not collect the child", err)
+	}
+	return sawZombie
+}
+
+func pollProcessDuringExec(t *testing.T, pid int, status string) (int, bool) {
+	t.Helper()
+	sawZombie := 0
+	execed := time.Time{}
+	for i := 0; i < 2_000_000 && (execed.IsZero() || time.Since(execed) < 20*time.Millisecond); i++ {
+		gone, goneErr := processGone(pid)
+		if gone || goneErr != nil {
+			t.Fatalf("processGone(child that only execs) = %v, %v on poll %d, want false: it never exited", gone, goneErr, i)
+		}
+		if body, readErr := os.ReadFile(status); readErr == nil && strings.HasPrefix(procStatusField(string(body), "State:"), "Z") {
+			sawZombie++
+		}
+		if execed.IsZero() && strings.HasSuffix(processImage(pid), "sleep") {
+			execed = time.Now()
+		}
+	}
+	return sawZombie, !execed.IsZero()
 }
 
 // TestScopeProbeRefusesAScopeCommandThatCreatesNoScope is the negative case of the probe the
@@ -477,6 +512,14 @@ func TestSandboxedJobOutsideItsScopeIsRefused(t *testing.T) {
 	beat := filepath.Join(job.Sandbox.Workspace, "beat")
 	sup := testSupervisor(t, job)
 	err := sup.Start(testContext(t), job.Name)
+	checkSandboxedJobRefusedLogs(t, job, err)
+	checkSandboxedJobReplayedRefusal(t, sup, job.Name)
+	checkSandboxedJobKilledRecord(t, sup, job.Name)
+	checkSandboxedJobStragglerKilled(t, sup, job, stragglerFile, beat)
+}
+
+func checkSandboxedJobRefusedLogs(t *testing.T, job config.JobConfig, err error) {
+	t.Helper()
 	if !errors.Is(err, ErrRefused) || !strings.Contains(err.Error(), "sandbox-noscope: sandbox: job ") || !strings.Contains(err.Error(), "scope "+scopeNamePrefix) {
 		t.Fatalf("Start(job outside its scope) = %v, want ErrRefused naming the job and the scope", err)
 	}
@@ -488,22 +531,34 @@ func TestSandboxedJobOutsideItsScopeIsRefused(t *testing.T) {
 		t.Fatalf("job log = %q, want the refusal naming the scope", log)
 	}
 	t.Logf("refusal in the job log: %s", strings.TrimSpace(string(log)))
+}
+
+func checkSandboxedJobReplayedRefusal(t *testing.T, sup *Supervisor, jobName string) {
+	t.Helper()
 	state, err := sup.replayState(testContext(t))
 	if err != nil {
 		t.Fatalf("replayState() = %v, want nil", err)
 	}
-	recorded := state.Jobs[job.Name]
+	recorded := state.Jobs[jobName]
 	if recorded.Since != "" || recorded.ShimPID != 0 || recorded.PID != 0 {
 		t.Fatalf("event log holds %+v for the refused job, want no record of a start", recorded)
 	}
 	if recorded.LastEvent != "job.refused" || recorded.State != string(StateDead) || recorded.RefusedShimPID == 0 || recorded.RefusedAt == "" || !strings.Contains(recorded.LastReason, "scope "+scopeNamePrefix) {
 		t.Fatalf("event log holds %+v for the refused job, want job.refused with the shim, the time and the reason", recorded)
 	}
-	rec, ok := readJobRecord(sup.recordPath(job.Name))
+}
+
+func checkSandboxedJobKilledRecord(t *testing.T, sup *Supervisor, jobName string) {
+	t.Helper()
+	rec, ok := readJobRecord(sup.recordPath(jobName))
 	if !ok {
-		t.Fatalf("job record %s missing, want the record of the killed job", sup.recordPath(job.Name))
+		t.Fatalf("job record %s missing, want the record of the killed job", sup.recordPath(jobName))
 	}
 	waitForProcessGone(t, rec.PID)
+}
+
+func checkSandboxedJobStragglerKilled(t *testing.T, sup *Supervisor, job config.JobConfig, stragglerFile string, beat string) {
+	t.Helper()
 	// The whole process group dies, not only the process the parent-death signal reaches.
 	straggler, err := os.ReadFile(stragglerFile)
 	if err != nil {

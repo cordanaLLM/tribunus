@@ -37,6 +37,15 @@ func printedUnit(t *testing.T, out string) eventlog.Unit {
 // ready node whose dependency landed, an assignment takes it off, a release puts it back.
 func TestRunUnitsFrontierAssignReleaseEndToEnd(t *testing.T) {
 	cfg, _, _ := graphConfig(t, 12)
+	setupUnitsFrontierStage(t, cfg)
+	checkUnitsFrontierAssignRefusals(t, cfg)
+	checkUnitsFrontierAssignSuccess(t, cfg)
+	checkUnitsFrontierReleaseSuccess(t, cfg)
+	checkUnitsFrontierReleaseRefusal(t, cfg)
+}
+
+func setupUnitsFrontierStage(t *testing.T, cfg string) {
+	t.Helper()
 	ops := []string{nodeOp("a"), nodeOp("b"), nodeOp("c"), edgeOp("b", "a"), edgeOp("c", "b"),
 		statusOp("a", "ready"), statusOp("b", "ready"), statusOp("c", "ready")}
 	for _, to := range []string{"claimed", "implementing", "review", "landing", "landed"} {
@@ -50,30 +59,46 @@ func TestRunUnitsFrontierAssignReleaseEndToEnd(t *testing.T) {
 	if err != nil || out != "b\t\"Task b\"\n" {
 		t.Fatalf("frontier = %q, %v; want b alone", out, err)
 	}
-	if _, err = unitsGraphRun(t, "assign", "--config", cfg, "--repo", "tekmora/epitrop", "c"); err == nil || !strings.Contains(err.Error(), "--repo and --lane") {
+}
+
+func checkUnitsFrontierAssignRefusals(t *testing.T, cfg string) {
+	t.Helper()
+	if _, err := unitsGraphRun(t, "assign", "--config", cfg, "--repo", "tekmora/epitrop", "c"); err == nil || !strings.Contains(err.Error(), "--repo and --lane") {
 		t.Fatalf("assign without a lane = %v, want it refused", err)
 	}
-	if _, err = unitsGraphRun(t, "assign", "--config", cfg, "--repo", "tekmora/epitrop", "--lane", "l", "c"); err == nil || !strings.Contains(err.Error(), `depends on "b"`) {
+	if _, err := unitsGraphRun(t, "assign", "--config", cfg, "--repo", "tekmora/epitrop", "--lane", "l", "c"); err == nil || !strings.Contains(err.Error(), `depends on "b"`) {
 		t.Fatalf("assign c = %v, want it refused for its dependency", err)
 	}
-	out, err = unitsGraphRun(t, "assign", "--config", cfg, "--repo", "tekmora/epitrop", "--lane", "l", "--by", "slot-1", "b")
+}
+
+func checkUnitsFrontierAssignSuccess(t *testing.T, cfg string) {
+	t.Helper()
+	out, err := unitsGraphRun(t, "assign", "--config", cfg, "--repo", "tekmora/epitrop", "--lane", "l", "--by", "slot-1", "b")
 	if u := printedUnit(t, out); err != nil || u.ID != "tekmora/epitrop:b" || u.Status != "claimed" || u.Node != "b" {
 		t.Fatalf("assign b = %+v, %v; want the claimed unit of b", u, err)
 	}
 	if out, err = unitsGraphRun(t, "frontier", "--config", cfg); err != nil || out != "" {
 		t.Fatalf("frontier after the assignment = %q, %v; want empty", out, err)
 	}
-	if _, err = unitsGraphRun(t, "release", "--config", cfg, "b"); err == nil || !strings.Contains(err.Error(), "--reason is required") {
+}
+
+func checkUnitsFrontierReleaseSuccess(t *testing.T, cfg string) {
+	t.Helper()
+	if _, err := unitsGraphRun(t, "release", "--config", cfg, "b"); err == nil || !strings.Contains(err.Error(), "--reason is required") {
 		t.Fatalf("release without a reason = %v, want it refused", err)
 	}
-	out, err = unitsGraphRun(t, "release", "--config", cfg, "--reason", "lane down", "b")
+	out, err := unitsGraphRun(t, "release", "--config", cfg, "--reason", "lane down", "b")
 	if u := printedUnit(t, out); err != nil || u.Status != "dropped" || u.Released == nil || u.Released.Reason != "lane down" {
 		t.Fatalf("release b = %+v, %v; want the unit dropped with the reason", u, err)
 	}
 	if out, err = unitsGraphRun(t, "frontier", "--config", cfg); err != nil || out != "b\t\"Task b\"\n" {
 		t.Fatalf("frontier after the release = %q, %v; want b again", out, err)
 	}
-	if _, err = unitsGraphRun(t, "release", "--config", cfg, "--reason", "again", "b"); err == nil || !strings.Contains(err.Error(), "not claimed") {
+}
+
+func checkUnitsFrontierReleaseRefusal(t *testing.T, cfg string) {
+	t.Helper()
+	if _, err := unitsGraphRun(t, "release", "--config", cfg, "--reason", "again", "b"); err == nil || !strings.Contains(err.Error(), "not claimed") {
 		t.Fatalf("release of a ready node = %v, want it refused", err)
 	}
 }

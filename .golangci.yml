@@ -59,9 +59,6 @@ linters:
       - path: ^cmd/epitropctl/sync_test\.go$
         linters: [gocyclo]
       # category C, expires 2026-10-25, #133
-      - path: ^cmd/epitropctl/units\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
       - path: ^cmd/epitropctl/units_frontier_test\.go$
         linters: [gocognit]
       # category C, expires 2026-10-25, #133

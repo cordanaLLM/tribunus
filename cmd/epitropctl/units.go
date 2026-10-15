@@ -42,31 +42,25 @@ func eventLogLimits(cfg config.Config, clk clockwork.Clock) eventlog.Limits {
 // unitsStdin is the reader "--identity=-" takes the identity object from.
 var unitsStdin io.Reader = os.Stdin
 
+var unitsCommands = map[string]func([]string) error{
+	"set":      runUnitsSet,
+	"resume":   runUnitsResume,
+	"show":     runUnitsShow,
+	"note":     runUnitsNote,
+	"inbox":    runUnitsInbox,
+	"preempt":  runUnitsPreempt,
+	"handover": runUnitsHandover,
+	"frontier": runUnitsFrontier,
+	"assign":   runUnitsAssign,
+	"release":  runUnitsRelease,
+}
+
 func runUnits(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("units command required: set, resume, show, note, inbox, preempt, handover, frontier, assign, or release")
 	}
-	switch args[0] {
-	case "set":
-		return runUnitsSet(args[1:])
-	case "resume":
-		return runUnitsResume(args[1:])
-	case "show":
-		return runUnitsShow(args[1:])
-	case "note":
-		return runUnitsNote(args[1:])
-	case "inbox":
-		return runUnitsInbox(args[1:])
-	case "preempt":
-		return runUnitsPreempt(args[1:])
-	case "handover":
-		return runUnitsHandover(args[1:])
-	case "frontier":
-		return runUnitsFrontier(args[1:])
-	case "assign":
-		return runUnitsAssign(args[1:])
-	case "release":
-		return runUnitsRelease(args[1:])
+	if fn, ok := unitsCommands[args[0]]; ok {
+		return fn(args[1:])
 	}
 	return fmt.Errorf("unknown units command: %s", args[0])
 }

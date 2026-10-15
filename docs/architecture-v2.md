@@ -106,8 +106,15 @@ The result rule is stated by fixtures replayed in both directions (`internal/slo
 
 What this does not cover:
 
-- No real harness has run in a slot. The proof uses a stand-in; which variables and files a real harness needs inside the sandbox is not measured yet.
-- A job with `sandbox.network: egress` reaches the whole internet. `network: proxy` gives a job its declared destinations and nothing else ([ADR-0006](adr/0006-proxy-socket-egress.md)), but no slot has run with it: which harness works through the proxy is not measured, and no real unit should run in a slot before that.
+- One real harness has run in a slot: Codex CLI 0.145.0 on #157 (a one-line test fix, landed as #175), with `network: proxy`, `chatgpt.com:443` as the only destination and a client home whose login was bound read-only. Measured on that run:
+  - The client needs only its own files, the workspace and the read-only inputs the template names (here a Go toolchain and a module cache, so the checks ran offline). It read nothing of the operator's own client folder.
+  - It works through the proxy. It also asked for `ab.chatgpt.com:443` four times, was refused, and finished regardless. It never asked for the login service, so no token was refreshed.
+  - Codex's own sandbox (`workspace-write`) runs inside the job's sandbox; no weaker mode was needed.
+  - Codex keeps the workspace's top-level `.git` read-only in `workspace-write` (`codex-rs/protocol/src/permissions.rs` at `rust-v0.145.0`), so the run could not commit and its change was committed outside the slot. Until that is settled, a Codex run in a slot ends without a branch.
+  - Codex adds a trust entry for the workspace to its settings. It lands in the per-run copy of the home only; the source is never written.
+  - With `HOME` in the workspace, Go writes its telemetry counters to `.config/go/` in the work tree. A client that stages everything would commit them.
+  - Other harnesses and other destinations are not measured.
+- A job with `sandbox.network: egress` reaches the whole internet. `network: proxy` gives a job its declared destinations and nothing else ([ADR-0006](adr/0006-proxy-socket-egress.md)).
 - A valid result is the run's own claim. The runner checks its form, the evidence files and the head of the branch. It does not check that the evidence shows what the summary says, and it reviews no commit.
 - Nothing bounds the size of what a run commits and the runner fetches.
 - The branch step finds a bound login only as a verbatim copy: an encoded or split copy passes, the files inside an input folder are not compared, and a run with network access can send the login elsewhere.

@@ -361,12 +361,14 @@ func (s *Supervisor) Reconcile(ctx context.Context) error {
 	if err := readyContext(ctx, "reconcile"); err != nil {
 		return err
 	}
-	state, err := s.replayState(ctx)
+	collector := &eventMatchCollector{jobs: s.cfg.Jobs, matches: map[string][]uint64{}}
+	state, err := s.replayStateWithReducer(ctx, collector.reduce)
 	if err != nil {
 		return err
 	}
 	for i := 0; i < len(s.cfg.Jobs); i++ {
-		if err = s.reconcileJob(ctx, s.cfg.Jobs[i], state.Jobs[s.cfg.Jobs[i].Name]); err != nil {
+		job := s.cfg.Jobs[i]
+		if err = s.reconcileJob(ctx, job, state.Jobs[job.Name], collector.matches[job.Name], collector.head); err != nil {
 			return err
 		}
 	}

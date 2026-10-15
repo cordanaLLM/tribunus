@@ -664,10 +664,6 @@ components:
       type: object
     BadRequestResponse:
       description: Bad Request - Invalid request parameters or malformed input
-      example:
-        error:
-          code: 400
-          message: Invalid request parameters
       properties:
         error:
           $ref: '#/components/schemas/BadRequestResponseErrorData'
@@ -686,13 +682,6 @@ components:
     DefaultParameters:
       additionalProperties: false
       description: Default parameters for this model
-      example:
-        frequency_penalty: 0
-        presence_penalty: 0
-        repetition_penalty: 1
-        temperature: 0.7
-        top_k: 0
-        top_p: 0.9
       properties:
         frequency_penalty:
           format: double
@@ -728,10 +717,6 @@ components:
         - 'null'
     ForbiddenResponse:
       description: Forbidden - Authentication successful but insufficient permissions
-      example:
-        error:
-          code: 403
-          message: Only management keys can perform this operation
       properties:
         error:
           $ref: '#/components/schemas/ForbiddenResponseErrorData'
@@ -754,7 +739,6 @@ components:
         - file
         - audio
         - video
-      example: text
       type: string
     InstructType:
       description: Instruction format type
@@ -782,16 +766,11 @@ components:
         - qwq
         - qwen3
         - null
-      example: chatml
       type:
         - string
         - 'null'
     InternalServerResponse:
       description: Internal Server Error - Unexpected server error
-      example:
-        error:
-          code: 500
-          message: Internal Server Error
       properties:
         error:
           $ref: '#/components/schemas/InternalServerResponseErrorData'
@@ -809,9 +788,6 @@ components:
       type: object
     ModelAliasTarget:
       description: Concrete model targeted by this tilde-latest alias, when applicable
-      example:
-        name: Claude Sonnet 4.5
-        slug: anthropic/claude-sonnet-4.5
       properties:
         name:
           description: Human-readable name of the concrete model targeted by this alias
@@ -829,28 +805,11 @@ components:
       description: >-
         Third-party benchmark rankings for this model. Omitted when no benchmark
         data is available.
-      example:
-        artificial_analysis:
-          agentic_index: 55.8
-          coding_index: 63.2
-          intelligence_index: 71.4
-        design_arena:
-          - arena: models
-            category: website
-            elo: 1385.2
-            rank: 5
-            win_rate: 62.5
       properties:
         artificial_analysis:
           $ref: '#/components/schemas/AABenchmarkEntry'
         design_arena:
           description: Design Arena ELO rankings across arena+category pairs.
-          example:
-            - arena: models
-              category: website
-              elo: 1385.2
-              rank: 5
-              win_rate: 62.5
           items:
             $ref: '#/components/schemas/DABenchmarkEntry'
           type: array
@@ -880,16 +839,12 @@ components:
         - PaLM
         - RWKV
         - Qwen3
-      example: GPT
       type: string
     ModelLinks:
       description: Related API endpoints and resources for this model.
-      example:
-        details: /api/v1/models/openai/gpt-5.4/endpoints
       properties:
         details:
           description: URL for the model details/endpoints API
-          example: /api/v1/models/openai/gpt-5.4/endpoints
           type: string
       required:
         - details
@@ -898,15 +853,6 @@ components:
       description: >-
         Reasoning effort configuration. Omitted for non-reasoning models and
         dynamic router models.
-      example:
-        default_effort: medium
-        default_enabled: true
-        mandatory: false
-        supported_efforts:
-          - high
-          - medium
-          - low
-          - minimal
       properties:
         default_effort:
           allOf:
@@ -956,7 +902,6 @@ components:
         - decisions
         - speech
         - transcription
-      example: text
       type: string
     Parameter:
       enum:
@@ -986,21 +931,15 @@ components:
         - reasoning_effort
         - web_search_options
         - verbosity
-      example: temperature
       type: string
     PerRequestLimits:
       description: Per-request token limits
-      example:
-        completion_tokens: 1000
-        prompt_tokens: 1000
       properties:
         completion_tokens:
           description: Maximum completion tokens per request
-          example: 1000
           type: number
         prompt_tokens:
           description: Maximum prompt tokens per request
-          example: 1000
           type: number
       required:
         - prompt_tokens
@@ -1015,10 +954,6 @@ components:
         utc_start/utc_end time window) match the request; among applicable
         entries, later entries win per price key; price keys absent from an
         entry inherit the base price.
-      example:
-        completion: '0.00002'
-        min_prompt_tokens: 200000
-        prompt: '0.000005'
       properties:
         audio:
           description: Overridden price in USD per audio input token
@@ -1083,20 +1018,14 @@ components:
       type: object
     TopProviderInfo:
       description: Information about the top provider for this model
-      example:
-        context_length: 8192
-        is_moderated: true
-        max_completion_tokens: 4096
       properties:
         context_length:
           description: Context length from the top provider
-          example: 8192
           type:
             - integer
             - 'null'
         is_moderated:
           description: Whether the top provider moderates content
-          example: true
           type: boolean
         max_completion_tokens:
           description: >-
@@ -1104,7 +1033,6 @@ components:
             tokens share the context window, so the effective maximum output for
             a request is further limited by the context remaining after input
             tokens.
-          example: 4096
           type:
             - integer
             - 'null'
@@ -1113,28 +1041,21 @@ components:
       type: object
     AABenchmarkEntry:
       description: Artificial Analysis benchmark index scores.
-      example:
-        agentic_index: 55.8
-        coding_index: 63.2
-        intelligence_index: 71.4
       properties:
         agentic_index:
           description: Artificial Analysis Agentic Index score
-          example: 55.8
           format: double
           type:
             - number
             - 'null'
         coding_index:
           description: Artificial Analysis Coding Index score
-          example: 63.2
           format: double
           type:
             - number
             - 'null'
         intelligence_index:
           description: Artificial Analysis Intelligence Index score
-          example: 71.4
           format: double
           type:
             - number
@@ -1146,9 +1067,6 @@ components:
       type: object
     BadRequestResponseErrorData:
       description: Error data for BadRequestResponse
-      example:
-        code: 400
-        message: Invalid request parameters
       properties:
         code:
           type: integer
@@ -1165,35 +1083,24 @@ components:
       type: object
     DABenchmarkEntry:
       description: A single Design Arena benchmark entry for a specific arena+category
-      example:
-        arena: models
-        category: website
-        elo: 1385.2
-        rank: 5
-        win_rate: 62.5
       properties:
         arena:
           description: Arena type (e.g. models, builders, agents)
-          example: models
           type: string
         category:
           description: Category within the arena (e.g. website, gamedev, uicomponent)
-          example: website
           type: string
         elo:
           description: ELO rating from head-to-head arena battles
-          example: 1385.2
           format: double
           type: number
         rank:
           description: >-
             Rank position within this arena+category among models available on
             OpenRouter (1 = highest ELO)
-          example: 5
           type: integer
         win_rate:
           description: Win rate percentage in arena battles
-          example: 62.5
           format: double
           type: number
       required:
@@ -1205,9 +1112,6 @@ components:
       type: object
     ForbiddenResponseErrorData:
       description: Error data for ForbiddenResponse
-      example:
-        code: 403
-        message: Only management keys can perform this operation
       properties:
         code:
           type: integer
@@ -1224,9 +1128,6 @@ components:
       type: object
     InternalServerResponseErrorData:
       description: Error data for InternalServerResponse
-      example:
-        code: 500
-        message: Internal Server Error
       properties:
         code:
           type: integer
@@ -1251,7 +1152,6 @@ components:
         - minimal
         - none
         - null
-      example: medium
       type:
         - string
         - 'null'

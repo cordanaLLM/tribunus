@@ -40,7 +40,7 @@
       "fragments": [
         {
           "path": "internal/sources/publiccatalog/testdata/upstream/openrouter-models-openapi.yaml",
-          "body_sha256": "5966a492d5c6011a9a190cc2cb2a9efecfa6ad11d5ff77ccdd3b9e36230e7fc3"
+          "body_sha256": "608177fe9fd6311e367c7513ce77a0fd6bcb8b0b4fdc2e46771d1655e795f2ba"
         }
       ]
     },

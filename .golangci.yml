@@ -200,12 +200,6 @@ linters:
       - path: ^internal/supervisor/egress_linux_test\.go$
         linters: [gocyclo]
       # category C, expires 2026-10-25, #133
-      - path: ^internal/supervisor/home_linux\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/supervisor/home_linux\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
       - path: ^internal/supervisor/home_linux_test\.go$
         linters: [gocognit]
       # category C, expires 2026-10-25, #133
@@ -225,9 +219,6 @@ linters:
         linters: [gocognit]
       # category C, expires 2026-10-25, #133
       - path: ^internal/supervisor/scope_linux_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/supervisor/shim\.go$
         linters: [gocyclo]
       # category C, expires 2026-10-25, #133
       - path: ^internal/supervisor/startonce_linux_test\.go$

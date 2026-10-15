@@ -128,19 +128,10 @@ linters:
       - path: ^internal/releasewatch/issue_text_test\.go$
         linters: [gocyclo]
       # category C, expires 2026-10-25, #133
-      - path: ^internal/releasewatch/service\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
       - path: ^internal/releasewatch/service_test\.go$
         linters: [gocognit]
       # category C, expires 2026-10-25, #133
       - path: ^internal/releasewatch/service_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/releasewatch/sinks\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/releasewatch/state\.go$
         linters: [gocyclo]
       # category C, expires 2026-10-25, #133
       - path: ^internal/slot/handover_test\.go$

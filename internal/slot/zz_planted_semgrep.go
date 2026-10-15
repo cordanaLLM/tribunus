@@ -5,5 +5,5 @@ package slot
 
 import "context"
 
-// plantedSemgrep is a planted HISS-02 finding; this commit is reverted.
-func plantedSemgrep() context.Context { return context.TODO() }
+// PlantedSemgrep is a planted HISS-02 finding; this commit is reverted.
+func PlantedSemgrep() context.Context { return context.TODO() }

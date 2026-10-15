@@ -75,7 +75,7 @@ func newSlotRun(t *testing.T, job func(slotRun) string) slotRun {
 	if err := os.WriteFile(brief, []byte("# Unit\nAdd the retry.\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile(brief) = %v, want nil", err)
 	}
-	template := `{"event_log": {"dir": "` + state + `", "signing_key_path": "` + keyPath + `"}, "jobs": [` + job(run) + `]}`
+	template := `{"sandbox_input_roots": ["` + base + `"], "event_log": {"dir": "` + state + `", "signing_key_path": "` + keyPath + `"}, "jobs": [` + job(run) + `]}`
 	if err := os.WriteFile(run.template, []byte(template+"\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile(template) = %v, want nil", err)
 	}

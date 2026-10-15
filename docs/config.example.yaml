@@ -4,6 +4,12 @@ budgets:
   default:
     tokens: 200000
     wall_clock_seconds: 3600
+# Every sandboxed job's workspace and inputs must lie in one of these directories once
+# symlinks are resolved; with none, no job runs sandboxed. A directory containing HOME is
+# refused, and a login location below HOME (.ssh, .config/gh, a coding client's folder and
+# the like) opens only to a root that names exactly that location.
+sandbox_input_roots:
+  - /var/tmp
 jobs:
   - name: daily-catalog-sync
     command:

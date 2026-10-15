@@ -65,28 +65,41 @@ func TestRunConfigCompletesTheTemplateForOneRun(t *testing.T) {
 		t.Fatalf("RunConfig() = %d jobs at %s, want one job at the run's config file", len(cfg.Jobs), path)
 	}
 	job := cfg.Jobs[0]
+	assertCompletedJobValues(t, job, ws.Dir, out)
+	assertCompletedConfigFileWritten(t, path)
+	assertCompletedConfigReload(t, path, ws.Dir, job.LogPath)
+}
+
+func assertCompletedJobValues(t *testing.T, job config.JobConfig, wsDir, out string) {
+	t.Helper()
 	if job.Name != "slot-1" || job.LogPath != filepath.Join(out, LogFile) || job.Schedule != "once" || job.Restart.Policy != "never" || job.Restart.MaxRestarts != 0 {
 		t.Fatalf("job = %+v, want the template's job with the run's log, run once and never restarted", job)
 	}
-	if job.Sandbox.Workspace != ws.Dir || job.Sandbox.Mode != "enforce" || job.Sandbox.MemoryMax != "1G" || job.MaxRuntimeSeconds != 600 {
+	if job.Sandbox.Workspace != wsDir || job.Sandbox.Mode != "enforce" || job.Sandbox.MemoryMax != "1G" || job.MaxRuntimeSeconds != 600 {
 		t.Fatalf("sandbox = %+v, want the run's workspace with the template's limits", job.Sandbox)
 	}
-	// The file says so itself, and does not lean on what a configuration without the keys means.
+}
+
+func assertCompletedConfigFileWritten(t *testing.T, path string) {
+	t.Helper()
 	var written struct {
 		Jobs []struct {
 			Schedule string         `json:"schedule"`
 			Restart  map[string]any `json:"restart"`
 		} `json:"jobs"`
 	}
-	if err = json.Unmarshal([]byte(readFile(t, path)), &written); err != nil || len(written.Jobs) != 1 {
+	if err := json.Unmarshal([]byte(readFile(t, path)), &written); err != nil || len(written.Jobs) != 1 {
 		t.Fatalf("the run's config file = %+v, %v; want one job", written, err)
 	}
 	if restart := written.Jobs[0].Restart; written.Jobs[0].Schedule != "once" || restart["policy"] != "never" || restart["max_restarts"] != float64(0) || len(restart) != 2 {
 		t.Fatalf("the run's config file has schedule %q and restart %v, want once and never, written out", written.Jobs[0].Schedule, restart)
 	}
-	// The file is a configuration of its own: `jobs status` and `jobs stop` take it.
+}
+
+func assertCompletedConfigReload(t *testing.T, path, wsDir, logPath string) {
+	t.Helper()
 	again, err := config.Load(slotCtx(t), path)
-	if err != nil || len(again.Jobs) != 1 || again.Jobs[0].Sandbox.Workspace != ws.Dir || again.Jobs[0].LogPath != job.LogPath {
+	if err != nil || len(again.Jobs) != 1 || again.Jobs[0].Sandbox.Workspace != wsDir || again.Jobs[0].LogPath != logPath {
 		t.Fatalf("Load(run's config) = %+v, %v; want the same job", again.Jobs, err)
 	}
 }
@@ -255,10 +268,16 @@ func TestSupervisedWaitReadsTheEndOfItsOwnStart(t *testing.T) {
 	if err != nil || !end.Recorded || end.Code == nil || *end.Code != 3 || end.Reason != "deadline" || sup.statusCalls != 3 {
 		t.Fatalf("Wait() = %+v, %v after %d looks; want the recorded exit after 3", end, err, sup.statusCalls)
 	}
+	assertSupervisedWaitUnrecordedExits(t, exited)
+}
+
+func assertSupervisedWaitUnrecordedExits(t *testing.T, exited supervisor.RecordedJob) {
+	t.Helper()
 	// An exit that belongs to another start of the slot's job is not this run's.
-	job = supervised(&fakeSupervisor{running: []bool{false}, recorded: exited}, 5)
+	job := supervised(&fakeSupervisor{running: []bool{false}, recorded: exited}, 5)
 	job.since = "t0"
-	if end, err = job.Wait(slotCtx(t)); err != nil || end.Recorded || end.Code != nil || !strings.Contains(end.Reason, "without its exit") {
+	end, err := job.Wait(slotCtx(t))
+	if err != nil || end.Recorded || end.Code != nil || !strings.Contains(end.Reason, "without its exit") {
 		t.Fatalf("Wait(exit of another start) = %+v, %v; want an end that is not recorded", end, err)
 	}
 	// A job that stopped running with no exit on record.

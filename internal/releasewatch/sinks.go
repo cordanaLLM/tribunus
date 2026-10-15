@@ -82,25 +82,9 @@ func DeliverGitHubIssue(ctx context.Context, client *Client, state *State, sink 
 
 func searchExistingIssueMarker(ctx context.Context, client *Client, repo string, firstLabel string, marker string) (bool, error) {
 	for page := 1; page <= MaxSearchIssuePages; page++ {
-		url := fmt.Sprintf("%s/repos/%s/issues?state=all&per_page=100&page=%d", client.GitHubBaseURL(), repo, page)
-		if firstLabel != "" {
-			url += "&labels=" + urlPkg.QueryEscape(firstLabel)
-		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		issues, err := fetchIssuePage(ctx, client, repo, firstLabel, page)
 		if err != nil {
-			return false, fmt.Errorf("build search issues request: %w", err)
-		}
-		req.Header.Set("Accept", "application/vnd.github+json")
-		status, _, body, err := client.DoRequest(ctx, req, 30*time.Second, maxSourceResponseBytes)
-		if err != nil {
-			return false, fmt.Errorf("search issues in %s page %d: %w", repo, page, err)
-		}
-		if status != http.StatusOK {
-			return false, &searchStatusError{repo: repo, status: status}
-		}
-		var issues []GitHubIssueResponse
-		if err = json.Unmarshal(body, &issues); err != nil {
-			return false, fmt.Errorf("parse issues response for %s: %w", repo, err)
+			return false, err
 		}
 		for i := 0; i < len(issues); i++ {
 			if strings.Contains(issues[i].Body, marker) {
@@ -112,6 +96,32 @@ func searchExistingIssueMarker(ctx context.Context, client *Client, repo string,
 		}
 	}
 	return false, nil
+}
+
+// fetchIssuePage reads one page of up to 100 issues of the repository, open and closed,
+// filtered by the label when one is given.
+func fetchIssuePage(ctx context.Context, client *Client, repo string, firstLabel string, page int) ([]GitHubIssueResponse, error) {
+	url := fmt.Sprintf("%s/repos/%s/issues?state=all&per_page=100&page=%d", client.GitHubBaseURL(), repo, page)
+	if firstLabel != "" {
+		url += "&labels=" + urlPkg.QueryEscape(firstLabel)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build search issues request: %w", err)
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	status, _, body, err := client.DoRequest(ctx, req, 30*time.Second, maxSourceResponseBytes)
+	if err != nil {
+		return nil, fmt.Errorf("search issues in %s page %d: %w", repo, page, err)
+	}
+	if status != http.StatusOK {
+		return nil, &searchStatusError{repo: repo, status: status}
+	}
+	var issues []GitHubIssueResponse
+	if err = json.Unmarshal(body, &issues); err != nil {
+		return nil, fmt.Errorf("parse issues response for %s: %w", repo, err)
+	}
+	return issues, nil
 }
 
 func createGitHubIssue(ctx context.Context, client *Client, repo string, payload GitHubIssuePayload) (int, error) {

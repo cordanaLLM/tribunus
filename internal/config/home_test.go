@@ -131,14 +131,24 @@ func TestLoadSandboxHomeSource(t *testing.T) {
 		{"protected key folder", append(roots, w.keys), w.keys, "home.source:"},
 	}
 	for _, tc := range cases {
-		_, err := w.loadHome(t, tc.roots, tc.source, 3600)
-		if tc.want == "" && err != nil {
-			t.Errorf("%s: Load() = %v, want nil", tc.name, err)
-		}
-		if tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
-			t.Errorf("%s: Load() = %v, want an error holding %q", tc.name, err, tc.want)
-		}
+		runLoadSandboxHomeSourceCase(t, w, tc.name, tc.roots, tc.source, tc.want)
 	}
+	assertLoadSandboxHomeSourceEdgeCases(t, w, roots, slotHome, link)
+}
+
+func runLoadSandboxHomeSourceCase(t *testing.T, w sandboxPathWorld, name string, roots []string, source, want string) {
+	t.Helper()
+	_, err := w.loadHome(t, roots, source, 3600)
+	if want == "" && err != nil {
+		t.Errorf("%s: Load() = %v, want nil", name, err)
+	}
+	if want != "" && (err == nil || !strings.Contains(err.Error(), want)) {
+		t.Errorf("%s: Load() = %v, want an error holding %q", name, err, want)
+	}
+}
+
+func assertLoadSandboxHomeSourceEdgeCases(t *testing.T, w sandboxPathWorld, roots []string, slotHome, link string) {
+	t.Helper()
 	if _, err := w.loadHome(t, roots, slotHome, 0); err == nil || !strings.Contains(err.Error(), "home: needs the job's max_runtime_seconds") {
 		t.Errorf("Load(home without a deadline) = %v, want the refusal", err)
 	}

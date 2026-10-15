@@ -25,34 +25,7 @@ func TestPlantedReleaseFilingAndSeenSetSecondPass(t *testing.T) {
 	var postedBody string
 	var postedTitle string
 
-	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/releases"):
-			w.Header().Set("Content-Type", "application/json")
-			testWrite(w, `[{"tag_name":"v1.0.0","html_url":"https://github.com/owner/upstream/releases/tag/v1.0.0","body":"notes","published_at":"2026-10-01T12:00:00Z"}]`)
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/issues"):
-			w.Header().Set("Content-Type", "application/json")
-			testWrite(w, `[]`)
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/issues"):
-			atomic.AddInt32(&postCount, 1)
-			data, err := io.ReadAll(r.Body)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			var payload GitHubIssuePayload
-			if err := json.Unmarshal(data, &payload); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			postedTitle = payload.Title
-			postedBody = payload.Body
-			w.WriteHeader(http.StatusCreated)
-			testWrite(w, `{"number":1,"title":"title","body":"body","state":"open"}`)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
+	ghServer := newPlantedReleaseServer(&postCount, &postedTitle, &postedBody)
 	defer ghServer.Close()
 
 	stateDir := t.TempDir()
@@ -86,7 +59,51 @@ func TestPlantedReleaseFilingAndSeenSetSecondPass(t *testing.T) {
 	if err = svc.RunPass(context.Background()); err != nil {
 		t.Fatalf("RunPass 1: %v", err)
 	}
+	assertPlantedReleasePass1(t, atomic.LoadInt32(&postCount), postedBody, postedTitle, stateDir)
+
+	// Pass 2: seen-set prevents second POST
+	if err = svc.RunPass(context.Background()); err != nil {
+		t.Fatalf("RunPass 2: %v", err)
+	}
 	if atomic.LoadInt32(&postCount) != 1 {
+		t.Fatalf("postCount after pass 2 = %d, want 1", postCount)
+	}
+}
+
+func newPlantedReleaseServer(postCount *int32, postedTitle, postedBody *string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/releases"):
+			w.Header().Set("Content-Type", "application/json")
+			testWrite(w, `[{"tag_name":"v1.0.0","html_url":"https://github.com/owner/upstream/releases/tag/v1.0.0","body":"notes","published_at":"2026-10-01T12:00:00Z"}]`)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/issues"):
+			w.Header().Set("Content-Type", "application/json")
+			testWrite(w, `[]`)
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/issues"):
+			atomic.AddInt32(postCount, 1)
+			data, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			var payload GitHubIssuePayload
+			if err := json.Unmarshal(data, &payload); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			*postedTitle = payload.Title
+			*postedBody = payload.Body
+			w.WriteHeader(http.StatusCreated)
+			testWrite(w, `{"number":1,"title":"title","body":"body","state":"open"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func assertPlantedReleasePass1(t *testing.T, postCount int32, postedBody, postedTitle, stateDir string) {
+	t.Helper()
+	if postCount != 1 {
 		t.Fatalf("postCount = %d, want 1", postCount)
 	}
 	wantMarker := "<!-- release-watch: github:owner/upstream@v1.0.0 -->"
@@ -105,36 +122,13 @@ func TestPlantedReleaseFilingAndSeenSetSecondPass(t *testing.T) {
 	if !diskState.Has("github:owner/upstream@v1.0.0") {
 		t.Fatal("seen-set on disk does not contain github:owner/upstream@v1.0.0")
 	}
-
-	// Pass 2: seen-set prevents second POST
-	if err = svc.RunPass(context.Background()); err != nil {
-		t.Fatalf("RunPass 2: %v", err)
-	}
-	if atomic.LoadInt32(&postCount) != 1 {
-		t.Fatalf("postCount after pass 2 = %d, want 1", postCount)
-	}
 }
 
 func TestMarkerAlreadyPresentInExistingIssue(t *testing.T) {
 	var postCalled int32
 	var stdout bytes.Buffer
 
-	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/releases"):
-			w.Header().Set("Content-Type", "application/json")
-			testWrite(w, `[{"tag_name":"v1.0.0","html_url":"https://github.com/owner/upstream/releases/tag/v1.0.0","body":"notes","published_at":"2026-10-01T12:00:00Z"}]`)
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/issues"):
-			w.Header().Set("Content-Type", "application/json")
-			// Return closed issue containing marker
-			testWrite(w, `[{"number":99,"title":"old","body":"<!-- release-watch: github:owner/upstream@v1.0.0 -->\nclosed","state":"closed"}]`)
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/issues"):
-			atomic.AddInt32(&postCalled, 1)
-			http.Error(w, "should not post", http.StatusInternalServerError)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
+	ghServer := newMarkerPresentServer(&postCalled)
 	defer ghServer.Close()
 
 	stateDir := t.TempDir()
@@ -180,50 +174,30 @@ func TestMarkerAlreadyPresentInExistingIssue(t *testing.T) {
 	}
 }
 
-func TestRestartMidPassAtomicSeenSet(t *testing.T) {
-	var filedReleases []string
-	deliverFailSecond := true
-
-	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func newMarkerPresentServer(postCalled *int32) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/releases"):
 			w.Header().Set("Content-Type", "application/json")
-			// Return v2.0.0 (newer) and v1.0.0 (older); service orders oldest first
-			testWrite(w, `[
-				{"tag_name":"v2.0.0","html_url":"https://github.com/owner/upstream/releases/tag/v2.0.0","published_at":"2026-10-02T12:00:00Z"},
-				{"tag_name":"v1.0.0","html_url":"https://github.com/owner/upstream/releases/tag/v1.0.0","published_at":"2026-10-01T12:00:00Z"}
-			]`)
+			testWrite(w, `[{"tag_name":"v1.0.0","html_url":"https://github.com/owner/upstream/releases/tag/v1.0.0","body":"notes","published_at":"2026-10-01T12:00:00Z"}]`)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/issues"):
 			w.Header().Set("Content-Type", "application/json")
-			testWrite(w, `[]`)
+			// Return closed issue containing marker
+			testWrite(w, `[{"number":99,"title":"old","body":"<!-- release-watch: github:owner/upstream@v1.0.0 -->\nclosed","state":"closed"}]`)
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/issues"):
-			data, err := io.ReadAll(r.Body)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			var p GitHubIssuePayload
-			if err := json.Unmarshal(data, &p); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			if strings.Contains(p.Body, "v1.0.0") {
-				filedReleases = append(filedReleases, "v1.0.0")
-				w.WriteHeader(http.StatusCreated)
-				testWrite(w, `{"number":1}`)
-				return
-			}
-			if deliverFailSecond {
-				w.WriteHeader(http.StatusInternalServerError)
-				return
-			}
-			filedReleases = append(filedReleases, "v2.0.0")
-			w.WriteHeader(http.StatusCreated)
-			testWrite(w, `{"number":2}`)
+			atomic.AddInt32(postCalled, 1)
+			http.Error(w, "should not post", http.StatusInternalServerError)
 		default:
 			http.NotFound(w, r)
 		}
 	}))
+}
+
+func TestRestartMidPassAtomicSeenSet(t *testing.T) {
+	var filedReleases []string
+	deliverFailSecond := true
+
+	ghServer := newRestartMidPassServer(&filedReleases, &deliverFailSecond)
 	defer ghServer.Close()
 
 	stateDir := t.TempDir()
@@ -250,12 +224,71 @@ func TestRestartMidPassAtomicSeenSet(t *testing.T) {
 	}
 
 	// Pass 1: fails on 2nd delivery
-	err = svc1.RunPass(context.Background())
+	assertRestartMidPass1(t, svc1, stateDir)
+
+	// Pass 2: restart with new service instance reading disk state
+	deliverFailSecond = false
+	filedReleases = nil
+	svc2, err := NewService(cfg, opts)
+	if err != nil {
+		t.Fatalf("NewService 2: %v", err)
+	}
+	assertRestartMidPass2(t, svc2, stateDir, &filedReleases)
+}
+
+func newRestartMidPassServer(filedReleases *[]string, deliverFailSecond *bool) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/releases"):
+			w.Header().Set("Content-Type", "application/json")
+			testWrite(w, `[
+				{"tag_name":"v2.0.0","html_url":"https://github.com/owner/upstream/releases/tag/v2.0.0","published_at":"2026-10-02T12:00:00Z"},
+				{"tag_name":"v1.0.0","html_url":"https://github.com/owner/upstream/releases/tag/v1.0.0","published_at":"2026-10-01T12:00:00Z"}
+			]`)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/issues"):
+			w.Header().Set("Content-Type", "application/json")
+			testWrite(w, `[]`)
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/issues"):
+			handleRestartMidPassPost(w, r, filedReleases, deliverFailSecond)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func handleRestartMidPassPost(w http.ResponseWriter, r *http.Request, filedReleases *[]string, deliverFailSecond *bool) {
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var p GitHubIssuePayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if strings.Contains(p.Body, "v1.0.0") {
+		*filedReleases = append(*filedReleases, "v1.0.0")
+		w.WriteHeader(http.StatusCreated)
+		testWrite(w, `{"number":1}`)
+		return
+	}
+	if *deliverFailSecond {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	*filedReleases = append(*filedReleases, "v2.0.0")
+	w.WriteHeader(http.StatusCreated)
+	testWrite(w, `{"number":2}`)
+}
+
+func assertRestartMidPass1(t *testing.T, svc1 *Service, stateDir string) {
+	t.Helper()
+	err := svc1.RunPass(context.Background())
 	if err == nil {
 		t.Fatal("RunPass 1 = nil, want failure for 2nd delivery")
 	}
 
-	// Assert 1st is seen on disk, 2nd is not
 	diskState, err := LoadState(stateDir)
 	if err != nil {
 		t.Fatalf("LoadState 1: %v", err)
@@ -266,19 +299,15 @@ func TestRestartMidPassAtomicSeenSet(t *testing.T) {
 	if diskState.Has("github:owner/upstream@v2.0.0") {
 		t.Fatal("v2.0.0 should not be in seen set on disk")
 	}
+}
 
-	// Pass 2: restart with new service instance reading disk state
-	deliverFailSecond = false
-	filedReleases = nil
-	svc2, err := NewService(cfg, opts)
-	if err != nil {
-		t.Fatalf("NewService 2: %v", err)
-	}
-	if err = svc2.RunPass(context.Background()); err != nil {
+func assertRestartMidPass2(t *testing.T, svc2 *Service, stateDir string, filedReleases *[]string) {
+	t.Helper()
+	if err := svc2.RunPass(context.Background()); err != nil {
 		t.Fatalf("RunPass 2: %v", err)
 	}
-	if len(filedReleases) != 1 || filedReleases[0] != "v2.0.0" {
-		t.Fatalf("filedReleases on rerun = %v, want only [v2.0.0]", filedReleases)
+	if len(*filedReleases) != 1 || (*filedReleases)[0] != "v2.0.0" {
+		t.Fatalf("filedReleases on rerun = %v, want only [v2.0.0]", *filedReleases)
 	}
 	diskState2, err := LoadState(stateDir)
 	if err != nil {
@@ -291,163 +320,188 @@ func TestRestartMidPassAtomicSeenSet(t *testing.T) {
 
 func TestSourceFailureScenariosAndTagsFallback(t *testing.T) {
 	t.Run("500 401 and malformed JSON name source and continue others", func(t *testing.T) {
-		hfServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			testWrite(w, `[{"id":"GoodOrg/Model1"}]`)
-		}))
-		defer hfServer.Close()
-
-		for _, statusFail := range []int{500, 401} {
-			t.Run(fmt.Sprintf("status_%d", statusFail), func(t *testing.T) {
-				ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.WriteHeader(statusFail)
-				}))
-				defer ghServer.Close()
-
-				cfg := config.Default()
-				cfg.ReleaseWatch = config.ReleaseWatchConfig{
-					StateDir:         t.TempDir(),
-					RateLimitFloor:   100,
-					MaxActionsPerRun: 12,
-					PerSourceCap:     3,
-					Routes: []config.ReleaseWatchRoute{{
-						Name: "rt",
-						Sources: []config.ReleaseWatchSource{
-							{GitHub: "fail/repo"},
-							{HuggingFaceOrg: "GoodOrg"},
-						},
-						Sinks: []config.ReleaseWatchSink{{Ntfy: &config.NtfySink{Topic: "top"}}},
-					}},
-				}
-				svc, err := NewService(cfg, ClientOptions{
-					GitHubBase:      ghServer.URL,
-					HuggingFaceBase: hfServer.URL,
-					NtfyBase:        hfServer.URL,
-				})
-				if err != nil {
-					t.Fatalf("NewService: %v", err)
-				}
-				err = svc.RunPass(context.Background())
-				if err == nil || !strings.Contains(err.Error(), "github:fail/repo") {
-					t.Fatalf("RunPass error = %v, want naming github:fail/repo", err)
-				}
-				// GoodOrg model should still have been processed and marked seen
-				if !svc.State().Has("hf:GoodOrg/Model1") {
-					t.Fatal("GoodOrg was not processed when other source failed")
-				}
-			})
-		}
-
-		t.Run("malformed_json", func(t *testing.T) {
-			ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				testWrite(w, `{not valid json`)
-			}))
-			defer ghServer.Close()
-
-			cfg := config.Default()
-			cfg.ReleaseWatch = config.ReleaseWatchConfig{
-				StateDir:         t.TempDir(),
-				RateLimitFloor:   100,
-				MaxActionsPerRun: 12,
-				PerSourceCap:     3,
-				Routes: []config.ReleaseWatchRoute{{
-					Name:    "rt",
-					Sources: []config.ReleaseWatchSource{{GitHub: "bad/json"}},
-					Sinks:   []config.ReleaseWatchSink{{Ntfy: &config.NtfySink{Topic: "top"}}},
-				}},
-			}
-			svc, err := NewService(cfg, ClientOptions{GitHubBase: ghServer.URL})
-			if err != nil {
-				t.Fatalf("NewService: %v", err)
-			}
-			err = svc.RunPass(context.Background())
-			if err == nil || !strings.Contains(err.Error(), "github:bad/json") {
-				t.Fatalf("RunPass error = %v, want naming bad/json", err)
-			}
-		})
+		testSourceFailureScenarios(t)
 	})
 
 	t.Run("empty releases list falls back to tags", func(t *testing.T) {
-		var tagsCalled bool
-		var releaseCalled bool
-		ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			if strings.Contains(r.URL.Path, "/releases") {
-				releaseCalled = true
-				testWrite(w, `[]`)
-				return
-			}
-			if strings.Contains(r.URL.Path, "/tags") {
-				tagsCalled = true
-				testWrite(w, `[{"name":"v0.9.0"}]`)
-				return
-			}
-			if r.Method == http.MethodPost {
-				w.WriteHeader(http.StatusOK)
-				return
-			}
-			http.NotFound(w, r)
-		}))
-		defer ghServer.Close()
-
-		cfg := config.Default()
-		cfg.ReleaseWatch = config.ReleaseWatchConfig{
-			StateDir:         t.TempDir(),
-			RateLimitFloor:   100,
-			MaxActionsPerRun: 12,
-			PerSourceCap:     3,
-			Routes: []config.ReleaseWatchRoute{{
-				Name:    "rt",
-				Sources: []config.ReleaseWatchSource{{GitHub: "tags/fallback"}},
-				Sinks:   []config.ReleaseWatchSink{{Ntfy: &config.NtfySink{Topic: "top"}}},
-			}},
-		}
-		svc, err := NewService(cfg, ClientOptions{
-			GitHubBase: ghServer.URL,
-			NtfyBase:   ghServer.URL,
-		})
-		if err != nil {
-			t.Fatalf("NewService: %v", err)
-		}
-		if err := svc.RunPass(context.Background()); err != nil {
-			t.Fatalf("RunPass: %v", err)
-		}
-		if !releaseCalled || !tagsCalled {
-			t.Fatalf("releaseCalled=%v, tagsCalled=%v", releaseCalled, tagsCalled)
-		}
-		if !svc.State().Has("github:tags/fallback@v0.9.0") {
-			t.Fatal("tag was not marked seen")
-		}
+		testEmptyReleasesFallsBackToTags(t)
 	})
 
 	t.Run("empty releases and tags is not an error", func(t *testing.T) {
-		ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			testWrite(w, `[]`)
-		}))
-		defer ghServer.Close()
-
-		cfg := config.Default()
-		cfg.ReleaseWatch = config.ReleaseWatchConfig{
-			StateDir:         t.TempDir(),
-			RateLimitFloor:   100,
-			MaxActionsPerRun: 12,
-			PerSourceCap:     3,
-			Routes: []config.ReleaseWatchRoute{{
-				Name:    "rt",
-				Sources: []config.ReleaseWatchSource{{GitHub: "empty/repo"}},
-				Sinks:   []config.ReleaseWatchSink{{Ntfy: &config.NtfySink{Topic: "top"}}},
-			}},
-		}
-		svc, err := NewService(cfg, ClientOptions{GitHubBase: ghServer.URL, NtfyBase: ghServer.URL})
-		if err != nil {
-			t.Fatalf("NewService: %v", err)
-		}
-		if err := svc.RunPass(context.Background()); err != nil {
-			t.Fatalf("RunPass = %v, want nil for empty valid response", err)
-		}
+		testEmptyReleasesAndTagsNotAnError(t)
 	})
+}
+
+func testSourceFailureScenarios(t *testing.T) {
+	t.Helper()
+	hfServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		testWrite(w, `[{"id":"GoodOrg/Model1"}]`)
+	}))
+	defer hfServer.Close()
+
+	for _, statusFail := range []int{500, 401} {
+		t.Run(fmt.Sprintf("status_%d", statusFail), func(t *testing.T) {
+			testSourceFailureStatus(t, statusFail, hfServer.URL)
+		})
+	}
+
+	t.Run("malformed_json", func(t *testing.T) {
+		testSourceFailureMalformedJSON(t)
+	})
+}
+
+func testSourceFailureStatus(t *testing.T, statusFail int, hfServerURL string) {
+	t.Helper()
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(statusFail)
+	}))
+	defer ghServer.Close()
+
+	cfg := config.Default()
+	cfg.ReleaseWatch = config.ReleaseWatchConfig{
+		StateDir:         t.TempDir(),
+		RateLimitFloor:   100,
+		MaxActionsPerRun: 12,
+		PerSourceCap:     3,
+		Routes: []config.ReleaseWatchRoute{{
+			Name: "rt",
+			Sources: []config.ReleaseWatchSource{
+				{GitHub: "fail/repo"},
+				{HuggingFaceOrg: "GoodOrg"},
+			},
+			Sinks: []config.ReleaseWatchSink{{Ntfy: &config.NtfySink{Topic: "top"}}},
+		}},
+	}
+	svc, err := NewService(cfg, ClientOptions{
+		GitHubBase:      ghServer.URL,
+		HuggingFaceBase: hfServerURL,
+		NtfyBase:        hfServerURL,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	err = svc.RunPass(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "github:fail/repo") {
+		t.Fatalf("RunPass error = %v, want naming github:fail/repo", err)
+	}
+	// GoodOrg model should still have been processed and marked seen
+	if !svc.State().Has("hf:GoodOrg/Model1") {
+		t.Fatal("GoodOrg was not processed when other source failed")
+	}
+}
+
+func testSourceFailureMalformedJSON(t *testing.T) {
+	t.Helper()
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		testWrite(w, `{not valid json`)
+	}))
+	defer ghServer.Close()
+
+	cfg := config.Default()
+	cfg.ReleaseWatch = config.ReleaseWatchConfig{
+		StateDir:         t.TempDir(),
+		RateLimitFloor:   100,
+		MaxActionsPerRun: 12,
+		PerSourceCap:     3,
+		Routes: []config.ReleaseWatchRoute{{
+			Name:    "rt",
+			Sources: []config.ReleaseWatchSource{{GitHub: "bad/json"}},
+			Sinks:   []config.ReleaseWatchSink{{Ntfy: &config.NtfySink{Topic: "top"}}},
+		}},
+	}
+	svc, err := NewService(cfg, ClientOptions{GitHubBase: ghServer.URL})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	err = svc.RunPass(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "github:bad/json") {
+		t.Fatalf("RunPass error = %v, want naming bad/json", err)
+	}
+}
+
+func testEmptyReleasesFallsBackToTags(t *testing.T) {
+	t.Helper()
+	var tagsCalled bool
+	var releaseCalled bool
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/releases") {
+			releaseCalled = true
+			testWrite(w, `[]`)
+			return
+		}
+		if strings.Contains(r.URL.Path, "/tags") {
+			tagsCalled = true
+			testWrite(w, `[{"name":"v0.9.0"}]`)
+			return
+		}
+		if r.Method == http.MethodPost {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ghServer.Close()
+
+	cfg := config.Default()
+	cfg.ReleaseWatch = config.ReleaseWatchConfig{
+		StateDir:         t.TempDir(),
+		RateLimitFloor:   100,
+		MaxActionsPerRun: 12,
+		PerSourceCap:     3,
+		Routes: []config.ReleaseWatchRoute{{
+			Name:    "rt",
+			Sources: []config.ReleaseWatchSource{{GitHub: "tags/fallback"}},
+			Sinks:   []config.ReleaseWatchSink{{Ntfy: &config.NtfySink{Topic: "top"}}},
+		}},
+	}
+	svc, err := NewService(cfg, ClientOptions{
+		GitHubBase: ghServer.URL,
+		NtfyBase:   ghServer.URL,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	if err := svc.RunPass(context.Background()); err != nil {
+		t.Fatalf("RunPass: %v", err)
+	}
+	if !releaseCalled || !tagsCalled {
+		t.Fatalf("releaseCalled=%v, tagsCalled=%v", releaseCalled, tagsCalled)
+	}
+	if !svc.State().Has("github:tags/fallback@v0.9.0") {
+		t.Fatal("tag was not marked seen")
+	}
+}
+
+func testEmptyReleasesAndTagsNotAnError(t *testing.T) {
+	t.Helper()
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		testWrite(w, `[]`)
+	}))
+	defer ghServer.Close()
+
+	cfg := config.Default()
+	cfg.ReleaseWatch = config.ReleaseWatchConfig{
+		StateDir:         t.TempDir(),
+		RateLimitFloor:   100,
+		MaxActionsPerRun: 12,
+		PerSourceCap:     3,
+		Routes: []config.ReleaseWatchRoute{{
+			Name:    "rt",
+			Sources: []config.ReleaseWatchSource{{GitHub: "empty/repo"}},
+			Sinks:   []config.ReleaseWatchSink{{Ntfy: &config.NtfySink{Topic: "top"}}},
+		}},
+	}
+	svc, err := NewService(cfg, ClientOptions{GitHubBase: ghServer.URL, NtfyBase: ghServer.URL})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	if err := svc.RunPass(context.Background()); err != nil {
+		t.Fatalf("RunPass = %v, want nil for empty valid response", err)
+	}
 }
 
 func TestDraftAndPrereleaseSkipped(t *testing.T) {
@@ -641,23 +695,26 @@ func TestTokenRuleAndRedirectIsolation(t *testing.T) {
 		t.Fatalf("RunPass: %v", err)
 	}
 
-	// 1. Authorization is present on GitHub-base requests
-	if ghAuthHeader != "Bearer "+secretToken {
-		t.Fatalf("ghAuthHeader = %q, want Bearer %s", ghAuthHeader, secretToken)
-	}
+	assertTokenHeaderIsolation(t, ghAuthHeader, hfAuthHeader, ntfyAuthHeader, secretToken)
+	assertTokenRedirectAndLogLeakIsolation(t, svc, ghServer.URL+"/redirect-test", redirectAuthHeader, secretToken, &stdout, &stderr)
+}
 
-	// 2. Authorization is ABSENT on HF requests
-	if hfAuthHeader != "" {
-		t.Fatalf("hfAuthHeader = %q, want empty", hfAuthHeader)
+func assertTokenHeaderIsolation(t *testing.T, ghAuth, hfAuth, ntfyAuth, secretToken string) {
+	t.Helper()
+	if ghAuth != "Bearer "+secretToken {
+		t.Fatalf("ghAuthHeader = %q, want Bearer %s", ghAuth, secretToken)
 	}
-
-	// 3. Authorization is ABSENT on ntfy requests
-	if ntfyAuthHeader != "" {
-		t.Fatalf("ntfyAuthHeader = %q, want empty", ntfyAuthHeader)
+	if hfAuth != "" {
+		t.Fatalf("hfAuthHeader = %q, want empty", hfAuth)
 	}
+	if ntfyAuth != "" {
+		t.Fatalf("ntfyAuthHeader = %q, want empty", ntfyAuth)
+	}
+}
 
-	// 4. Cross-host redirect arrives WITHOUT Authorization
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ghServer.URL+"/redirect-test", nil)
+func assertTokenRedirectAndLogLeakIsolation(t *testing.T, svc *Service, redirectURL, redirectAuthHeader, secretToken string, stdout, stderr *bytes.Buffer) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, redirectURL, nil)
 	if err != nil {
 		t.Fatalf("NewRequestWithContext: %v", err)
 	}
@@ -668,8 +725,6 @@ func TestTokenRuleAndRedirectIsolation(t *testing.T) {
 	if redirectAuthHeader != "" {
 		t.Fatalf("redirect to different host leaked Authorization header: %q", redirectAuthHeader)
 	}
-
-	// 5. Secret token NEVER appears in captured stdout or stderr
 	if strings.Contains(stdout.String(), secretToken) {
 		t.Fatalf("stdout leaked secret token: %s", stdout.String())
 	}
@@ -744,146 +799,172 @@ func TestFilingWithoutGitHubTokenErrors(t *testing.T) {
 
 func TestCapsEnforcement(t *testing.T) {
 	t.Run("per_source_cap respected and deferred logged", func(t *testing.T) {
-		var posted []string
-		var stdout bytes.Buffer
-
-		ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			if strings.Contains(r.URL.Path, "/releases") {
-				// 4 releases (newest to oldest)
-				testWrite(w, `[
-					{"tag_name":"v4.0.0","published_at":"2026-10-04T12:00:00Z"},
-					{"tag_name":"v3.0.0","published_at":"2026-10-03T12:00:00Z"},
-					{"tag_name":"v2.0.0","published_at":"2026-10-02T12:00:00Z"},
-					{"tag_name":"v1.0.0","published_at":"2026-10-01T12:00:00Z"}
-				]`)
-				return
-			}
-			if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/issues") {
-				testWrite(w, `[]`)
-				return
-			}
-			if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/issues") {
-				data, err := io.ReadAll(r.Body)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusBadRequest)
-					return
-				}
-				var p GitHubIssuePayload
-				if err := json.Unmarshal(data, &p); err != nil {
-					http.Error(w, err.Error(), http.StatusBadRequest)
-					return
-				}
-				posted = append(posted, p.Title)
-				w.WriteHeader(http.StatusCreated)
-				testWrite(w, `{"number":1}`)
-				return
-			}
-			http.NotFound(w, r)
-		}))
-		defer ghServer.Close()
-
-		cfg := config.Default()
-		cfg.ReleaseWatch = config.ReleaseWatchConfig{
-			StateDir:         t.TempDir(),
-			RateLimitFloor:   100,
-			MaxActionsPerRun: 10,
-			PerSourceCap:     2, // Only 2 oldest releases acted on
-			Routes: []config.ReleaseWatchRoute{{
-				Name:    "rt",
-				Sources: []config.ReleaseWatchSource{{GitHub: "owner/upstream"}},
-				Sinks:   []config.ReleaseWatchSink{{GitHubIssue: &config.GitHubIssueSink{Repo: "owner/consumer"}}},
-			}},
-		}
-
-		svc, err := NewService(cfg, ClientOptions{
-			GitHubBase: ghServer.URL,
-			Stdout:     &stdout,
-			LookupEnv:  func(string) (string, bool) { return "token", true },
-		})
-		if err != nil {
-			t.Fatalf("NewService: %v", err)
-		}
-
-		if err := svc.RunPass(context.Background()); err != nil {
-			t.Fatalf("RunPass: %v", err)
-		}
-
-		if len(posted) != 2 {
-			t.Fatalf("len(posted) = %d, want 2 (per_source_cap)", len(posted))
-		}
-		// Oldest first: v1.0.0 and v2.0.0
-		if !strings.Contains(posted[0], "v1.0.0") || !strings.Contains(posted[1], "v2.0.0") {
-			t.Fatalf("posted releases = %v, want v1.0.0 then v2.0.0", posted)
-		}
-		if !strings.Contains(stdout.String(), "release-watch: deferred github:owner/upstream@v3.0.0 (cap)") {
-			t.Fatalf("stdout missing deferred message for v3.0.0: %s", stdout.String())
-		}
-		if svc.State().Has("github:owner/upstream@v3.0.0") {
-			t.Fatal("deferred id v3.0.0 was marked seen")
-		}
+		testPerSourceCapRespected(t)
 	})
 
 	t.Run("max_actions_per_run stops filing across sources", func(t *testing.T) {
-		var postedCount int32
-		ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			if strings.Contains(r.URL.Path, "/releases") {
-				testWrite(w, `[
-					{"tag_name":"v2.0.0","published_at":"2026-10-02T12:00:00Z"},
-					{"tag_name":"v1.0.0","published_at":"2026-10-01T12:00:00Z"}
-				]`)
-				return
-			}
-			if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/issues") {
-				testWrite(w, `[]`)
-				return
-			}
-			if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/issues") {
-				atomic.AddInt32(&postedCount, 1)
-				w.WriteHeader(http.StatusCreated)
-				testWrite(w, `{"number":1}`)
-				return
-			}
-			http.NotFound(w, r)
-		}))
-		defer ghServer.Close()
-
-		cfg := config.Default()
-		cfg.ReleaseWatch = config.ReleaseWatchConfig{
-			StateDir:         t.TempDir(),
-			RateLimitFloor:   100,
-			MaxActionsPerRun: 3, // Total cap is 3 issues
-			PerSourceCap:     2,
-			Routes: []config.ReleaseWatchRoute{
-				{
-					Name:    "rt1",
-					Sources: []config.ReleaseWatchSource{{GitHub: "owner/repo1"}},
-					Sinks:   []config.ReleaseWatchSink{{GitHubIssue: &config.GitHubIssueSink{Repo: "c/d1"}}},
-				},
-				{
-					Name:    "rt2",
-					Sources: []config.ReleaseWatchSource{{GitHub: "owner/repo2"}},
-					Sinks:   []config.ReleaseWatchSink{{GitHubIssue: &config.GitHubIssueSink{Repo: "c/d2"}}},
-				},
-			},
-		}
-
-		svc, err := NewService(cfg, ClientOptions{
-			GitHubBase: ghServer.URL,
-			LookupEnv:  func(string) (string, bool) { return "token", true },
-		})
-		if err != nil {
-			t.Fatalf("NewService: %v", err)
-		}
-
-		if err := svc.RunPass(context.Background()); err != nil {
-			t.Fatalf("RunPass: %v", err)
-		}
-		if got := atomic.LoadInt32(&postedCount); got != 3 {
-			t.Fatalf("postedCount = %d, want max_actions_per_run = 3", got)
-		}
+		testMaxActionsPerRunStopsFiling(t)
 	})
+}
+
+func testPerSourceCapRespected(t *testing.T) {
+	t.Helper()
+	var posted []string
+	var stdout bytes.Buffer
+
+	ghServer := newCapsPerSourceServer(&posted)
+	defer ghServer.Close()
+
+	cfg := config.Default()
+	cfg.ReleaseWatch = config.ReleaseWatchConfig{
+		StateDir:         t.TempDir(),
+		RateLimitFloor:   100,
+		MaxActionsPerRun: 10,
+		PerSourceCap:     2, // Only 2 oldest releases acted on
+		Routes: []config.ReleaseWatchRoute{{
+			Name:    "rt",
+			Sources: []config.ReleaseWatchSource{{GitHub: "owner/upstream"}},
+			Sinks:   []config.ReleaseWatchSink{{GitHubIssue: &config.GitHubIssueSink{Repo: "owner/consumer"}}},
+		}},
+	}
+
+	svc, err := NewService(cfg, ClientOptions{
+		GitHubBase: ghServer.URL,
+		Stdout:     &stdout,
+		LookupEnv:  func(string) (string, bool) { return "token", true },
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	if err := svc.RunPass(context.Background()); err != nil {
+		t.Fatalf("RunPass: %v", err)
+	}
+
+	assertPerSourceCapResults(t, posted, stdout.String(), svc.State())
+}
+
+func newCapsPerSourceServer(posted *[]string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/releases") {
+			testWrite(w, `[
+				{"tag_name":"v4.0.0","published_at":"2026-10-04T12:00:00Z"},
+				{"tag_name":"v3.0.0","published_at":"2026-10-03T12:00:00Z"},
+				{"tag_name":"v2.0.0","published_at":"2026-10-02T12:00:00Z"},
+				{"tag_name":"v1.0.0","published_at":"2026-10-01T12:00:00Z"}
+			]`)
+			return
+		}
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/issues") {
+			testWrite(w, `[]`)
+			return
+		}
+		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/issues") {
+			handleCapsPerSourcePost(w, r, posted)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+}
+
+func handleCapsPerSourcePost(w http.ResponseWriter, r *http.Request, posted *[]string) {
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var p GitHubIssuePayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	*posted = append(*posted, p.Title)
+	w.WriteHeader(http.StatusCreated)
+	testWrite(w, `{"number":1}`)
+}
+
+func assertPerSourceCapResults(t *testing.T, posted []string, stdout string, state *State) {
+	t.Helper()
+	if len(posted) != 2 {
+		t.Fatalf("len(posted) = %d, want 2 (per_source_cap)", len(posted))
+	}
+	// Oldest first: v1.0.0 and v2.0.0
+	if !strings.Contains(posted[0], "v1.0.0") || !strings.Contains(posted[1], "v2.0.0") {
+		t.Fatalf("posted releases = %v, want v1.0.0 then v2.0.0", posted)
+	}
+	if !strings.Contains(stdout, "release-watch: deferred github:owner/upstream@v3.0.0 (cap)") {
+		t.Fatalf("stdout missing deferred message for v3.0.0: %s", stdout)
+	}
+	if state.Has("github:owner/upstream@v3.0.0") {
+		t.Fatal("deferred id v3.0.0 was marked seen")
+	}
+}
+
+func testMaxActionsPerRunStopsFiling(t *testing.T) {
+	t.Helper()
+	var postedCount int32
+	ghServer := newMaxActionsServer(&postedCount)
+	defer ghServer.Close()
+
+	cfg := config.Default()
+	cfg.ReleaseWatch = config.ReleaseWatchConfig{
+		StateDir:         t.TempDir(),
+		RateLimitFloor:   100,
+		MaxActionsPerRun: 3, // Total cap is 3 issues
+		PerSourceCap:     2,
+		Routes: []config.ReleaseWatchRoute{
+			{
+				Name:    "rt1",
+				Sources: []config.ReleaseWatchSource{{GitHub: "owner/repo1"}},
+				Sinks:   []config.ReleaseWatchSink{{GitHubIssue: &config.GitHubIssueSink{Repo: "c/d1"}}},
+			},
+			{
+				Name:    "rt2",
+				Sources: []config.ReleaseWatchSource{{GitHub: "owner/repo2"}},
+				Sinks:   []config.ReleaseWatchSink{{GitHubIssue: &config.GitHubIssueSink{Repo: "c/d2"}}},
+			},
+		},
+	}
+
+	svc, err := NewService(cfg, ClientOptions{
+		GitHubBase: ghServer.URL,
+		LookupEnv:  func(string) (string, bool) { return "token", true },
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	if err := svc.RunPass(context.Background()); err != nil {
+		t.Fatalf("RunPass: %v", err)
+	}
+	if got := atomic.LoadInt32(&postedCount); got != 3 {
+		t.Fatalf("postedCount = %d, want max_actions_per_run = 3", got)
+	}
+}
+
+func newMaxActionsServer(postedCount *int32) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/releases") {
+			testWrite(w, `[
+				{"tag_name":"v2.0.0","published_at":"2026-10-02T12:00:00Z"},
+				{"tag_name":"v1.0.0","published_at":"2026-10-01T12:00:00Z"}
+			]`)
+			return
+		}
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/issues") {
+			testWrite(w, `[]`)
+			return
+		}
+		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/issues") {
+			atomic.AddInt32(postedCount, 1)
+			w.WriteHeader(http.StatusCreated)
+			testWrite(w, `{"number":1}`)
+			return
+		}
+		http.NotFound(w, r)
+	}))
 }
 
 func TestSeedOperation(t *testing.T) {
@@ -942,15 +1023,20 @@ func TestSeedOperation(t *testing.T) {
 		t.Fatalf("Seed(): %v", err)
 	}
 
-	if atomic.LoadInt32(&postCalled) != 0 {
+	assertSeedOperationResults(t, atomic.LoadInt32(&postCalled), stdout.String(), stateDir)
+}
+
+func assertSeedOperationResults(t *testing.T, postCalled int32, stdout string, stateDir string) {
+	t.Helper()
+	if postCalled != 0 {
 		t.Fatal("Seed posted an issue; want 0 issues posted")
 	}
 
-	if !strings.Contains(stdout.String(), "release-watch: seeded github:owner/repo@v1.0.0") {
-		t.Fatalf("stdout missing seeded github:owner/repo@v1.0.0: %s", stdout.String())
+	if !strings.Contains(stdout, "release-watch: seeded github:owner/repo@v1.0.0") {
+		t.Fatalf("stdout missing seeded github:owner/repo@v1.0.0: %s", stdout)
 	}
-	if !strings.Contains(stdout.String(), "release-watch: seeded hf:Org/Model1") {
-		t.Fatalf("stdout missing seeded hf:Org/Model1: %s", stdout.String())
+	if !strings.Contains(stdout, "release-watch: seeded hf:Org/Model1") {
+		t.Fatalf("stdout missing seeded hf:Org/Model1: %s", stdout)
 	}
 
 	diskState, err := LoadState(stateDir)

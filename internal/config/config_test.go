@@ -49,20 +49,25 @@ func TestLoadPositiveFullFile(t *testing.T) {
 	if cfg.Graph.MaxDepth != 24 || cfg.Budgets.Default.Tokens != 300000 {
 		t.Fatalf("Load() = %+v, want full file values", cfg)
 	}
-	if len(cfg.Jobs) != 1 || cfg.Jobs[0].RouterAlias != "cordana/auto" {
-		t.Fatalf("Load() jobs = %+v, want one scheduled alias declaration", cfg.Jobs)
-	}
-	if cfg.Jobs[0].Command[1] != "catalog" || cfg.Jobs[0].Restart.Policy != "never" {
-		t.Fatalf("Load() jobs = %+v, want command and restart policy", cfg.Jobs)
-	}
-	if cfg.Jobs[0].Sandbox.MemoryHigh != "1536M" {
-		t.Fatalf("Load() jobs[0].sandbox.memory_high = %q, want 1536M", cfg.Jobs[0].Sandbox.MemoryHigh)
-	}
-	if cfg.Jobs[0].MaxRuntimeSeconds != 1800 {
-		t.Fatalf("Load() jobs[0].max_runtime_seconds = %d, want 1800", cfg.Jobs[0].MaxRuntimeSeconds)
-	}
+	assertFullFileJobValues(t, cfg.Jobs)
 	if cfg.EventLog.LockTimeoutSeconds != 7 || cfg.EventLog.MaxReplayRecords != 1234 {
 		t.Fatalf("Load() event_log = %+v, want full event log values", cfg.EventLog)
+	}
+}
+
+func assertFullFileJobValues(t *testing.T, jobs []JobConfig) {
+	t.Helper()
+	if len(jobs) != 1 || jobs[0].RouterAlias != "cordana/auto" {
+		t.Fatalf("Load() jobs = %+v, want one scheduled alias declaration", jobs)
+	}
+	if jobs[0].Command[1] != "catalog" || jobs[0].Restart.Policy != "never" {
+		t.Fatalf("Load() jobs = %+v, want command and restart policy", jobs)
+	}
+	if jobs[0].Sandbox.MemoryHigh != "1536M" {
+		t.Fatalf("Load() jobs[0].sandbox.memory_high = %q, want 1536M", jobs[0].Sandbox.MemoryHigh)
+	}
+	if jobs[0].MaxRuntimeSeconds != 1800 {
+		t.Fatalf("Load() jobs[0].max_runtime_seconds = %d, want 1800", jobs[0].MaxRuntimeSeconds)
 	}
 }
 
@@ -179,11 +184,21 @@ func TestReadDocumentGivesTheFileUnvalidated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadDocument() = %v, want nil", err)
 	}
+	assertReadDocumentContent(t, doc)
+}
+
+func assertReadDocumentContent(t *testing.T, doc map[string]any) {
+	t.Helper()
 	graph, isGraph := doc["graph"].(map[string]any)
 	jobs, isJobs := doc["jobs"].([]any)
 	if !isGraph || !isJobs || len(doc) != 3 || len(graph) != 1 || fmt.Sprint(graph["max_depth"]) != "7" || doc["not_in_the_schema"] != true || len(jobs) != 1 {
 		t.Fatalf("ReadDocument() = %v, want the three keys of the file and nothing else", doc)
 	}
+	assertReadDocumentJob(t, jobs)
+}
+
+func assertReadDocumentJob(t *testing.T, jobs []any) {
+	t.Helper()
 	job, isJob := jobs[0].(map[string]any)
 	sandbox, isSandbox := job["sandbox"].(map[string]any)
 	if !isJob || !isSandbox || len(job) != 3 || job["name"] != "slot" || len(sandbox) != 1 || sandbox["network"] != "none" {
@@ -199,14 +214,19 @@ func TestReadDocumentRefusals(t *testing.T) {
 	if _, err := ReadDocument(testContext(t), ""); err == nil || !strings.Contains(err.Error(), "path is required") {
 		t.Fatalf("ReadDocument(no path) = %v, want it refused", err)
 	}
+	assertReadDocumentFileRefusals(t)
+	if doc, err := ReadDocument(testContext(t), path); err != nil || len(doc) != 0 {
+		t.Fatalf("ReadDocument(empty document) = %v, %v; want an empty document", doc, err)
+	}
+}
+
+func assertReadDocumentFileRefusals(t *testing.T) {
+	t.Helper()
 	if _, err := ReadDocument(testContext(t), filepath.Join(t.TempDir(), "missing.json")); err == nil || !strings.Contains(err.Error(), "stat") {
 		t.Fatalf("ReadDocument(missing file) = %v, want it refused", err)
 	}
 	if _, err := ReadDocument(testContext(t), writeConfig(t, "{not json")); err == nil || !strings.Contains(err.Error(), "load") {
 		t.Fatalf("ReadDocument(no JSON) = %v, want it refused", err)
-	}
-	if doc, err := ReadDocument(testContext(t), path); err != nil || len(doc) != 0 {
-		t.Fatalf("ReadDocument(empty document) = %v, %v; want an empty document", doc, err)
 	}
 }
 
@@ -251,17 +271,27 @@ func TestLoadJobDefaults(t *testing.T) {
 		t.Fatalf("Load() = %v, want nil", err)
 	}
 	job := cfg.Jobs[0]
+	assertJobDefaults(t, job)
+}
+
+func assertJobDefaults(t *testing.T, job JobConfig) {
+	t.Helper()
 	if job.Schedule != "always" || job.RouterAlias != "cordana/auto" || job.Restart.Policy != "never" || job.Stop.Signal != "TERM" {
 		t.Fatalf("job defaults = %+v, want schedule, alias, restart and stop defaults", job)
 	}
-	if job.Sandbox.Mode != "enforce" || job.Sandbox.Network != "none" || job.Sandbox.MemoryMax != "2G" {
-		t.Fatalf("sandbox defaults = %+v, want enforce none 2G", job.Sandbox)
-	}
-	if job.Sandbox.MemoryHigh != "" {
-		t.Fatalf("memory_high default = %q, want none", job.Sandbox.MemoryHigh)
-	}
+	assertJobSandboxDefaults(t, job.Sandbox)
 	if job.MaxRuntimeSeconds != 0 {
 		t.Fatalf("max_runtime_seconds default = %d, want 0: no deadline of its own", job.MaxRuntimeSeconds)
+	}
+}
+
+func assertJobSandboxDefaults(t *testing.T, sb SandboxConfig) {
+	t.Helper()
+	if sb.Mode != "enforce" || sb.Network != "none" || sb.MemoryMax != "2G" {
+		t.Fatalf("sandbox defaults = %+v, want enforce none 2G", sb)
+	}
+	if sb.MemoryHigh != "" {
+		t.Fatalf("memory_high default = %q, want none", sb.MemoryHigh)
 	}
 }
 
@@ -978,6 +1008,11 @@ func TestValidateNtfySink(t *testing.T) {
 		}
 	}
 
+	checkValidateNtfySinkTopicRefusals(t)
+}
+
+func checkValidateNtfySinkTopicRefusals(t *testing.T) {
+	t.Helper()
 	for _, topic := range []string{"", "   "} {
 		sink := &NtfySink{Topic: topic, Priority: 3}
 		err := validateNtfySink("route-a", 0, sink)

@@ -109,6 +109,18 @@ func checkShimConfig(cfg shimConfig) error {
 	if cfg.LockPath == "" || cfg.RecordPath == "" || cfg.LogPath == "" {
 		return fmt.Errorf("job-shim: lock, record and log paths are required")
 	}
+	if err := checkShimLimits(cfg); err != nil {
+		return err
+	}
+	cfg.Sandbox = config.NormalizeSandbox(cfg.Sandbox)
+	if err := config.ValidateSandbox(cfg.Sandbox); err != nil {
+		return fmt.Errorf("job-shim: sandbox.%w", err)
+	}
+	return nil
+}
+
+// checkShimLimits checks the command's length, the run's deadline and how the job is stopped.
+func checkShimLimits(cfg shimConfig) error {
 	if len(cfg.Command) == 0 || len(cfg.Command) > config.MaxJobArgs {
 		return fmt.Errorf("job-shim: command must have 1..%d args", config.MaxJobArgs)
 	}
@@ -120,10 +132,6 @@ func checkShimConfig(cfg shimConfig) error {
 	}
 	if _, err := signalFromName(cfg.StopSignal); cfg.StopSignal != "" && err != nil {
 		return fmt.Errorf("job-shim: stop signal: %w", err)
-	}
-	cfg.Sandbox = config.NormalizeSandbox(cfg.Sandbox)
-	if err := config.ValidateSandbox(cfg.Sandbox); err != nil {
-		return fmt.Errorf("job-shim: sandbox.%w", err)
 	}
 	return nil
 }

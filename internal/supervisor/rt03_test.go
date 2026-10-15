@@ -284,6 +284,16 @@ func rt03Allowed(t *testing.T, fixture rt03Fixture, world rt03World, commandOK b
 }
 
 func rt03Script(kind string) string {
+	if s := rt03FsScript(kind); s != "" {
+		return s
+	}
+	if s := rt03NetScript(kind); s != "" {
+		return s
+	}
+	return "false"
+}
+
+func rt03FsScript(kind string) string {
 	switch kind {
 	case "write_event_log":
 		return `mkdir -p "$(dirname "$EVENT_LOG_DIR")" && printf 'event-log\n' > "$EVENT_LOG_DIR/probe.txt"`
@@ -299,6 +309,12 @@ func rt03Script(kind string) string {
 		return `test -r "$SIGNING_KEY"`
 	case "read_allowed_env":
 		return `test "$VISIBLE_TOKEN" = allowed`
+	}
+	return ""
+}
+
+func rt03NetScript(kind string) string {
+	switch kind {
 	case "signal_shim":
 		return `kill -0 "$SHIM_PID"`
 	case "signal_supervisor":
@@ -314,7 +330,7 @@ func rt03Script(kind string) string {
 		// never answers, so the attempt is bounded.
 		return `timeout 5 bash -c ': > /dev/tcp/"$0"/"$1"' "$TARGET_HOST" "$TARGET_PORT"`
 	}
-	return "false"
+	return ""
 }
 
 func rt03Listener(t *testing.T, kind string) (string, string, func()) {

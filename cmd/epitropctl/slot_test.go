@@ -121,15 +121,7 @@ func TestRunSlotRefusesWhatIsNoRun(t *testing.T) {
 		return `{"name": "slot-1", "command": ["/usr/bin/true"], "max_runtime_seconds": 60}`
 	})
 	without := func(flag string) []string {
-		args := make([]string, 0, len(run.args))
-		for i := 0; i < len(run.args); i++ {
-			if run.args[i] == flag {
-				i++
-				continue
-			}
-			args = append(args, run.args[i])
-		}
-		return args
+		return slotArgsWithoutFlag(run.args, flag)
 	}
 	with := func(flag string, value string) []string {
 		return append(without(flag), flag, value)
@@ -158,17 +150,34 @@ func TestRunSlotRefusesWhatIsNoRun(t *testing.T) {
 		{"an invalid unit id", append(append([]string{}, run.args[:len(run.args)-1]...), "unit-1"), "invalid unit id"},
 	}
 	for i := 0; i < len(cases); i++ {
-		printed, err := captureSlot(t, cases[i].args)
-		if err == nil || !strings.Contains(err.Error(), cases[i].want) {
-			t.Errorf("%s: slot = %v, want an error holding %q", cases[i].name, err, cases[i].want)
+		checkSlotRefusalCase(t, cases[i].name, cases[i].args, cases[i].want, run)
+	}
+}
+
+func slotArgsWithoutFlag(args []string, flag string) []string {
+	res := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == flag {
+			i++
+			continue
 		}
-		if printed != "" {
-			t.Errorf("%s: printed %q, want nothing", cases[i].name, printed)
-		}
-		for _, path := range []string{run.workspace, run.out} {
-			if _, statErr := os.Lstat(path); !os.IsNotExist(statErr) {
-				t.Errorf("%s: %s is there (%v), want nothing made", cases[i].name, path, statErr)
-			}
+		res = append(res, args[i])
+	}
+	return res
+}
+
+func checkSlotRefusalCase(t *testing.T, name string, args []string, want string, run slotRun) {
+	t.Helper()
+	printed, err := captureSlot(t, args)
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("%s: slot = %v, want an error holding %q", name, err, want)
+	}
+	if printed != "" {
+		t.Errorf("%s: printed %q, want nothing", name, printed)
+	}
+	for _, path := range []string{run.workspace, run.out} {
+		if _, statErr := os.Lstat(path); !os.IsNotExist(statErr) {
+			t.Errorf("%s: %s is there (%v), want nothing made", name, path, statErr)
 		}
 	}
 }

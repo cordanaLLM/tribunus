@@ -54,18 +54,30 @@ func TestRunEffectsListAndResolveEndToEnd(t *testing.T) {
 	if err != nil || out != "" || errOut != "" {
 		t.Fatalf("list(no effects) = %q, %q, %v; want nothing", out, errOut, err)
 	}
-	if _, err = ledger.Do(ctx, effects.Key{TaskID: "task-1", ActionType: "file-issue"}, func(context.Context) error { return nil }); err != nil {
+	seedEffectsForResolve(t, ctx, ledger, writer)
+	checkEffectsListBeforeResolve(t, cfg)
+	resolveEffectsTasks(t, cfg)
+	checkEffectsListAfterResolve(t, cfg)
+}
+
+func seedEffectsForResolve(t *testing.T, ctx context.Context, ledger *effects.Ledger, writer *eventlog.Writer) {
+	t.Helper()
+	if _, err := ledger.Do(ctx, effects.Key{TaskID: "task-1", ActionType: "file-issue"}, func(context.Context) error { return nil }); err != nil {
 		t.Fatalf("Do() = %v, want nil", err)
 	}
 	failure := errors.New("the forge answered 502")
-	if _, err = ledger.Do(ctx, effects.Key{TaskID: "task-2", ActionType: "file-issue"}, func(context.Context) error { return failure }); !errors.Is(err, failure) {
+	if _, err := ledger.Do(ctx, effects.Key{TaskID: "task-2", ActionType: "file-issue"}, func(context.Context) error { return failure }); !errors.Is(err, failure) {
 		t.Fatalf("Do(failing) = %v, want the effect's error", err)
 	}
 	// A claim and nothing after it, as a crash leaves it.
-	if _, err = writer.Append(ctx, eventlog.Event{Type: effects.Claimed, TaskID: "task-3", Payload: []byte(`{"action_type":"file-issue"}`)}); err != nil {
+	if _, err := writer.Append(ctx, eventlog.Event{Type: effects.Claimed, TaskID: "task-3", Payload: []byte(`{"action_type":"file-issue"}`)}); err != nil {
 		t.Fatalf("Append(claim) = %v, want nil", err)
 	}
-	out, errOut, err = effectsRun(t, "list", "--config", cfg)
+}
+
+func checkEffectsListBeforeResolve(t *testing.T, cfg string) {
+	t.Helper()
+	out, errOut, err := effectsRun(t, "list", "--config", cfg)
 	want := "task-1\tfile-issue\tdone\t1\t0\t\n" +
 		"task-2\tfile-issue\tfailed\t1\t0\t\"the forge answered 502\"\n" +
 		"task-3\tfile-issue\tclaimed\t1\t0\t\n"
@@ -75,14 +87,22 @@ func TestRunEffectsListAndResolveEndToEnd(t *testing.T) {
 	if !strings.Contains(errOut, "2 open claim(s)") {
 		t.Fatalf("list stderr = %q, want the two open claims counted", errOut)
 	}
-	if _, _, err = effectsRun(t, "resolve", "--config", cfg, "--outcome", "retry", "--by", "operator", "--note", "no issue on the forge", "task-2", "file-issue"); err != nil {
+}
+
+func resolveEffectsTasks(t *testing.T, cfg string) {
+	t.Helper()
+	if _, _, err := effectsRun(t, "resolve", "--config", cfg, "--outcome", "retry", "--by", "operator", "--note", "no issue on the forge", "task-2", "file-issue"); err != nil {
 		t.Fatalf("resolve(retry) = %v, want nil", err)
 	}
-	if _, _, err = effectsRun(t, "resolve", "--config", cfg, "--outcome=done", "--by=operator", "--note=issue 12 is there", "task-3", "file-issue"); err != nil {
+	if _, _, err := effectsRun(t, "resolve", "--config", cfg, "--outcome=done", "--by=operator", "--note=issue 12 is there", "task-3", "file-issue"); err != nil {
 		t.Fatalf("resolve(done) = %v, want nil", err)
 	}
-	out, errOut, err = effectsRun(t, "list", "--config", cfg)
-	want = "task-1\tfile-issue\tdone\t1\t0\t\n" +
+}
+
+func checkEffectsListAfterResolve(t *testing.T, cfg string) {
+	t.Helper()
+	out, errOut, err := effectsRun(t, "list", "--config", cfg)
+	want := "task-1\tfile-issue\tdone\t1\t0\t\n" +
 		"task-2\tfile-issue\treleased\t1\t0\tresolved by operator: \"no issue on the forge\"\n" +
 		"task-3\tfile-issue\tdone\t1\t0\tresolved by operator: \"issue 12 is there\"\n"
 	if err != nil || out != want || errOut != "" {
@@ -135,10 +155,17 @@ func TestRunEffectsListWarnings(t *testing.T) {
 	}
 
 	claimPayload := []byte(`{"action_type":"file-issue"}`)
+	wantOpenLine := checkEffectsListWarningOpen(t, cfg, writer, ctx, claimPayload)
+	checkEffectsListWarningDuplicate(t, cfg, writer, ctx, claimPayload, wantOpenLine)
+	checkEffectsListWarningDone(t, cfg, writer, ctx)
+}
+
+func checkEffectsListWarningOpen(t *testing.T, cfg string, writer *eventlog.Writer, ctx context.Context, claimPayload []byte) string {
+	t.Helper()
 	if _, err := writer.Append(ctx, eventlog.Event{Type: effects.Claimed, TaskID: "task-open", Payload: claimPayload}); err != nil {
 		t.Fatalf("Append(claim) = %v", err)
 	}
-	_, errOut, err = effectsRun(t, "list", "--config", cfg)
+	_, errOut, err := effectsRun(t, "list", "--config", cfg)
 	if err != nil {
 		t.Fatalf("list = %v", err)
 	}
@@ -146,22 +173,29 @@ func TestRunEffectsListWarnings(t *testing.T) {
 	if errOut != wantOpenLine {
 		t.Fatalf("stderr = %q, want exact open warning %q", errOut, wantOpenLine)
 	}
+	return wantOpenLine
+}
 
+func checkEffectsListWarningDuplicate(t *testing.T, cfg string, writer *eventlog.Writer, ctx context.Context, claimPayload []byte, wantOpenLine string) {
+	t.Helper()
 	if _, err := writer.Append(ctx, eventlog.Event{Type: effects.Claimed, TaskID: "task-open", Payload: claimPayload}); err != nil {
 		t.Fatalf("Append(duplicate claim) = %v", err)
 	}
 	wantBoth := wantOpenLine + "effects: replay did not apply 1 effect record(s) that lost a race\n"
-	_, errOut, err = effectsRun(t, "list", "--config", cfg)
+	_, errOut, err := effectsRun(t, "list", "--config", cfg)
 	if err != nil || errOut != wantBoth {
 		t.Fatalf("stderr = %q, want exact both warnings %q", errOut, wantBoth)
 	}
+}
 
+func checkEffectsListWarningDone(t *testing.T, cfg string, writer *eventlog.Writer, ctx context.Context) {
+	t.Helper()
 	donePayload := []byte(`{"action_type":"file-issue","claim_seq":1}`)
 	if _, err := writer.Append(ctx, eventlog.Event{Type: effects.Done, TaskID: "task-open", Payload: donePayload}); err != nil {
 		t.Fatalf("Append(done) = %v", err)
 	}
 	wantIgnoredOnly := "effects: replay did not apply 1 effect record(s) that lost a race\n"
-	_, errOut, err = effectsRun(t, "list", "--config", cfg)
+	_, errOut, err := effectsRun(t, "list", "--config", cfg)
 	if err != nil || errOut != wantIgnoredOnly {
 		t.Fatalf("stderr = %q, want exact ignored warning %q", errOut, wantIgnoredOnly)
 	}

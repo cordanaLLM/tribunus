@@ -57,7 +57,7 @@ type Result struct {
 // error, non-200 response, malformed body -- is reported as StatusFail with
 // a detail string that never contains the token.
 func Fetch(ctx context.Context, baseURL, tokenFile string) Result {
-	token, err := readToken(tokenFile)
+	token, err := ReadToken(tokenFile)
 	if err != nil {
 		return Result{Status: catalog.StatusFail, Detail: err.Error()}
 	}
@@ -81,8 +81,8 @@ func Fetch(ctx context.Context, baseURL, tokenFile string) Result {
 	return Result{Records: records, Status: catalog.StatusOK, Count: len(records)}
 }
 
-// readToken reads and trims tokenFile. Errors name the path, never contents.
-func readToken(tokenFile string) (token string, err error) {
+// ReadToken reads and trims tokenFile. Errors name the path, never contents.
+func ReadToken(tokenFile string) (token string, err error) {
 	// #nosec G304 -- tokenFile is a CLI flag the operator supplies directly, the
 	// same trust level as any other path the operator passes.
 	f, err := os.Open(tokenFile)

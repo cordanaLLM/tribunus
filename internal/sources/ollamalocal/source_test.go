@@ -124,41 +124,49 @@ func mustReadFixture(t *testing.T, path string) []byte {
 }
 
 func TestFetch_Negative(t *testing.T) {
-	t.Run("tags endpoint unreachable", func(t *testing.T) {
-		res := Fetch(context.Background(), "http://127.0.0.1:1")
-		if res.Status != catalog.StatusFail {
-			t.Fatalf("Status = %v, want fail when /api/tags is unreachable", res.Status)
-		}
-	})
+	t.Run("tags endpoint unreachable", testFetchNegativeTagsUnreachable)
+	t.Run("malformed tags body", testFetchNegativeMalformedTagsBody)
+	t.Run("ps failure degrades, does not fail the source", testFetchNegativePSFailureDegrades)
+}
 
-	t.Run("malformed tags body", func(t *testing.T) {
-		server := newServer(t, "{not json", samplePS, http.StatusOK)
-		defer server.Close()
-		res := Fetch(context.Background(), server.URL)
-		if res.Status != catalog.StatusFail {
-			t.Fatalf("Status = %v, want fail for a malformed /api/tags body", res.Status)
-		}
-	})
+func testFetchNegativeTagsUnreachable(t *testing.T) {
+	t.Helper()
+	res := Fetch(context.Background(), "http://127.0.0.1:1")
+	if res.Status != catalog.StatusFail {
+		t.Fatalf("Status = %v, want fail when /api/tags is unreachable", res.Status)
+	}
+}
 
-	t.Run("ps failure degrades, does not fail the source", func(t *testing.T) {
-		server := newServer(t, sampleTags, "", http.StatusInternalServerError)
-		defer server.Close()
-		res := Fetch(context.Background(), server.URL)
-		if res.Status != catalog.StatusDegraded {
-			t.Fatalf("Status = %v, detail = %q, want degraded with a note when only /api/ps fails", res.Status, res.Detail)
+func testFetchNegativeMalformedTagsBody(t *testing.T) {
+	t.Helper()
+	server := newServer(t, "{not json", samplePS, http.StatusOK)
+	defer server.Close()
+	res := Fetch(context.Background(), server.URL)
+	if res.Status != catalog.StatusFail {
+		t.Fatalf("Status = %v, want fail for a malformed /api/tags body", res.Status)
+	}
+}
+
+func testFetchNegativePSFailureDegrades(t *testing.T) {
+	t.Helper()
+	server := newServer(t, sampleTags, "", http.StatusInternalServerError)
+	defer server.Close()
+	res := Fetch(context.Background(), server.URL)
+	if res.Status != catalog.StatusDegraded {
+		t.Fatalf("Status = %v, detail = %q, want degraded with a note when only /api/ps fails", res.Status, res.Detail)
+	}
+	if res.Detail == "" {
+		t.Fatal("Detail = empty, want a note explaining the /api/ps failure")
+	}
+	for i := 0; i < len(res.Records); i++ {
+		rec := res.Records[i]
+		if rec.Absent["capabilities.loaded"] == "" {
+			t.Fatalf("Absent = %+v, want unknown loaded-state reason", rec.Absent)
 		}
-		if res.Detail == "" {
-			t.Fatal("Detail = empty, want a note explaining the /api/ps failure")
+		if contains(rec.Capabilities, "loaded") {
+			t.Fatalf("Capabilities = %v, want no loaded flag when /api/ps failed", rec.Capabilities)
 		}
-		for _, rec := range res.Records {
-			if rec.Absent["capabilities.loaded"] == "" {
-				t.Fatalf("Absent = %+v, want unknown loaded-state reason", rec.Absent)
-			}
-			if contains(rec.Capabilities, "loaded") {
-				t.Fatalf("Capabilities = %v, want no loaded flag when /api/ps failed", rec.Capabilities)
-			}
-		}
-	})
+	}
 }
 
 // TestFetch_Boundary covers the zero-installed-models response, which must

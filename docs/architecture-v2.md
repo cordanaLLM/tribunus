@@ -110,7 +110,8 @@ What this does not cover:
   - The client needs only its own files, the workspace and the read-only inputs the template names (here a Go toolchain and a module cache, so the checks ran offline). It read nothing of the operator's own client folder.
   - It works through the proxy. It also asked for `ab.chatgpt.com:443` four times, was refused, and finished regardless. It never asked for the login service, so no token was refreshed.
   - Codex's own sandbox (`workspace-write`) runs inside the job's sandbox; no weaker mode was needed.
-  - Codex keeps the workspace's top-level `.git` read-only in `workspace-write` (`codex-rs/protocol/src/permissions.rs` at `rust-v0.145.0`), so the run could not commit and its change was committed outside the slot. Until that is settled, a Codex run in a slot ends without a branch.
+  - Codex keeps the workspace's top-level `.git` read-only in `workspace-write` (`codex-rs/protocol/src/permissions.rs` at `rust-v0.145.0`), so the run could not commit and its change was committed outside the slot. The slot's client settings now select a permission profile that extends `:workspace` with write access to `.git` alone. With it, a second run on #133 (landed as #177) committed inside the slot and the runner published its branch. The runner still runs no git inside the workspace and fetches the branch through `git-upload-pack`, so hooks and settings the run writes into `.git` do not act.
+  - Codex's sandbox refuses sockets, so a test that listens on one fails inside the slot (`socket: operation not permitted`). Those checks run outside the slot.
   - Codex adds a trust entry for the workspace to its settings. It lands in the per-run copy of the home only; the source is never written.
   - With `HOME` in the workspace, Go writes its telemetry counters to `.config/go/` in the work tree. A client that stages everything would commit them.
   - Other harnesses and other destinations are not measured.

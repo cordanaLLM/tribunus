@@ -303,34 +303,39 @@ func Load(ctx context.Context, path string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("config: load %s: %w", path, err)
 	}
-	flat := loaded.All()
-	if err := validateFlat(flat); err != nil {
+	if err := validateFlat(loaded.All()); err != nil {
 		return Config{}, err
 	}
 	cfg := Default()
 	if err = loaded.Unmarshal("", &cfg); err != nil {
 		return Config{}, err
 	}
-	applyJobDefaults(cfg.Jobs)
-	applyReleaseWatchDefaults(&cfg.ReleaseWatch)
-	if err = validateNames(cfg); err != nil {
-		return Config{}, err
-	}
-	for i := 0; i < len(cfg.Jobs); i++ {
-		if err = ValidateJobTrigger(cfg.Jobs[i]); err != nil {
-			return Config{}, err
-		}
-	}
-	if err = validateRouterAliases(cfg); err != nil {
-		return Config{}, err
-	}
-	if err = validateReleaseWatch(&cfg); err != nil {
-		return Config{}, err
-	}
-	if err = validateJobSandboxes(&cfg, path); err != nil {
+	if err = validateLoaded(&cfg, path); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+// validateLoaded applies the defaults to a decoded document and runs the checks that need
+// the typed config; path is the file the sandbox paths resolve against.
+func validateLoaded(cfg *Config, path string) error {
+	applyJobDefaults(cfg.Jobs)
+	applyReleaseWatchDefaults(&cfg.ReleaseWatch)
+	if err := validateNames(*cfg); err != nil {
+		return err
+	}
+	for i := 0; i < len(cfg.Jobs); i++ {
+		if err := ValidateJobTrigger(cfg.Jobs[i]); err != nil {
+			return err
+		}
+	}
+	if err := validateRouterAliases(*cfg); err != nil {
+		return err
+	}
+	if err := validateReleaseWatch(cfg); err != nil {
+		return err
+	}
+	return validateJobSandboxes(cfg, path)
 }
 
 // ReadDocument reads a configuration file as a document. It validates nothing and applies
@@ -504,21 +509,8 @@ func validateJobSandboxes(cfg *Config, configPath string) error {
 
 func validateJobSandbox(job *JobConfig, guard protectedPaths) error {
 	applySandboxDefaults(&job.Sandbox)
-	if err := validateSandboxMode(job.Sandbox); err != nil {
+	if err := validateSandboxSettings(*job); err != nil {
 		return err
-	}
-	if err := validateSandboxLimits(job.Sandbox); err != nil {
-		return err
-	}
-	if err := validateSandboxEnv(job.Sandbox.EnvAllow); err != nil {
-		return err
-	}
-	if err := validateSandboxHome(job.Sandbox); err != nil {
-		return err
-	}
-	// A bound login has to outlast the run, and only a deadline says how long that is.
-	if job.Sandbox.Home != nil && job.MaxRuntimeSeconds == 0 {
-		return fmt.Errorf("home: needs the job's max_runtime_seconds")
 	}
 	if job.Sandbox.Mode == "off" {
 		return nil
@@ -536,6 +528,27 @@ func validateJobSandbox(job *JobConfig, guard protectedPaths) error {
 	}
 	job.Sandbox.Workspace, job.Sandbox.Inputs = workspace, inputs
 	return resolveSandboxHome(&job.Sandbox, guard)
+}
+
+// validateSandboxSettings checks the sandbox settings that need no path resolved.
+func validateSandboxSettings(job JobConfig) error {
+	if err := validateSandboxMode(job.Sandbox); err != nil {
+		return err
+	}
+	if err := validateSandboxLimits(job.Sandbox); err != nil {
+		return err
+	}
+	if err := validateSandboxEnv(job.Sandbox.EnvAllow); err != nil {
+		return err
+	}
+	if err := validateSandboxHome(job.Sandbox); err != nil {
+		return err
+	}
+	// A bound login has to outlast the run, and only a deadline says how long that is.
+	if job.Sandbox.Home != nil && job.MaxRuntimeSeconds == 0 {
+		return fmt.Errorf("home: needs the job's max_runtime_seconds")
+	}
+	return nil
 }
 
 func validateSandboxMode(sandbox SandboxConfig) error {
@@ -1041,18 +1054,24 @@ func validateRouteSources(routeName string, sources []ReleaseWatchSource) error 
 		return fmt.Errorf("config: release_watch route %q sources: exceeds %d", routeName, MaxReleaseWatchSources)
 	}
 	for i := 0; i < len(sources); i++ {
-		src := sources[i]
-		hasGitHub := src.GitHub != ""
-		hasHF := src.HuggingFaceOrg != ""
-		if (!hasGitHub && !hasHF) || (hasGitHub && hasHF) {
-			return fmt.Errorf("config: release_watch route %q sources/%d: must specify exactly one of github or huggingface_org", routeName, i)
+		if err := validateRouteSource(routeName, i, sources[i]); err != nil {
+			return err
 		}
-		if hasGitHub && !validRepository(src.GitHub) {
-			return fmt.Errorf("config: release_watch route %q sources/%d/github: invalid repository %q (must be owner/name)", routeName, i, src.GitHub)
-		}
-		if hasHF && (!hfOrgPattern.MatchString(src.HuggingFaceOrg) || isDotSegment(src.HuggingFaceOrg)) {
-			return fmt.Errorf("config: release_watch route %q sources/%d/huggingface_org: invalid org %q", routeName, i, src.HuggingFaceOrg)
-		}
+	}
+	return nil
+}
+
+func validateRouteSource(routeName string, index int, src ReleaseWatchSource) error {
+	hasGitHub := src.GitHub != ""
+	hasHF := src.HuggingFaceOrg != ""
+	if hasGitHub == hasHF {
+		return fmt.Errorf("config: release_watch route %q sources/%d: must specify exactly one of github or huggingface_org", routeName, index)
+	}
+	if hasGitHub && !validRepository(src.GitHub) {
+		return fmt.Errorf("config: release_watch route %q sources/%d/github: invalid repository %q (must be owner/name)", routeName, index, src.GitHub)
+	}
+	if hasHF && (!hfOrgPattern.MatchString(src.HuggingFaceOrg) || isDotSegment(src.HuggingFaceOrg)) {
+		return fmt.Errorf("config: release_watch route %q sources/%d/huggingface_org: invalid org %q", routeName, index, src.HuggingFaceOrg)
 	}
 	return nil
 }
@@ -1079,24 +1098,23 @@ func validateRouteSinks(routeName string, sinks []ReleaseWatchSink) error {
 		return fmt.Errorf("config: release_watch route %q sinks: exceeds %d", routeName, MaxReleaseWatchSinks)
 	}
 	for i := 0; i < len(sinks); i++ {
-		sink := sinks[i]
-		hasGH := sink.GitHubIssue != nil
-		hasNtfy := sink.Ntfy != nil
-		if (!hasGH && !hasNtfy) || (hasGH && hasNtfy) {
-			return fmt.Errorf("config: release_watch route %q sinks/%d: must specify exactly one of github_issue or ntfy", routeName, i)
-		}
-		if hasGH {
-			if err := validateGitHubIssueSink(routeName, i, sink.GitHubIssue); err != nil {
-				return err
-			}
-		}
-		if hasNtfy {
-			if err := validateNtfySink(routeName, i, sink.Ntfy); err != nil {
-				return err
-			}
+		if err := validateRouteSink(routeName, i, sinks[i]); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func validateRouteSink(routeName string, index int, sink ReleaseWatchSink) error {
+	hasGH := sink.GitHubIssue != nil
+	hasNtfy := sink.Ntfy != nil
+	if hasGH == hasNtfy {
+		return fmt.Errorf("config: release_watch route %q sinks/%d: must specify exactly one of github_issue or ntfy", routeName, index)
+	}
+	if hasGH {
+		return validateGitHubIssueSink(routeName, index, sink.GitHubIssue)
+	}
+	return validateNtfySink(routeName, index, sink.Ntfy)
 }
 
 func validateGitHubIssueSink(routeName string, index int, sink *GitHubIssueSink) error {

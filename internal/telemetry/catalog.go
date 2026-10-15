@@ -26,6 +26,8 @@ const (
 	MetricJobRunsTotal = "epitrop_job_runs_total"
 	// MetricCheckpointWritesTotal counts event log checkpoint write attempts by outcome.
 	MetricCheckpointWritesTotal = "epitrop_checkpoint_writes_total"
+	// MetricAdmissionDecisionsTotal counts router alias admission decisions by outcome.
+	MetricAdmissionDecisionsTotal = "epitrop_admission_decisions_total"
 	// MetricGraphTasks tracks tasks in the task graph per status.
 	MetricGraphTasks = "epitrop_graph_tasks"
 )
@@ -35,7 +37,8 @@ const (
 var Catalog = sync.OnceValues(buildCatalog)
 
 func buildCatalog() (*metricdef.Catalog, error) {
-	defs := append(runMetricDefs(), graphMetricDefs()...)
+	defs := append(runMetricDefs(), admissionMetricDefs()...)
+	defs = append(defs, graphMetricDefs()...)
 	c, err := metricdef.NewCatalog(defs...)
 	if err != nil {
 		return nil, fmt.Errorf("telemetry: build catalog: %w", err)
@@ -93,6 +96,22 @@ func runMetricDefs() []metricdef.Def {
 			Limits: map[string]metricdef.LabelLimit{
 				"outcome": {
 					Allow: []string{"failed", "written"},
+				},
+			},
+		},
+	}
+}
+
+func admissionMetricDefs() []metricdef.Def {
+	return []metricdef.Def{
+		{
+			Name:   MetricAdmissionDecisionsTotal,
+			Help:   "Admission decisions for router aliases, by outcome.",
+			Kind:   metricdef.KindCounter,
+			Labels: []string{"outcome"},
+			Limits: map[string]metricdef.LabelLimit{
+				"outcome": {
+					Allow: []string{"admitted", "refused", "unknown"},
 				},
 			},
 		},

@@ -39,8 +39,9 @@ Metric definitions are declared in the central catalog with bounded label cardin
 | `epitrop_slot_runs_total` | counter | `outcome` (`blocked`, `done`, `failed`, `not-taken`, `preempted`, `refused`) | Slot runs that were recorded, by outcome. |
 | `epitrop_job_runs_total` | counter | `outcome` (`failed`, `refused`, `started`) | Supervisor job start attempts, by outcome. |
 | `epitrop_checkpoint_writes_total` | counter | `outcome` (`failed`, `written`) | Event log checkpoint write attempts, by outcome. |
+| `epitrop_admission_decisions_total` | counter | `outcome` (`admitted`, `refused`, `unknown`) | Admission decisions for router aliases, by outcome. |
 | `epitrop_graph_tasks` | gauge | `status` (`blocked`, `claimed`, `dropped`, `fix-round`, `implementing`, `landed`, `landing`, `proposed`, `queued`, `ready`, `review`) | Tasks in the task graph per status after the last committed change (queue depth). |
 
-Budget accounting metrics will arrive with issue [#6](https://github.com/tekmora/epitrop/issues/6). Admission metrics will arrive with issue [#40](https://github.com/tekmora/epitrop/issues/40).
+Budget accounting metrics will arrive with issue [#6](https://github.com/tekmora/epitrop/issues/6). The admission gate (`internal/admission`) counts one decision each time it admits or refuses work for a router alias.
 
-Budget use becomes a metric with [#6](https://github.com/tekmora/epitrop/issues/6), and admission decisions with [#40](https://github.com/tekmora/epitrop/issues/40). Until then, the catalog declares only metrics that something writes.
+Budget use becomes a metric with [#6](https://github.com/tekmora/epitrop/issues/6). Until then, the catalog declares only metrics that something writes.

@@ -42,9 +42,12 @@ func TestTakeUpEqualsUninterruptedRun(t *testing.T) {
 	}
 	unitA := runA.unit(t)
 	unitB := runB.unit(t)
-	if unitB.Status != unitA.Status || unitB.Status != "review" {
-		t.Fatalf("unit B status = %s, want %s (review)", unitB.Status, unitA.Status)
-	}
+	assertTakeUpEqualsRunReportAndTree(t, runA, runB, repA, repB)
+	assertTakeUpUnitEvidence(t, runB, unitA, unitB)
+}
+
+func assertTakeUpEqualsRunReportAndTree(t *testing.T, runA, runB *testRun, repA, repB Report) {
+	t.Helper()
 	if repB.Outcome != repA.Outcome || repB.Status != repA.Status || repB.Published != repA.Published || repB.Head == "" {
 		t.Fatalf("report B = %+v, want equal to report A %+v", repB, repA)
 	}
@@ -53,6 +56,13 @@ func TestTakeUpEqualsUninterruptedRun(t *testing.T) {
 	treeA := gitIn(t, runA.repo, "rev-parse", repA.Head+"^{tree}")
 	if treeB := gitIn(t, runB.repo, "rev-parse", repB.Head+"^{tree}"); treeB != treeA {
 		t.Fatalf("published tree B = %s, want tree A %s (heads %s, %s)", treeB, treeA, repB.Head, repA.Head)
+	}
+}
+
+func assertTakeUpUnitEvidence(t *testing.T, runB *testRun, unitA, unitB eventlog.Unit) {
+	t.Helper()
+	if unitB.Status != unitA.Status || unitB.Status != "review" {
+		t.Fatalf("unit B status = %s, want %s (review)", unitB.Status, unitA.Status)
 	}
 	wantPath := filepath.Join(runB.req.Out, ReportFile)
 	if unitB.Evidence == nil || unitB.Evidence.Path != wantPath {
@@ -266,6 +276,12 @@ func TestBeginWritesStartFileBeforeImplementingRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadStart() = %v, want nil", err)
 	}
+	assertStartFileContents(t, start, run)
+	assertImplementingUnitEvidence(t, run)
+}
+
+func assertStartFileContents(t *testing.T, start Start, run *testRun) {
+	t.Helper()
 	if start.Unit != testUnit {
 		t.Fatalf("start.Unit = %q, want %q", start.Unit, testUnit)
 	}
@@ -284,6 +300,10 @@ func TestBeginWritesStartFileBeforeImplementingRecord(t *testing.T) {
 	if start.PreparedAt == "" {
 		t.Fatal("start.PreparedAt is empty")
 	}
+}
+
+func assertImplementingUnitEvidence(t *testing.T, run *testRun) {
+	t.Helper()
 	unit := run.unit(t)
 	if unit.Status != "implementing" {
 		t.Fatalf("unit.Status = %q, want implementing", unit.Status)

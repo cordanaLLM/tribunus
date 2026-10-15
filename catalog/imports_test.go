@@ -29,22 +29,27 @@ func TestCatalogImportsStdlibOnly(t *testing.T) {
 		if strings.HasSuffix(files[i], "_test.go") {
 			continue
 		}
-		src, err := os.ReadFile(files[i])
+		checkCatalogSourceImports(t, fset, files[i])
+	}
+}
+
+func checkCatalogSourceImports(t *testing.T, fset *token.FileSet, file string) {
+	t.Helper()
+	src, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("read %s: %v", file, err)
+	}
+	parsed, err := parser.ParseFile(fset, file, src, parser.ImportsOnly)
+	if err != nil {
+		t.Fatalf("parse %s: %v", file, err)
+	}
+	for _, spec := range parsed.Imports {
+		path, err := strconv.Unquote(spec.Path.Value)
 		if err != nil {
-			t.Fatalf("read %s: %v", files[i], err)
+			t.Fatalf("%s: unquote import %s: %v", file, spec.Path.Value, err)
 		}
-		parsed, err := parser.ParseFile(fset, files[i], src, parser.ImportsOnly)
-		if err != nil {
-			t.Fatalf("parse %s: %v", files[i], err)
-		}
-		for _, spec := range parsed.Imports {
-			path, err := strconv.Unquote(spec.Path.Value)
-			if err != nil {
-				t.Fatalf("%s: unquote import %s: %v", files[i], spec.Path.Value, err)
-			}
-			if first, _, _ := strings.Cut(path, "/"); strings.Contains(first, ".") {
-				t.Errorf("%s imports %q; catalog must import only the standard library", files[i], path)
-			}
+		if first, _, _ := strings.Cut(path, "/"); strings.Contains(first, ".") {
+			t.Errorf("%s imports %q; catalog must import only the standard library", file, path)
 		}
 	}
 }

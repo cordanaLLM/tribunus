@@ -79,7 +79,11 @@ func TestFetch_Positive(t *testing.T) {
 	if res.Count != 1 || len(res.Records) != 1 {
 		t.Fatalf("got %d records, want 1", res.Count)
 	}
-	rec := res.Records[0]
+	assertCodexRecord(t, res.Records[0])
+}
+
+func assertCodexRecord(t *testing.T, rec catalog.Record) {
+	t.Helper()
 	if rec.ModelID != "codex-cli/codex" {
 		t.Fatalf("ModelID = %q, want codex-cli/codex", rec.ModelID)
 	}
@@ -217,52 +221,59 @@ func TestDefaultSessionsDir(t *testing.T) {
 }
 
 func TestCloseSessionFile(t *testing.T) {
-	t.Run("closes open file and preserves cause", func(t *testing.T) {
-		f, err := os.CreateTemp(t.TempDir(), "session-*")
-		if err != nil {
-			t.Fatalf("CreateTemp: %v", err)
-		}
-		cause := errors.New("open-cause")
-		got := closeSessionFile(f, cause)
-		if !errors.Is(got, cause) {
-			t.Fatalf("closeSessionFile() = %v, want cause %v", got, cause)
-		}
-		if err = f.Close(); err == nil {
-			t.Fatal("second Close() = nil, want error since file was closed")
-		}
-	})
+	t.Run("closes open file and preserves cause", testCloseSessionFilePreservesCause)
+	t.Run("joins close error on already closed file", testCloseSessionFileJoinsError)
+	t.Run("nil cause with already closed file", testCloseSessionFileNilCause)
+}
 
-	t.Run("joins close error on already closed file", func(t *testing.T) {
-		f, err := os.CreateTemp(t.TempDir(), "session-*")
-		if err != nil {
-			t.Fatalf("CreateTemp: %v", err)
-		}
-		if err = f.Close(); err != nil {
-			t.Fatalf("Close: %v", err)
-		}
-		cause := errors.New("prior-cause")
-		got := closeSessionFile(f, cause)
-		if !errors.Is(got, cause) {
-			t.Fatalf("closeSessionFile() = %v, want cause %v", got, cause)
-		}
-		if !errors.Is(got, os.ErrClosed) {
-			t.Fatalf("closeSessionFile() = %v, want joined os.ErrClosed", got)
-		}
-	})
+func testCloseSessionFilePreservesCause(t *testing.T) {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "session-*")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	cause := errors.New("open-cause")
+	got := closeSessionFile(f, cause)
+	if !errors.Is(got, cause) {
+		t.Fatalf("closeSessionFile() = %v, want cause %v", got, cause)
+	}
+	if err = f.Close(); err == nil {
+		t.Fatal("second Close() = nil, want error since file was closed")
+	}
+}
 
-	t.Run("nil cause with already closed file", func(t *testing.T) {
-		f, err := os.CreateTemp(t.TempDir(), "session-*")
-		if err != nil {
-			t.Fatalf("CreateTemp: %v", err)
-		}
-		if err = f.Close(); err != nil {
-			t.Fatalf("Close: %v", err)
-		}
-		got := closeSessionFile(f, nil)
-		if !errors.Is(got, os.ErrClosed) {
-			t.Fatalf("closeSessionFile() = %v, want os.ErrClosed", got)
-		}
-	})
+func testCloseSessionFileJoinsError(t *testing.T) {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "session-*")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	if err = f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	cause := errors.New("prior-cause")
+	got := closeSessionFile(f, cause)
+	if !errors.Is(got, cause) {
+		t.Fatalf("closeSessionFile() = %v, want cause %v", got, cause)
+	}
+	if !errors.Is(got, os.ErrClosed) {
+		t.Fatalf("closeSessionFile() = %v, want joined os.ErrClosed", got)
+	}
+}
+
+func testCloseSessionFileNilCause(t *testing.T) {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "session-*")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	if err = f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	got := closeSessionFile(f, nil)
+	if !errors.Is(got, os.ErrClosed) {
+		t.Fatalf("closeSessionFile() = %v, want os.ErrClosed", got)
+	}
 }
 
 type fakeDirEntry struct{}
@@ -295,44 +306,49 @@ func TestSessionScan_FilesScannedCap(t *testing.T) {
 }
 
 func TestOpenRegularSessionFile_SizeCap(t *testing.T) {
-	t.Run("exactly maxSessionFileBytes opens", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "exact.jsonl")
-		f, err := os.Create(path)
-		if err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		if err := f.Close(); err != nil {
-			t.Fatalf("Close: %v", err)
-		}
-		if err := os.Truncate(path, maxSessionFileBytes); err != nil {
-			t.Fatalf("Truncate: %v", err)
-		}
-		opened, err := openRegularSessionFile(path)
-		if err != nil {
-			t.Fatalf("openRegularSessionFile(cap) = %v, want nil error", err)
-		}
-		if err := opened.Close(); err != nil {
-			t.Fatalf("Close opened: %v", err)
-		}
-	})
+	t.Run("exactly maxSessionFileBytes opens", testOpenRegularSessionFileExactCap)
+	t.Run("maxSessionFileBytes+1 fails with exceeds", testOpenRegularSessionFileOverCap)
+}
 
-	t.Run("maxSessionFileBytes+1 fails with exceeds", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "over.jsonl")
-		f, err := os.Create(path)
-		if err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		if err := f.Close(); err != nil {
-			t.Fatalf("Close: %v", err)
-		}
-		if err := os.Truncate(path, maxSessionFileBytes+1); err != nil {
-			t.Fatalf("Truncate: %v", err)
-		}
-		_, err = openRegularSessionFile(path)
-		if err == nil || !strings.Contains(err.Error(), "exceeds") {
-			t.Fatalf("openRegularSessionFile(cap+1) err = %v, want error with 'exceeds'", err)
-		}
-	})
+func testOpenRegularSessionFileExactCap(t *testing.T) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "exact.jsonl")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := os.Truncate(path, maxSessionFileBytes); err != nil {
+		t.Fatalf("Truncate: %v", err)
+	}
+	opened, err := openRegularSessionFile(path)
+	if err != nil {
+		t.Fatalf("openRegularSessionFile(cap) = %v, want nil error", err)
+	}
+	if err := opened.Close(); err != nil {
+		t.Fatalf("Close opened: %v", err)
+	}
+}
+
+func testOpenRegularSessionFileOverCap(t *testing.T) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "over.jsonl")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := os.Truncate(path, maxSessionFileBytes+1); err != nil {
+		t.Fatalf("Truncate: %v", err)
+	}
+	_, err = openRegularSessionFile(path)
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("openRegularSessionFile(cap+1) err = %v, want error with 'exceeds'", err)
+	}
 }
 
 func TestScanLatestRateLimits_MaxScanLines(t *testing.T) {

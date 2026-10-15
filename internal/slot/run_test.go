@@ -109,20 +109,50 @@ type runWork struct {
 	inOut func(out string)
 }
 
+func commitWork(t *testing.T, ws Workspace, stage func(Workspace)) string {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(ws.Dir, "third.txt"), []byte("third\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() = %v, want nil", err)
+	}
+	gitIn(t, ws.Dir, "add", "--all")
+	if stage != nil {
+		stage(ws)
+	}
+	gitIn(t, ws.Dir, "commit", "--quiet", "--message", "the unit's work")
+	return gitIn(t, ws.Dir, "rev-parse", "HEAD")
+}
+
+func writeWorkEvidence(t *testing.T, dir string) Evidence {
+	t.Helper()
+	body := []byte("ok 1\nok 2\n")
+	path := EvidenceDir + "/tests/unit.log"
+	full := filepath.Join(dir, filepath.FromSlash(path))
+	if err := os.MkdirAll(filepath.Dir(full), 0o750); err != nil {
+		t.Fatalf("MkdirAll() = %v, want nil", err)
+	}
+	if err := os.WriteFile(full, body, 0o600); err != nil {
+		t.Fatalf("WriteFile() = %v, want nil", err)
+	}
+	return Evidence{Path: path, SHA256: digestOf(body), Lines: 2}
+}
+
+func writeWorkResult(t *testing.T, dir string, result Result) {
+	t.Helper()
+	doc, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("Marshal() = %v, want nil", err)
+	}
+	if err = os.WriteFile(filepath.Join(dir, filepath.FromSlash(ResultFile)), doc, 0o600); err != nil {
+		t.Fatalf("WriteFile(result) = %v, want nil", err)
+	}
+}
+
 // doWork does a run's work in ws: a commit, an evidence file and the result.
 func doWork(t *testing.T, ws Workspace, out string, w runWork) {
 	t.Helper()
 	head := gitIn(t, ws.Dir, "rev-parse", "HEAD")
 	if w.commit {
-		if err := os.WriteFile(filepath.Join(ws.Dir, "third.txt"), []byte("third\n"), 0o600); err != nil {
-			t.Fatalf("WriteFile() = %v, want nil", err)
-		}
-		gitIn(t, ws.Dir, "add", "--all")
-		if w.stage != nil {
-			w.stage(ws)
-		}
-		gitIn(t, ws.Dir, "commit", "--quiet", "--message", "the unit's work")
-		head = gitIn(t, ws.Dir, "rev-parse", "HEAD")
+		head = commitWork(t, ws, w.stage)
 	}
 	if w.head != "" {
 		head = w.head
@@ -132,24 +162,9 @@ func doWork(t *testing.T, ws Workspace, out string, w runWork) {
 		result.Head = head
 	}
 	if w.evidence {
-		body := []byte("ok 1\nok 2\n")
-		path := EvidenceDir + "/tests/unit.log"
-		full := filepath.Join(ws.Dir, filepath.FromSlash(path))
-		if err := os.MkdirAll(filepath.Dir(full), 0o750); err != nil {
-			t.Fatalf("MkdirAll() = %v, want nil", err)
-		}
-		if err := os.WriteFile(full, body, 0o600); err != nil {
-			t.Fatalf("WriteFile() = %v, want nil", err)
-		}
-		result.Evidence = []Evidence{{Path: path, SHA256: digestOf(body), Lines: 2}}
+		result.Evidence = []Evidence{writeWorkEvidence(t, ws.Dir)}
 	}
-	doc, err := json.Marshal(result)
-	if err != nil {
-		t.Fatalf("Marshal() = %v, want nil", err)
-	}
-	if err = os.WriteFile(filepath.Join(ws.Dir, filepath.FromSlash(ResultFile)), doc, 0o600); err != nil {
-		t.Fatalf("WriteFile(result) = %v, want nil", err)
-	}
+	writeWorkResult(t, ws.Dir, result)
 	if w.after != nil {
 		w.after(ws)
 	}
@@ -243,6 +258,15 @@ func TestRunRecordsADoneRunAsReviewWithItsBranchAndEvidence(t *testing.T) {
 		t.Fatalf("report = %+v, want a done run at %s, published, for review", report, head)
 	}
 	branch := Branch(testUnit)
+	assertDoneRunRepoRefs(t, run, branch, head)
+	assertDoneRunEvidenceCopy(t, run, report)
+	assertDoneRunResultCopy(t, run, report)
+	body := assertDoneRunReport(t, run.req.Out, report)
+	assertDoneRunUnit(t, run, branch, body)
+}
+
+func assertDoneRunRepoRefs(t *testing.T, run *testRun, branch, head string) {
+	t.Helper()
 	if got := gitIn(t, run.repo, "rev-parse", "refs/heads/"+branch); got != head {
 		t.Fatalf("the repository's %s is at %s, want %s", branch, got, head)
 	}
@@ -252,10 +276,21 @@ func TestRunRecordsADoneRunAsReviewWithItsBranchAndEvidence(t *testing.T) {
 	if current := gitIn(t, run.repo, "rev-parse", "HEAD"); current != run.base {
 		t.Fatalf("the repository's own branch moved to %s, want it at %s", current, run.base)
 	}
+}
+
+func assertDoneRunEvidenceCopy(t *testing.T, run *testRun, report Report) {
+	t.Helper()
 	copied, err := os.ReadFile(filepath.Join(run.req.Out, EvidenceCopies, "tests", "unit.log"))
 	if err != nil || string(copied) != "ok 1\nok 2\n" {
 		t.Fatalf("evidence copy = %q, %v; want the file the run wrote", copied, err)
 	}
+	if len(report.Evidence) != 1 || report.Evidence[0].Path != "evidence/tests/unit.log" || report.Evidence[0].SHA256 != digestOf(copied) || report.Evidence[0].Lines != 2 {
+		t.Fatalf("report evidence = %+v, want the copy with its digest and line count", report.Evidence)
+	}
+}
+
+func assertDoneRunResultCopy(t *testing.T, run *testRun, report Report) {
+	t.Helper()
 	result, err := os.ReadFile(filepath.Join(run.req.Out, ResultCopy))
 	if err != nil || report.Result == nil || digestOf(result) != report.Result.SHA256 || report.Result.Path != ResultCopy {
 		t.Fatalf("result copy: %v, pointer %+v; want the copy the report names", err, report.Result)
@@ -263,13 +298,19 @@ func TestRunRecordsADoneRunAsReviewWithItsBranchAndEvidence(t *testing.T) {
 	if wrote := readFile(t, filepath.Join(run.req.Dir, filepath.FromSlash(ResultFile))); string(result) != wrote || wrote == "" {
 		t.Fatalf("result copy = %q, want the result the run wrote %q", result, wrote)
 	}
-	if len(report.Evidence) != 1 || report.Evidence[0].Path != "evidence/tests/unit.log" || report.Evidence[0].SHA256 != digestOf(copied) || report.Evidence[0].Lines != 2 {
-		t.Fatalf("report evidence = %+v, want the copy with its digest and line count", report.Evidence)
-	}
-	written, body := readReport(t, run.req.Out)
+}
+
+func assertDoneRunReport(t *testing.T, out string, report Report) []byte {
+	t.Helper()
+	written, body := readReport(t, out)
 	if written.Outcome != report.Outcome || written.Head != report.Head || written.Status != "review" || written.Job == nil || !written.Job.Recorded {
 		t.Fatalf("written report = %+v, want what Run returned", written)
 	}
+	return body
+}
+
+func assertDoneRunUnit(t *testing.T, run *testRun, branch string, body []byte) {
+	t.Helper()
 	unit := run.unit(t)
 	if unit.Status != "review" || unit.Worktree != run.req.Dir || unit.Branch != branch {
 		t.Fatalf("unit = %+v, want review with the workspace and the branch", unit)
@@ -292,17 +333,22 @@ func TestRunRecordsABlockedRunWithoutABranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() = %v, want nil", err)
 	}
-	if report.Outcome != OutcomeBlocked || report.Status != "blocked" || report.Published || report.Head != run.base {
-		t.Fatalf("report = %+v, want a blocked run at its base, not published", report)
-	}
-	if len(report.Questions) != 1 || report.Questions[0] != question {
-		t.Fatalf("questions = %q, want the run's question", report.Questions)
-	}
+	assertBlockedRunReport(t, report, question, run.base)
 	if after := repoRefs(t, run.repo); after != before {
 		t.Fatalf("refs = %q, want them unchanged %q", after, before)
 	}
 	if unit := run.unit(t); unit.Status != "blocked" || unit.Evidence == nil {
 		t.Fatalf("unit = %+v, want blocked with a pointer to the report", unit)
+	}
+}
+
+func assertBlockedRunReport(t *testing.T, report Report, question, base string) {
+	t.Helper()
+	if report.Outcome != OutcomeBlocked || report.Status != "blocked" || report.Published || report.Head != base {
+		t.Fatalf("report = %+v, want a blocked run at its base, not published", report)
+	}
+	if len(report.Questions) != 1 || report.Questions[0] != question {
+		t.Fatalf("questions = %q, want the run's question", report.Questions)
 	}
 }
 
@@ -330,9 +376,7 @@ func TestRunRecordsARefusedStartAsBlocked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() = %v, want nil: a refused start is recorded, not an error", err)
 	}
-	if report.Outcome != OutcomeRefused || report.Status != "blocked" || !strings.Contains(report.Reason, "the scope was refused") || report.Taken() || report.Job != nil {
-		t.Fatalf("report = %+v, want a refused start with its reason", report)
-	}
+	assertRefusedStartReport(t, report)
 	if run.job.waited != 0 {
 		t.Fatalf("waited %d times for a job that did not start, want 0", run.job.waited)
 	}
@@ -342,6 +386,13 @@ func TestRunRecordsARefusedStartAsBlocked(t *testing.T) {
 	written, _ := readReport(t, run.req.Out)
 	if unit := run.unit(t); unit.Status != "blocked" || unit.Evidence == nil || written.Outcome != OutcomeRefused {
 		t.Fatalf("unit = %+v, report %+v; want blocked with the report of the refusal", unit, written)
+	}
+}
+
+func assertRefusedStartReport(t *testing.T, report Report) {
+	t.Helper()
+	if report.Outcome != OutcomeRefused || report.Status != "blocked" || !strings.Contains(report.Reason, "the scope was refused") || report.Taken() || report.Job != nil {
+		t.Fatalf("report = %+v, want a refused start with its reason", report)
 	}
 }
 
@@ -523,15 +574,25 @@ func checkRunNotTaken(t *testing.T, name string, run *testRun, want string) {
 		t.Errorf("%s: Run() = %v, want nil: the run is recorded", name, err)
 		return
 	}
+	assertRunNotTakenReport(t, name, report, want)
+	if after := repoRefs(t, run.repo); after != before {
+		t.Errorf("%s: refs = %q, want them unchanged %q", name, after, before)
+	}
+	assertRunNotTakenUnitAndWritten(t, name, run)
+}
+
+func assertRunNotTakenReport(t *testing.T, name string, report Report, want string) {
+	t.Helper()
 	if report.Outcome != OutcomeNotTaken || report.Status != "blocked" || !strings.Contains(report.Reason, want) {
 		t.Errorf("%s: report = %+v, want not-taken with a reason holding %q", name, report, want)
 	}
 	if report.Taken() || report.Published || report.Head != "" || report.Result != nil || len(report.Evidence) != 0 || report.Summary != "" {
 		t.Errorf("%s: report = %+v, want nothing of the result carried", name, report)
 	}
-	if after := repoRefs(t, run.repo); after != before {
-		t.Errorf("%s: refs = %q, want them unchanged %q", name, after, before)
-	}
+}
+
+func assertRunNotTakenUnitAndWritten(t *testing.T, name string, run *testRun) {
+	t.Helper()
 	if unit := run.unit(t); unit.Status != "blocked" || unit.Evidence == nil {
 		t.Errorf("%s: unit = %+v, want blocked with a pointer to the report", name, unit)
 	}
@@ -573,6 +634,11 @@ func TestRunNeverForcesTheRepositorysBranch(t *testing.T) {
 			t.Errorf("%s: refs = %q, want them unchanged %q", cases[i].name, after, before)
 		}
 	}
+	assertAncestorBranchMovesForward(t, branch)
+}
+
+func assertAncestorBranchMovesForward(t *testing.T, branch string) {
+	t.Helper()
 	// A branch that is an ancestor of the run's head moves forward.
 	run := newTestRun(t, &runWork{outcome: OutcomeDone, commit: true})
 	gitIn(t, run.repo, "branch", "--quiet", branch, run.base)
@@ -590,34 +656,52 @@ func TestRunNeverForcesTheRepositorysBranch(t *testing.T) {
 func TestRunRunsNothingTheWorkspaceNames(t *testing.T) {
 	marks := t.TempDir()
 	plant := func(ws Workspace) {
-		settings := map[string]string{
-			"uploadpack.packObjectsHook": "pack",
-			"core.fsmonitor":             "fsmonitor",
-			"core.sshCommand":            "ssh",
-			"core.pager":                 "pager",
-			"core.editor":                "editor",
-			"core.alternateRefsCommand":  "alternates",
-		}
-		for key, name := range settings {
-			gitIn(t, ws.Dir, "config", key, "touch "+filepath.Join(marks, name))
-		}
-		hooks := filepath.Join(ws.Dir, ".git", "hooks")
-		if err := os.MkdirAll(hooks, 0o750); err != nil {
-			t.Fatalf("MkdirAll() = %v, want nil", err)
-		}
-		for _, hook := range []string{"pre-auto-gc", "reference-transaction", "post-checkout", "pre-push", "post-update", "pre-receive", "update"} {
-			script := "#!/bin/sh\ntouch " + filepath.Join(marks, "hook-"+hook) + "\n"
-			// #nosec G306 -- a hook has to be executable to run; the test proves it does not.
-			if err := os.WriteFile(filepath.Join(hooks, hook), []byte(script), 0o700); err != nil {
-				t.Fatalf("WriteFile(hook) = %v, want nil", err)
-			}
-		}
+		plantWorkspaceSettingsAndHooks(t, ws, marks)
 	}
 	run := newTestRun(t, &runWork{outcome: OutcomeDone, commit: true, evidence: true, after: plant})
 	report, err := Run(slotCtx(t), run.req)
 	if err != nil || report.Outcome != OutcomeDone || !report.Published {
 		t.Fatalf("Run() = %+v, %v; want the run taken", report, err)
 	}
+	assertNoWorkspaceCommandsRan(t, marks)
+	// The other direction: what was planted does run when a git command is run inside the
+	// workspace, so its silence above is the runner's doing.
+	gitIn(t, run.req.Dir, "status", "--porcelain")
+	if _, err = os.Lstat(filepath.Join(marks, "fsmonitor")); err != nil {
+		t.Fatalf("a git command inside the workspace ran nothing of it (%v): the test plants nothing that could run", err)
+	}
+}
+
+func plantWorkspaceSettingsAndHooks(t *testing.T, ws Workspace, marks string) {
+	t.Helper()
+	settings := map[string]string{
+		"uploadpack.packObjectsHook": "pack",
+		"core.fsmonitor":             "fsmonitor",
+		"core.sshCommand":            "ssh",
+		"core.pager":                 "pager",
+		"core.editor":                "editor",
+		"core.alternateRefsCommand":  "alternates",
+	}
+	for key, name := range settings {
+		gitIn(t, ws.Dir, "config", key, "touch "+filepath.Join(marks, name))
+	}
+	hooks := filepath.Join(ws.Dir, ".git", "hooks")
+	if err := os.MkdirAll(hooks, 0o750); err != nil {
+		t.Fatalf("MkdirAll() = %v, want nil", err)
+	}
+	hookNames := []string{"pre-auto-gc", "reference-transaction", "post-checkout", "pre-push", "post-update", "pre-receive", "update"}
+	for i := 0; i < len(hookNames); i++ {
+		hook := hookNames[i]
+		script := "#!/bin/sh\ntouch " + filepath.Join(marks, "hook-"+hook) + "\n"
+		// #nosec G306 -- a hook has to be executable to run; the test proves it does not.
+		if err := os.WriteFile(filepath.Join(hooks, hook), []byte(script), 0o700); err != nil {
+			t.Fatalf("WriteFile(hook) = %v, want nil", err)
+		}
+	}
+}
+
+func assertNoWorkspaceCommandsRan(t *testing.T, marks string) {
+	t.Helper()
 	ran, err := os.ReadDir(marks)
 	if err != nil {
 		t.Fatalf("ReadDir() = %v, want nil", err)
@@ -628,12 +712,6 @@ func TestRunRunsNothingTheWorkspaceNames(t *testing.T) {
 			names = append(names, ran[i].Name())
 		}
 		t.Fatalf("commands of the workspace ran: %q, want none", names)
-	}
-	// The other direction: what was planted does run when a git command is run inside the
-	// workspace, so its silence above is the runner's doing.
-	gitIn(t, run.req.Dir, "status", "--porcelain")
-	if _, err = os.Lstat(filepath.Join(marks, "fsmonitor")); err != nil {
-		t.Fatalf("a git command inside the workspace ran nothing of it (%v): the test plants nothing that could run", err)
 	}
 }
 
@@ -724,6 +802,11 @@ func TestRunBringsNothingButTheUnitsBranch(t *testing.T) {
 	if _, statErr := os.Lstat(filepath.Join(run.repo, ".git", "FETCH_HEAD")); !os.IsNotExist(statErr) {
 		t.Fatalf("the repository has a FETCH_HEAD (%v), want none", statErr)
 	}
+	assertWrittenRefsHook(t, written, branch)
+}
+
+func assertWrittenRefsHook(t *testing.T, written, branch string) {
+	t.Helper()
 	names := strings.Fields(readFile(t, written))
 	staged := 0
 	for i := 0; i < len(names); i++ {
@@ -856,12 +939,17 @@ func TestRunPreemptedBeforeStart(t *testing.T) {
 	if run.job.started != 0 {
 		t.Fatalf("run.job.started = %d, want 0", run.job.started)
 	}
+	assertPreemptedUnit(t, run, "priority halt")
+}
+
+func assertPreemptedUnit(t *testing.T, run *testRun, reason string) {
+	t.Helper()
 	u := run.unit(t)
 	if u.Status != "blocked" {
 		t.Fatalf("unit status = %s, want blocked", u.Status)
 	}
-	if u.Preempted == nil || u.Preempted.Reason != "priority halt" {
-		t.Fatalf("unit.Preempted = %+v, want priority halt", u.Preempted)
+	if u.Preempted == nil || u.Preempted.Reason != reason {
+		t.Fatalf("unit.Preempted = %+v, want %s", u.Preempted, reason)
 	}
 	if u.Evidence == nil || filepath.Base(u.Evidence.Path) != ReportFile {
 		t.Fatalf("unit.Evidence = %+v, want pointer to %s", u.Evidence, ReportFile)

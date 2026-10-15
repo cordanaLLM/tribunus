@@ -90,17 +90,22 @@ func (r *rt02Run) step(t *testing.T, ctx context.Context, act string) bool {
 			t.Fatalf("append(claim) = %v, want nil", err)
 		}
 	case "resolve_retry", "resolve_done":
-		outcome := OutcomeRetry
-		if act == "resolve_done" {
-			outcome = OutcomeDone
-		}
-		if err := r.ledger.Resolve(ctx, fixtureKey, outcome, "operator", "checked on the forge by hand"); err != nil {
-			t.Fatalf("Resolve(%s) = %v, want nil", outcome, err)
-		}
+		stepResolve(t, r, ctx, act)
 	default:
 		t.Fatalf("unknown act %q", act)
 	}
 	return r.executions > before
+}
+
+func stepResolve(t *testing.T, r *rt02Run, ctx context.Context, act string) {
+	t.Helper()
+	outcome := OutcomeRetry
+	if act == "resolve_done" {
+		outcome = OutcomeDone
+	}
+	if err := r.ledger.Resolve(ctx, fixtureKey, outcome, "operator", "checked on the forge by hand"); err != nil {
+		t.Fatalf("Resolve(%s) = %v, want nil", outcome, err)
+	}
 }
 
 // checkRT02Fixture replays one fixture and returns what is wrong with the outcome, "" when

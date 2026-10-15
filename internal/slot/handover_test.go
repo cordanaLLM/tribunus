@@ -109,41 +109,55 @@ func TestHandoverNamesTheUnansweredQuestionsAndUnreadNotes(t *testing.T) {
 // A report that changed after its run was recorded, or that is gone, leaves the pending
 // decisions unknown and says why; it never reads as nothing pending.
 func TestHandoverRefusesAReportThatIsNotTheRecordedOne(t *testing.T) {
-	cases := map[string]func(*eventlog.UnitEvidence){
-		"changed": func(p *eventlog.UnitEvidence) {
-			if err := os.WriteFile(p.Path, []byte(`{"unit":"r#1","outcome":"done"}`), 0o600); err != nil {
-				t.Fatalf("WriteFile = %v", err)
-			}
-		},
-		"gone": func(p *eventlog.UnitEvidence) {
-			if err := os.Remove(p.Path); err != nil {
-				t.Fatalf("Remove = %v", err)
-			}
-		},
-		"a link": func(p *eventlog.UnitEvidence) {
-			target := p.Path + ".real"
-			if err := os.Rename(p.Path, target); err != nil {
-				t.Fatalf("Rename = %v", err)
-			}
-			if err := os.Symlink(target, p.Path); err != nil {
-				t.Fatalf("Symlink = %v", err)
-			}
-		},
-		"a digest too short": func(p *eventlog.UnitEvidence) { p.SHA256 = p.SHA256[:11] },
+	cases := map[string]func(*testing.T, *eventlog.UnitEvidence){
+		"changed":            spoilReportChanged,
+		"gone":               spoilReportGone,
+		"a link":             spoilReportLink,
+		"a digest too short": func(_ *testing.T, p *eventlog.UnitEvidence) { p.SHA256 = p.SHA256[:11] },
 	}
 	for name, spoil := range cases {
 		t.Run(name, func(t *testing.T) {
-			pointer := writeReport(t, Report{Unit: "r#1", Outcome: OutcomeBlocked, Questions: []string{"ASK r-x: y"}})
-			spoil(pointer)
-			unit := eventlog.Unit{ID: "r#1", Status: "blocked", Evidence: pointer}
-			list, err := Handover(eventlog.State{Units: map[string]eventlog.Unit{"r#1": unit}}, "r", nil)
-			if err != nil {
-				t.Fatalf("Handover() = %v, want nil", err)
-			}
-			if list[0].ReportError == "" || list[0].Pending != nil {
-				t.Fatalf("unit = %+v, want a report error and no pending list", list[0])
-			}
+			runHandoverRefusedReportCase(t, spoil)
 		})
+	}
+}
+
+func spoilReportChanged(t *testing.T, p *eventlog.UnitEvidence) {
+	t.Helper()
+	if err := os.WriteFile(p.Path, []byte(`{"unit":"r#1","outcome":"done"}`), 0o600); err != nil {
+		t.Fatalf("WriteFile = %v", err)
+	}
+}
+
+func spoilReportGone(t *testing.T, p *eventlog.UnitEvidence) {
+	t.Helper()
+	if err := os.Remove(p.Path); err != nil {
+		t.Fatalf("Remove = %v", err)
+	}
+}
+
+func spoilReportLink(t *testing.T, p *eventlog.UnitEvidence) {
+	t.Helper()
+	target := p.Path + ".real"
+	if err := os.Rename(p.Path, target); err != nil {
+		t.Fatalf("Rename = %v", err)
+	}
+	if err := os.Symlink(target, p.Path); err != nil {
+		t.Fatalf("Symlink = %v", err)
+	}
+}
+
+func runHandoverRefusedReportCase(t *testing.T, spoil func(*testing.T, *eventlog.UnitEvidence)) {
+	t.Helper()
+	pointer := writeReport(t, Report{Unit: "r#1", Outcome: OutcomeBlocked, Questions: []string{"ASK r-x: y"}})
+	spoil(t, pointer)
+	unit := eventlog.Unit{ID: "r#1", Status: "blocked", Evidence: pointer}
+	list, err := Handover(eventlog.State{Units: map[string]eventlog.Unit{"r#1": unit}}, "r", nil)
+	if err != nil {
+		t.Fatalf("Handover() = %v, want nil", err)
+	}
+	if list[0].ReportError == "" || list[0].Pending != nil {
+		t.Fatalf("unit = %+v, want a report error and no pending list", list[0])
 	}
 }
 

@@ -29,12 +29,6 @@ linters:
     # tools/lintexceptions checks: a rule without its comment, or past its date, fails.
     rules:
       # category C, expires 2026-10-25, #133
-      - path: ^catalog/imports_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^catalog/imports_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
       - path: ^cmd/epitropctl/effects_test\.go$
         linters: [gocyclo]
       # category C, expires 2026-10-25, #133
@@ -73,84 +67,6 @@ linters:
       # category C, expires 2026-10-25, #133
       - path: ^cmd/epitropctl/units_test\.go$
         linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/config/config_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/config/home_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/config/home_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/effects/fixtures_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/effects/ledger_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/effects/ledger_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/effects/telemetry_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/egressproxy/ends_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/egressproxy/ends_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/releasewatch/anonymous_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/releasewatch/issue_text_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/releasewatch/service_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/releasewatch/service_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/slot/handover_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/slot/job_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/slot/result_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/slot/run_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/slot/run_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/slot/takeup_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/slot/workspace_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/slot/workspace_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/sources/codexlocal/source_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/sources/codexlocal/source_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/sources/httpfetch/httpfetch_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/sources/httpfetch/httpfetch_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/sources/ollamalocal/source_test\.go$
-        linters: [gocognit]
       # category C, expires 2026-10-25, #133
       - path: ^internal/supervisor/deadline_linux_test\.go$
         linters: [gocyclo]

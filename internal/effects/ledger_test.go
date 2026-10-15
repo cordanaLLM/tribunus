@@ -112,6 +112,15 @@ func TestDoubleDeliveryExecutesOnce(t *testing.T) {
 	if err != nil || second.Executed || !second.Skipped {
 		t.Fatalf("second Do() = %+v, %v; want it skipped", second, err)
 	}
+	assertDoubleDeliveryState(t, ledger, dir, ran)
+	other, err := ledger.Do(testCtx(t), Key{TaskID: "task-7", ActionType: "close-issue"}, effect)
+	if err != nil || !other.Executed || ran != 2 {
+		t.Fatalf("Do(same task, other action) = %+v, %v, ran %d; want a key of its own to run", other, err, ran)
+	}
+}
+
+func assertDoubleDeliveryState(t *testing.T, ledger *Ledger, dir string, ran int) {
+	t.Helper()
 	if ran != 1 {
 		t.Fatalf("the effect ran %d times, want 1", ran)
 	}
@@ -120,10 +129,6 @@ func TestDoubleDeliveryExecutesOnce(t *testing.T) {
 	}
 	if got := effectOf(t, ledger, key); got.State != StateDone || got.Skipped != 1 || got.Attempt != 1 {
 		t.Fatalf("effect = %+v, want done, skipped once, one attempt", got)
-	}
-	other, err := ledger.Do(testCtx(t), Key{TaskID: "task-7", ActionType: "close-issue"}, effect)
-	if err != nil || !other.Executed || ran != 2 {
-		t.Fatalf("Do(same task, other action) = %+v, %v, ran %d; want a key of its own to run", other, err, ran)
 	}
 }
 
@@ -152,11 +157,16 @@ func TestConcurrentDeliveriesExecuteOnce(t *testing.T) {
 	}
 	wg.Wait()
 	close(errs)
+	assertConcurrentDeliveriesResult(t, dir, errs, ran.Load(), executed.Load())
+}
+
+func assertConcurrentDeliveriesResult(t *testing.T, dir string, errs <-chan error, ran, executed int32) {
+	t.Helper()
 	for err := range errs {
 		t.Fatalf("Do() = %v, want nil, a claim held elsewhere or an open claim", err)
 	}
-	if ran.Load() != 1 || executed.Load() != 1 {
-		t.Fatalf("the effect ran %d times and %d writers report having run it, want 1 and 1", ran.Load(), executed.Load())
+	if ran != 1 || executed != 1 {
+		t.Fatalf("the effect ran %d times and %d writers report having run it, want 1 and 1", ran, executed)
 	}
 	if got := effectOf(t, ledgerAt(t, dir), key); got.State != StateDone || got.Attempt != 1 {
 		t.Fatalf("effect = %+v, want done after one attempt", got)
@@ -178,6 +188,12 @@ func TestOpenClaimBlocksUntilItIsResolved(t *testing.T) {
 		t.Fatalf("Do(failing effect) = %v, want the effect's error", err)
 	}
 	records := len(recordTypes(t, dir))
+	assertOpenClaimsRemain(t, ledger, failing, effect)
+	assertOpenClaimsFinalState(t, ledger, dir, records, ran)
+}
+
+func assertOpenClaimsRemain(t *testing.T, ledger *Ledger, failing Key, effect func(context.Context) error) {
+	t.Helper()
 	for i := 0; i < 3; i++ {
 		_, err := ledger.Do(testCtx(t), key, effect)
 		if !errors.Is(err, ErrUnresolved) || !strings.Contains(err.Error(), "never ended") {
@@ -188,6 +204,10 @@ func TestOpenClaimBlocksUntilItIsResolved(t *testing.T) {
 			t.Fatalf("Do(failed key) = %v, want an open claim with the failure's reason", err)
 		}
 	}
+}
+
+func assertOpenClaimsFinalState(t *testing.T, ledger *Ledger, dir string, records, ran int) {
+	t.Helper()
 	if ran != 0 || len(recordTypes(t, dir)) != records {
 		t.Fatalf("ran %d, records %d -> %d; want nothing run and nothing appended", ran, records, len(recordTypes(t, dir)))
 	}
@@ -203,38 +223,46 @@ func TestResolveRecordsWhatBecameOfAnOpenClaim(t *testing.T) {
 	ledger, _ := testLedger(t)
 	ran := 0
 	effect := func(context.Context) error { ran++; return nil }
-	crash := func(k Key) {
-		t.Helper()
-		if _, err := ledger.append(testCtx(t), Claimed, k, payload{}); err != nil {
-			t.Fatalf("append(claim) = %v, want nil", err)
-		}
+	assertResolvedRetryClaim(t, ledger, effect, &ran)
+	assertResolvedDoneClaim(t, ledger, effect, &ran)
+	if open, err := ledger.Open(testCtx(t)); err != nil || len(open) != 0 {
+		t.Fatalf("Open() = %+v, %v; want none left", open, err)
 	}
+}
+
+func assertResolvedRetryClaim(t *testing.T, ledger *Ledger, effect func(context.Context) error, ran *int) {
+	t.Helper()
 	retried := Key{TaskID: "task-1", ActionType: "file-issue"}
-	crash(retried)
+	if _, err := ledger.append(testCtx(t), Claimed, retried, payload{}); err != nil {
+		t.Fatalf("append(claim) = %v, want nil", err)
+	}
 	if err := ledger.Resolve(testCtx(t), retried, OutcomeRetry, "operator", "no issue on the forge"); err != nil {
 		t.Fatalf("Resolve(retry) = %v, want nil", err)
 	}
 	res, err := ledger.Do(testCtx(t), retried, effect)
-	if err != nil || !res.Executed || ran != 1 {
-		t.Fatalf("Do(after retry) = %+v, %v, ran %d; want it to run once", res, err, ran)
+	if err != nil || !res.Executed || *ran != 1 {
+		t.Fatalf("Do(after retry) = %+v, %v, ran %d; want it to run once", res, err, *ran)
 	}
 	if got := effectOf(t, ledger, retried); got.State != StateDone || got.Attempt != 2 || got.ResolvedBy != "" {
 		t.Fatalf("effect after the retry = %+v, want done in a second attempt", got)
 	}
+}
+
+func assertResolvedDoneClaim(t *testing.T, ledger *Ledger, effect func(context.Context) error, ran *int) {
+	t.Helper()
 	happened := Key{TaskID: "task-2", ActionType: "file-issue"}
-	crash(happened)
-	if err = ledger.Resolve(testCtx(t), happened, OutcomeDone, "operator", "issue 12 is there"); err != nil {
+	if _, err := ledger.append(testCtx(t), Claimed, happened, payload{}); err != nil {
+		t.Fatalf("append(claim) = %v, want nil", err)
+	}
+	if err := ledger.Resolve(testCtx(t), happened, OutcomeDone, "operator", "issue 12 is there"); err != nil {
 		t.Fatalf("Resolve(done) = %v, want nil", err)
 	}
-	res, err = ledger.Do(testCtx(t), happened, effect)
-	if err != nil || !res.Skipped || ran != 1 {
-		t.Fatalf("Do(after done) = %+v, %v, ran %d; want it skipped", res, err, ran)
+	res, err := ledger.Do(testCtx(t), happened, effect)
+	if err != nil || !res.Skipped || *ran != 1 {
+		t.Fatalf("Do(after done) = %+v, %v, ran %d; want it skipped", res, err, *ran)
 	}
 	if got := effectOf(t, ledger, happened); got.State != StateDone || got.ResolvedBy != "operator" || got.ResolvedNote != "issue 12 is there" {
 		t.Fatalf("effect resolved as done = %+v, want who and why recorded", got)
-	}
-	if open, err := ledger.Open(testCtx(t)); err != nil || len(open) != 0 {
-		t.Fatalf("Open() = %+v, %v; want none left", open, err)
 	}
 }
 
@@ -292,6 +320,15 @@ func TestDoRefusesWhatItCannotRun(t *testing.T) {
 	if _, err := ledger.Do(testCtx(t), longest, effect); err != nil {
 		t.Errorf("Do(key at the length bound) = %v, want nil", err)
 	}
+	assertDoContextAndEffectRefusals(t, ledger, effect)
+	if got := strings.Join(recordTypes(t, dir), " "); got != "effect.claimed effect.done" {
+		t.Fatalf("records = %q, want only the one delivery that ran", got)
+	}
+	assertNewLedgerRefusals(t)
+}
+
+func assertDoContextAndEffectRefusals(t *testing.T, ledger *Ledger, effect func(context.Context) error) {
+	t.Helper()
 	if _, err := ledger.Do(testCtx(t), key, nil); err == nil || !strings.Contains(err.Error(), "nil effect") {
 		t.Errorf("Do(nil effect) = %v, want it refused", err)
 	}
@@ -301,9 +338,10 @@ func TestDoRefusesWhatItCannotRun(t *testing.T) {
 	if _, err := ledgerAt(t, t.TempDir()).Open(context.Background()); err == nil || !strings.Contains(err.Error(), "effects: replay requires a context deadline") {
 		t.Errorf("Open(no deadline, empty log) = %v, want the ledger to refuse it", err)
 	}
-	if got := strings.Join(recordTypes(t, dir), " "); got != "effect.claimed effect.done" {
-		t.Fatalf("records = %q, want only the one delivery that ran", got)
-	}
+}
+
+func assertNewLedgerRefusals(t *testing.T) {
+	t.Helper()
 	signer, err := corereceipt.NewSignerFromSeed(bytes.Repeat([]byte{5}, 32), clock.NewFake())
 	if err != nil {
 		t.Fatalf("NewSignerFromSeed() = %v, want nil", err)
@@ -374,6 +412,11 @@ func TestReducerIgnoresAndCountsWhatARaceProduces(t *testing.T) {
 	if got.State != StateDone || got.Skipped != 1 || st.EffectRecordsIgnored != 4 {
 		t.Fatalf("effect = %+v, ignored %d; want done, skipped once and four records ignored", got, st.EffectRecordsIgnored)
 	}
+	assertReducerReplayCanonicalJSON(t, claim)
+}
+
+func assertReducerReplayCanonicalJSON(t *testing.T, claim string) {
+	t.Helper()
 	first, err := reduce(t, rec(1, Claimed, "task-1", claim)).CanonicalJSON()
 	if err != nil {
 		t.Fatalf("CanonicalJSON() = %v, want nil", err)

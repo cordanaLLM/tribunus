@@ -27,7 +27,7 @@ func TestLoadPositiveFullFile(t *testing.T) {
     "schedule": "0 2 * * *",
     "router_alias": "cordana/auto",
     "max_runtime_seconds": 1800,
-    "restart": {"policy": "on-failure", "max_restarts": 3, "backoff_seconds": 2},
+    "restart": {"policy": "never", "max_restarts": 0, "backoff_seconds": 0},
     "stop": {"signal": "TERM", "grace_seconds": 5},
     "sandbox": {"mode": "enforce", "workspace": "/var/tmp", "network": "none", "memory_max": "2G", "memory_high": "1536M", "cpu_weight": 100, "tasks_max": 512}
   }],
@@ -51,7 +51,7 @@ func TestLoadPositiveFullFile(t *testing.T) {
 	if len(cfg.Jobs) != 1 || cfg.Jobs[0].RouterAlias != "cordana/auto" {
 		t.Fatalf("Load() jobs = %+v, want one scheduled alias declaration", cfg.Jobs)
 	}
-	if cfg.Jobs[0].Command[1] != "catalog" || cfg.Jobs[0].Restart.Policy != "on-failure" {
+	if cfg.Jobs[0].Command[1] != "catalog" || cfg.Jobs[0].Restart.Policy != "never" {
 		t.Fatalf("Load() jobs = %+v, want command and restart policy", cfg.Jobs)
 	}
 	if cfg.Jobs[0].Sandbox.MemoryHigh != "1536M" {
@@ -343,7 +343,7 @@ func jobDeclarations(count int) []map[string]any {
 			"name":         "job-" + jsonInt(i),
 			"command":      []string{"/bin/true"},
 			"log_path":     "/tmp/job-" + jsonInt(i) + ".log",
-			"schedule":     "event",
+			"schedule":     "always",
 			"router_alias": defaultAlias,
 			"sandbox":      map[string]any{"mode": "off", "reason": "test fixture"},
 		})

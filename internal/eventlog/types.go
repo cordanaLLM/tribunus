@@ -109,6 +109,11 @@ type Job struct {
 	// kept apart from ShimPID and Since, which belong to the last start that was recorded.
 	RefusedShimPID int    `json:"refused_shim_pid,omitempty"`
 	RefusedAt      string `json:"refused_at,omitempty"`
+	ArmedTrigger   string `json:"armed_trigger,omitempty"`
+	ArmedAt        string `json:"armed_at,omitempty"`
+	ArmedSeq       uint64 `json:"armed_seq,omitempty"`
+	LastDue        string `json:"last_due,omitempty"`
+	LastTriggerSeq uint64 `json:"last_trigger_seq,omitempty"`
 }
 
 // UnitNote is one unread inbox note. Seq is the log sequence number of its record.

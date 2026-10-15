@@ -274,6 +274,7 @@ func TestNeverRestartDoesNotRestartFailure(t *testing.T) {
 func TestReconcileSkipsNonAlwaysSchedule(t *testing.T) {
 	job := testJob("event", longJobCommand(t))
 	job.Schedule = "event"
+	job.OnEvent = &config.JobEventTrigger{Type: "job.exited", TaskID: "other"}
 	sup := testSupervisor(t, job)
 	if err := sup.Reconcile(testContext(t)); err != nil {
 		t.Fatalf("Reconcile() = %v, want nil", err)

@@ -157,11 +157,12 @@ type TaskBudget struct {
 }
 
 type JobConfig struct {
-	Name        string   `koanf:"name" json:"name"`
-	Command     []string `koanf:"command" json:"command"`
-	LogPath     string   `koanf:"log_path" json:"log_path"`
-	Schedule    string   `koanf:"schedule" json:"schedule"`
-	RouterAlias string   `koanf:"router_alias" json:"router_alias"`
+	Name        string           `koanf:"name" json:"name"`
+	Command     []string         `koanf:"command" json:"command"`
+	LogPath     string           `koanf:"log_path" json:"log_path"`
+	Schedule    string           `koanf:"schedule" json:"schedule"`
+	OnEvent     *JobEventTrigger `koanf:"on_event" json:"on_event,omitempty"`
+	RouterAlias string           `koanf:"router_alias" json:"router_alias"`
 	// MaxRuntimeSeconds is the job's deadline: when it has run this long it is stopped like
 	// `jobs stop` stops it and its exit is recorded with reason "deadline". 0 means the
 	// longest runtime any job may have (MaxJobRuntimeSeconds).
@@ -306,6 +307,11 @@ func Load(ctx context.Context, path string) (Config, error) {
 	applyReleaseWatchDefaults(&cfg.ReleaseWatch)
 	if err = validateNames(cfg); err != nil {
 		return Config{}, err
+	}
+	for i := 0; i < len(cfg.Jobs); i++ {
+		if err = ValidateJobTrigger(cfg.Jobs[i]); err != nil {
+			return Config{}, err
+		}
 	}
 	if err = validateRouterAliases(cfg); err != nil {
 		return Config{}, err

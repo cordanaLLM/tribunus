@@ -68,14 +68,6 @@ exceptions:
   # Dated gaps for declared linters that no workflow runs (praetorctl audit, declared-linters).
   # gitleaks runs in ci.yml and needs no entry.
   - rule: declared-linters
-    tool: gocognit
-    reason: eight functions exceed the HISS-04 caps (three cognitive); the linter is enabled with their refactor (#133)
-    expires: "2027-01-11"
-  - rule: declared-linters
-    tool: gocyclo
-    reason: eight functions exceed the HISS-04 caps (five cyclomatic); the linter is enabled with their refactor (#133)
-    expires: "2027-01-11"
-  - rule: declared-linters
     tool: trivy
     reason: the engine's own trivy job is still pending (praetor .standards.yaml declared-linters exception); govulncheck runs VEX-aware in ci.yml; adopt the engine's job when it lands
     expires: "2027-01-11"

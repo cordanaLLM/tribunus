@@ -4,7 +4,7 @@
       "id": "openai-openapi",
       "url_template": "https://raw.githubusercontent.com/openai/openai-openapi/{revision}/openapi.yaml",
       "pinned_revision": "e7cfd6242d5d39e67e6fe172bf973b57ecafba2d",
-      "full_document_sha256": "8f037f570565278e84c57ef1f1777c1c8ede954da7b428d70ec93dc294781ba7",
+      "full_document_sha256": "6d3c847e482c6488e576f97e84cbe04656e02e05745518fef75bd3644b6a2f27",
       "spdx_license": "MIT",
       "copyright_holder": "OpenAI",
       "fragments": [
@@ -18,7 +18,7 @@
       "id": "litellm-price-map",
       "url_template": "https://raw.githubusercontent.com/BerriAI/litellm/{revision}/model_prices_and_context_window.json",
       "pinned_revision": "ad83e3d3c8376e5561b07a329a063bb5ac03dc9c",
-      "full_document_sha256": "9b88d7873307df1a207d21189a4ffcebd4259363e1bdb53c72f519ad786ab670",
+      "full_document_sha256": "70f6dbc07538f070f866549eec17075265142ff863a659e7f2836781aad092a7",
       "spdx_license": "MIT",
       "copyright_holder": "Berri AI",
       "fragments": [

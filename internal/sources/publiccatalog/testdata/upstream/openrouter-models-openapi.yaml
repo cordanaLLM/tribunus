@@ -5,9 +5,27 @@
 # Extraction date: 2026-10-09
 # SPDX licence: MIT
 # Copyright holder: OpenRouter
-# Changes: provenance header added by Epitrop; extracted getModels path and model schema blocks
+# Changes: provenance header added by Epitrop; extracted info, servers, the Models tag, getModels path and model schema blocks, with every schema they reference
 
 openapi: 3.1.0
+info:
+  contact:
+    email: support@openrouter.ai
+    name: OpenRouter Support
+    url: https://openrouter.ai/docs
+  description: OpenAI-compatible API with additional OpenRouter features
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  title: OpenRouter API
+  version: 1.0.0
+servers:
+  - description: Production server
+    url: https://openrouter.ai/api/v1
+    x-speakeasy-server-id: production
+tags:
+  - description: Model information endpoints
+    name: Models
 paths:
   /models:
     get:
@@ -644,3 +662,496 @@ components:
         - prompt
         - completion
       type: object
+    BadRequestResponse:
+      description: Bad Request - Invalid request parameters or malformed input
+      properties:
+        error:
+          $ref: '#/components/schemas/BadRequestResponseErrorData'
+        openrouter_metadata:
+          additionalProperties: {}
+          type:
+            - object
+            - 'null'
+        user_id:
+          type:
+            - string
+            - 'null'
+      required:
+        - error
+      type: object
+    DefaultParameters:
+      additionalProperties: false
+      description: Default parameters for this model
+      properties:
+        frequency_penalty:
+          format: double
+          type:
+            - number
+            - 'null'
+        presence_penalty:
+          format: double
+          type:
+            - number
+            - 'null'
+        repetition_penalty:
+          format: double
+          type:
+            - number
+            - 'null'
+        temperature:
+          format: double
+          type:
+            - number
+            - 'null'
+        top_k:
+          type:
+            - integer
+            - 'null'
+        top_p:
+          format: double
+          type:
+            - number
+            - 'null'
+      type:
+        - object
+        - 'null'
+    ForbiddenResponse:
+      description: Forbidden - Authentication successful but insufficient permissions
+      properties:
+        error:
+          $ref: '#/components/schemas/ForbiddenResponseErrorData'
+        openrouter_metadata:
+          additionalProperties: {}
+          type:
+            - object
+            - 'null'
+        user_id:
+          type:
+            - string
+            - 'null'
+      required:
+        - error
+      type: object
+    InputModality:
+      enum:
+        - text
+        - image
+        - file
+        - audio
+        - video
+      type: string
+    InstructType:
+      description: Instruction format type
+      enum:
+        - none
+        - airoboros
+        - alpaca
+        - alpaca-modif
+        - chatml
+        - claude
+        - code-llama
+        - gemma
+        - llama2
+        - llama3
+        - mistral
+        - nemotron
+        - neural
+        - openchat
+        - phi3
+        - rwkv
+        - vicuna
+        - zephyr
+        - deepseek-r1
+        - deepseek-v3.1
+        - qwq
+        - qwen3
+        - null
+      type:
+        - string
+        - 'null'
+    InternalServerResponse:
+      description: Internal Server Error - Unexpected server error
+      properties:
+        error:
+          $ref: '#/components/schemas/InternalServerResponseErrorData'
+        openrouter_metadata:
+          additionalProperties: {}
+          type:
+            - object
+            - 'null'
+        user_id:
+          type:
+            - string
+            - 'null'
+      required:
+        - error
+      type: object
+    ModelAliasTarget:
+      description: Concrete model targeted by this tilde-latest alias, when applicable
+      properties:
+        name:
+          description: Human-readable name of the concrete model targeted by this alias
+          type: string
+        slug:
+          description: >-
+            Routable model ID of the concrete target, matching that model row's
+            id
+          type: string
+      required:
+        - slug
+        - name
+      type: object
+    ModelBenchmarks:
+      description: >-
+        Third-party benchmark rankings for this model. Omitted when no benchmark
+        data is available.
+      properties:
+        artificial_analysis:
+          $ref: '#/components/schemas/AABenchmarkEntry'
+        design_arena:
+          description: Design Arena ELO rankings across arena+category pairs.
+          items:
+            $ref: '#/components/schemas/DABenchmarkEntry'
+          type: array
+      required:
+        - design_arena
+      type: object
+    ModelGroup:
+      description: Tokenizer type used by the model
+      enum:
+        - Router
+        - Media
+        - Other
+        - GPT
+        - Claude
+        - Gemini
+        - Gemma
+        - Grok
+        - Cohere
+        - Nova
+        - Qwen
+        - Yi
+        - DeepSeek
+        - Mistral
+        - Llama2
+        - Llama3
+        - Llama4
+        - PaLM
+        - RWKV
+        - Qwen3
+      type: string
+    ModelLinks:
+      description: Related API endpoints and resources for this model.
+      properties:
+        details:
+          description: URL for the model details/endpoints API
+          type: string
+      required:
+        - details
+      type: object
+    ModelReasoning:
+      description: >-
+        Reasoning effort configuration. Omitted for non-reasoning models and
+        dynamic router models.
+      properties:
+        default_effort:
+          allOf:
+            - $ref: '#/components/schemas/ReasoningEffort'
+            - description: >-
+                Default reasoning effort when the client enables reasoning
+                without specifying effort. Maps to `reasoning.effort` in chat
+                requests. When `"none"`, prefer omitting effort unless the user
+                explicitly disables reasoning.
+        default_enabled:
+          description: >-
+            Default reasoning enabled state when the client does not set
+            `reasoning.enabled`.
+          type: boolean
+        mandatory:
+          description: >-
+            When true, reasoning cannot be disabled and effort "none" is
+            rejected.
+          type: boolean
+        supported_efforts:
+          description: >-
+            Allowed reasoning effort values for this model, in descending effort
+            order (highest first). Null means no allowlist — all gateway effort
+            values are accepted.
+          items:
+            $ref: '#/components/schemas/ReasoningEffort'
+          type:
+            - array
+            - 'null'
+        supports_max_tokens:
+          description: >-
+            Present and `true` when the model accepts `reasoning.max_tokens` in
+            requests (Anthropic-style) instead of or in addition to
+            `reasoning.effort`. Omitted otherwise.
+          type: boolean
+      required:
+        - mandatory
+      type: object
+    OutputModality:
+      enum:
+        - text
+        - image
+        - embeddings
+        - audio
+        - video
+        - rerank
+        - decisions
+        - speech
+        - transcription
+      type: string
+    Parameter:
+      enum:
+        - temperature
+        - top_p
+        - top_k
+        - min_p
+        - top_a
+        - frequency_penalty
+        - presence_penalty
+        - repetition_penalty
+        - max_tokens
+        - max_completion_tokens
+        - logit_bias
+        - logprobs
+        - top_logprobs
+        - prediction
+        - seed
+        - response_format
+        - structured_outputs
+        - stop
+        - tools
+        - tool_choice
+        - parallel_tool_calls
+        - include_reasoning
+        - reasoning
+        - reasoning_effort
+        - web_search_options
+        - verbosity
+      type: string
+    PerRequestLimits:
+      description: Per-request token limits
+      properties:
+        completion_tokens:
+          description: Maximum completion tokens per request
+          type: number
+        prompt_tokens:
+          description: Maximum prompt tokens per request
+          type: number
+      required:
+        - prompt_tokens
+        - completion_tokens
+      type:
+        - object
+        - 'null'
+    PricingOverride:
+      description: >-
+        A conditional override of the base pricing. An entry applies only when
+        all of its condition fields (e.g. min_prompt_tokens, or the
+        utc_start/utc_end time window) match the request; among applicable
+        entries, later entries win per price key; price keys absent from an
+        entry inherit the base price.
+      properties:
+        audio:
+          description: Overridden price in USD per audio input token
+          type: string
+        completion:
+          description: Overridden price in USD per token for completion (output) generation
+          type: string
+        input_audio_cache:
+          description: Overridden price in USD per cached audio input token
+          type: string
+        input_cache_read:
+          description: Overridden price in USD per cached input token (read)
+          type: string
+        input_cache_write:
+          description: Overridden price in USD per cache-write token
+          type: string
+        input_cache_write_1h:
+          description: Overridden price in USD per 1-hour cache-write token
+          type: string
+        min_prompt_tokens:
+          description: >-
+            Condition: the entry applies when the total prompt tokens of a
+            request are strictly greater than this threshold
+          format: double
+          type: number
+        prompt:
+          description: Overridden price in USD per token for prompt (input) processing
+          type: string
+        utc_days:
+          description: >-
+            Condition: UTC weekdays the entry applies on, evaluated at the
+            request instant. Scopes the utc_start/utc_end window (or, without a
+            window, the whole UTC day) to the listed days. Absent means every
+            day.
+          items:
+            enum:
+              - monday
+              - tuesday
+              - wednesday
+              - thursday
+              - friday
+              - saturday
+              - sunday
+            type: string
+          minItems: 1
+          type: array
+        utc_end:
+          description: >-
+            Condition: exclusive end of a daily UTC time window as an HHMM clock
+            number (e.g. 400 = 04:00)
+          format: double
+          type: number
+        utc_start:
+          description: >-
+            Condition: inclusive start of a daily UTC time window as an HHMM
+            clock number (e.g. 100 = 01:00, 1030 = 10:30). The entry applies
+            while the current UTC time is inside the half-open window
+            [utc_start, utc_end), which may wrap past midnight (utc_start >
+            utc_end).
+          format: double
+          type: number
+      type: object
+    TopProviderInfo:
+      description: Information about the top provider for this model
+      properties:
+        context_length:
+          description: Context length from the top provider
+          type:
+            - integer
+            - 'null'
+        is_moderated:
+          description: Whether the top provider moderates content
+          type: boolean
+        max_completion_tokens:
+          description: >-
+            Maximum completion tokens from the top provider. Input and output
+            tokens share the context window, so the effective maximum output for
+            a request is further limited by the context remaining after input
+            tokens.
+          type:
+            - integer
+            - 'null'
+      required:
+        - is_moderated
+      type: object
+    AABenchmarkEntry:
+      description: Artificial Analysis benchmark index scores.
+      properties:
+        agentic_index:
+          description: Artificial Analysis Agentic Index score
+          format: double
+          type:
+            - number
+            - 'null'
+        coding_index:
+          description: Artificial Analysis Coding Index score
+          format: double
+          type:
+            - number
+            - 'null'
+        intelligence_index:
+          description: Artificial Analysis Intelligence Index score
+          format: double
+          type:
+            - number
+            - 'null'
+      required:
+        - intelligence_index
+        - coding_index
+        - agentic_index
+      type: object
+    BadRequestResponseErrorData:
+      description: Error data for BadRequestResponse
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+        metadata:
+          additionalProperties: {}
+          type:
+            - object
+            - 'null'
+      required:
+        - code
+        - message
+      type: object
+    DABenchmarkEntry:
+      description: A single Design Arena benchmark entry for a specific arena+category
+      properties:
+        arena:
+          description: Arena type (e.g. models, builders, agents)
+          type: string
+        category:
+          description: Category within the arena (e.g. website, gamedev, uicomponent)
+          type: string
+        elo:
+          description: ELO rating from head-to-head arena battles
+          format: double
+          type: number
+        rank:
+          description: >-
+            Rank position within this arena+category among models available on
+            OpenRouter (1 = highest ELO)
+          type: integer
+        win_rate:
+          description: Win rate percentage in arena battles
+          format: double
+          type: number
+      required:
+        - arena
+        - category
+        - elo
+        - win_rate
+        - rank
+      type: object
+    ForbiddenResponseErrorData:
+      description: Error data for ForbiddenResponse
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+        metadata:
+          additionalProperties: {}
+          type:
+            - object
+            - 'null'
+      required:
+        - code
+        - message
+      type: object
+    InternalServerResponseErrorData:
+      description: Error data for InternalServerResponse
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+        metadata:
+          additionalProperties: {}
+          type:
+            - object
+            - 'null'
+      required:
+        - code
+        - message
+      type: object
+    ReasoningEffort:
+      enum:
+        - max
+        - xhigh
+        - high
+        - medium
+        - low
+        - minimal
+        - none
+        - null
+      type:
+        - string
+        - 'null'

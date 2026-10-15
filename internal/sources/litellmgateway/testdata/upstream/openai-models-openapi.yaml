@@ -5,9 +5,21 @@
 # Extraction date: 2026-10-09
 # SPDX licence: MIT
 # Copyright holder: OpenAI
-# Changes: provenance header added by Epitrop; extracted /models path and ListModelsResponse/Model schema blocks
+# Changes: provenance header added by Epitrop; extracted info, /models path and ListModelsResponse/Model schema blocks, with every schema they reference
 
 openapi: 3.1.0
+info:
+  title: OpenAI API
+  description: The OpenAI REST API. Please see
+    https://platform.openai.com/docs/api-reference for more details.
+  version: 2.3.0
+  termsOfService: https://openai.com/policies/terms-of-use
+  contact:
+    name: OpenAI Support
+    url: https://help.openai.com/
+  license:
+    name: MIT
+    identifier: MIT
 paths:
   /models:
     get:
@@ -78,3 +90,77 @@ components:
         - object
         - created
         - owned_by
+    PermissionErrorResponse:
+      type: object
+      properties:
+        error:
+          description: Details about the permission error.
+          anyOf:
+            - $ref: "#/components/schemas/Error"
+            - type: string
+              description: An explanation of the missing API permissions.
+      required:
+        - error
+    Error:
+      type: object
+      properties:
+        code:
+          anyOf:
+            - type: string
+            - type: "null"
+        message:
+          type: string
+        param:
+          anyOf:
+            - type: string
+            - type: "null"
+        type:
+          type: string
+        misalignment:
+          $ref: "#/components/schemas/MisalignmentErrorDetailsResource"
+      required:
+        - type
+        - message
+        - param
+        - code
+    MisalignmentErrorDetailsResource:
+      properties:
+        review_target:
+          anyOf:
+            - not:
+                pattern: "[^A-Za-z0-9._~:-]"
+              type: string
+              maxLength: 96
+              minLength: 1
+              pattern: ^[A-Za-z0-9._~:-]+$
+              description: An opaque target for explicitly continuing this review, or null
+                when unavailable.
+            - type: "null"
+        error_type:
+          $ref: "#/components/schemas/_MisalignmentErrorType"
+          description: An optional classification; clients must accept additional values.
+        detailed_explanation:
+          type: string
+          description: The public explanation for this block.
+        steer:
+          $ref: "#/components/schemas/_MisalignmentSteer"
+          description: An optional public continuation instruction.
+      type: object
+      required: []
+    _MisalignmentErrorType:
+      anyOf:
+        - type: string
+        - type: string
+          enum:
+            - potentially_unintended_data_transfer
+            - potentially_unintended_data_access
+            - potentially_unintended_destructive_activity
+            - other
+    _MisalignmentSteer:
+      properties:
+        message:
+          type: string
+          description: The public continuation instruction.
+      type: object
+      required:
+        - message

@@ -113,27 +113,6 @@ linters:
       - path: ^internal/egressproxy/ends_test\.go$
         linters: [gocyclo]
       # category C, expires 2026-10-25, #133
-      - path: ^internal/eventlog/eventlog_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/eventlog/eventlog_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/graph/graph_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/graph/graph_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/graphlog/assign_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/graphlog/assign_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/graphlog/service_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
       - path: ^internal/releasewatch/anonymous_test\.go$
         linters: [gocognit]
       # category C, expires 2026-10-25, #133
@@ -239,15 +218,6 @@ linters:
       - path: ^internal/supervisor/trigger_test\.go$
         linters: [gocyclo]
       # category C, expires 2026-10-25, #133
-      - path: ^internal/telemetry/telemetry_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/units/checkpoint_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/units/preempt_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
       - path: ^internal/units/reducer\.go$
         linters: [gocyclo]
       # category C, expires 2026-10-25, #133
@@ -255,12 +225,6 @@ linters:
         linters: [gocognit]
       # category C, expires 2026-10-25, #133
       - path: ^internal/units/service\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/units/units_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/units/units_test\.go$
         linters: [gocyclo]
 issues:
   max-issues-per-linter: 0

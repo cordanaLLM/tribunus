@@ -80,14 +80,20 @@ func ValidateRelease(payload ReleasePayload) error {
 // AssignRefusal says why the run record st cannot open unit id, or nil. A unit that was
 // landed or dropped may be assigned again; an open one may not.
 func AssignRefusal(st eventlog.State, id string) error {
-	unit, exists := st.Units[id]
-	if exists && !IsTerminalStatus(unit.Status) {
+	if assignAllowed(st, id) {
+		return nil
+	}
+	if unit, exists := st.Units[id]; exists {
 		return fmt.Errorf("units: %s is already open in status %s", id, unit.Status)
 	}
-	if !exists && len(st.Units) >= MaxUnits {
-		return fmt.Errorf("units: record already holds %d units", MaxUnits)
+	return fmt.Errorf("units: record already holds %d units", MaxUnits)
+}
+
+func assignAllowed(st eventlog.State, id string) bool {
+	if unit, exists := st.Units[id]; exists {
+		return IsTerminalStatus(unit.Status)
 	}
-	return nil
+	return len(st.Units) < MaxUnits
 }
 
 // ReleaseTarget returns the open unit assigned from node, and refuses a node no open unit
@@ -114,7 +120,7 @@ func reduceUnitAssigned(st eventlog.State, rec eventlog.Record) (eventlog.State,
 	if err := ValidateAssign(rec.TaskID, payload); err != nil {
 		return eventlog.State{}, fmt.Errorf("eventlog: seq %d: %w", rec.Seq, err)
 	}
-	if AssignRefusal(st, rec.TaskID) != nil {
+	if !assignAllowed(st, rec.TaskID) {
 		st.UnitRecordsIgnored++
 		return st, nil
 	}

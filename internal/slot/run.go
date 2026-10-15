@@ -143,6 +143,9 @@ type Report struct {
 	Result    *Evidence  `json:"result,omitempty"`
 	Evidence  []Evidence `json:"evidence,omitempty"`
 	Questions []string   `json:"questions,omitempty"`
+	// Binds are what the job's sandbox made visible to the job, as its configuration names
+	// them; none for a job that does not tell.
+	Binds []Bind `json:"binds,omitempty"`
 }
 
 // Taken reports whether the run left a result the runner took.
@@ -184,6 +187,7 @@ func Run(ctx context.Context, req RunRequest) (rep Report, err error) {
 	if err != nil {
 		return Report{}, errors.Join(err, removeWorkspace(ws.Dir), removeOut(req.Out))
 	}
+	report.Binds = jobBinds(job)
 	u, err := rec.Show(ctx, req.Unit)
 	if err != nil {
 		return report, fmt.Errorf("slot: read unit %s before start: %w", req.Unit, err)
@@ -347,7 +351,7 @@ func TakeUp(ctx context.Context, req TakeUpRequest) (rep Report, err error) {
 		}
 	}
 	ws := Workspace{Dir: start.Workspace, Branch: start.Branch, Base: start.Base}
-	report := Report{Unit: start.Unit, Workspace: ws.Dir, Branch: ws.Branch, Base: ws.Base}
+	report := Report{Unit: start.Unit, Workspace: ws.Dir, Branch: ws.Branch, Base: ws.Base, Binds: jobBinds(job)}
 	end, err := job.Wait(ctx)
 	if err != nil {
 		return report, fmt.Errorf("slot: wait for the job of %s; the unit stays %s: %w", start.Unit, graph.StatusImplementing, err)
@@ -367,7 +371,7 @@ func takeAndFinish(ctx context.Context, rec UnitRecorder, req RunRequest, ws Wor
 		return finish(ctx, rec, req, report)
 	}
 	if err = take(ctx, req, ws, &report); err != nil {
-		report = Report{Unit: req.Unit, Workspace: ws.Dir, Branch: ws.Branch, Base: ws.Base, Job: &end}
+		report = Report{Unit: req.Unit, Workspace: ws.Dir, Branch: ws.Branch, Base: ws.Base, Job: &end, Binds: report.Binds}
 		report.Outcome, report.Reason = OutcomeNotTaken, err.Error()
 	}
 	return finish(ctx, rec, req, report)
@@ -431,7 +435,7 @@ func take(ctx context.Context, req RunRequest, ws Workspace, report *Report) err
 	if err != nil {
 		return err
 	}
-	head, err := stageBranch(ctx, req.Repo, ws, result.Head)
+	head, err := stageBranch(ctx, req.Repo, ws, result.Head, readOnlyFiles(report.Binds))
 	if err != nil {
 		return errors.Join(fmt.Errorf("%w: %w", ErrResult, err), dropStaged(ctx, req.Repo, ws))
 	}

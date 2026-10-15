@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -73,6 +74,9 @@ func buildSandboxCommand(command []string, sandbox config.SandboxConfig, opts sa
 		return jobCommand{}, err
 	}
 	if err = validateSandboxProxy(sandbox, opts.Proxy); err != nil {
+		return jobCommand{}, err
+	}
+	if err = prepareHome(sandbox, opts.Until); err != nil {
 		return jobCommand{}, err
 	}
 	inner := bwrapArgs(resolvedCommand, command, sandbox, tools, opts.Proxy)
@@ -219,7 +223,13 @@ func validateSandboxRuntimePaths(sandbox config.SandboxConfig, paths sandboxPath
 			return fmt.Errorf("sandbox: workspace overlaps protected path %s", protected[i])
 		}
 	}
-	return validateSandboxInputs(sandbox.Inputs, protected)
+	if sandbox.Home == nil {
+		return validateSandboxInputs(sandbox.Inputs, protected)
+	}
+	if pathOverlapsSandbox(sandbox.Workspace, sandbox.Home.Source) {
+		return fmt.Errorf("sandbox: home source %s overlaps the workspace", sandbox.Home.Source)
+	}
+	return validateSandboxInputs(append(slices.Clone(sandbox.Inputs), sandbox.Home.Source), protected)
 }
 
 func validateSandboxInputs(inputs []string, protected []string) error {
@@ -354,6 +364,7 @@ func bwrapArgs(commandPath string, command []string, sandbox config.SandboxConfi
 	args := bwrapBaseArgs(tools.Bwrap, sandbox)
 	args = append(args, "--bind", sandbox.Workspace, sandbox.Workspace)
 	args = appendInputBinds(args, sandbox.Inputs)
+	args = appendHomeArgs(args, sandbox)
 	args = append(args, "--ro-bind", commandPath, commandPath, "--chdir", sandbox.Workspace)
 	args = append(args, "--setenv", "PATH", "/usr/bin:/bin", "--setenv", "HOME", sandbox.Workspace, "--setenv", "TMPDIR", "/tmp")
 	for i := 0; i < len(busEnvNames); i++ {

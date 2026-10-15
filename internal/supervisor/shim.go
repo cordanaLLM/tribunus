@@ -80,14 +80,23 @@ func parseShimArgs(args []string) (shimConfig, error) {
 	fs.StringVar(&cfg.Sandbox.MemoryHigh, "sandbox-memory-high", "", "")
 	fs.IntVar(&cfg.Sandbox.CPUWeight, "sandbox-cpu-weight", 0, "")
 	fs.IntVar(&cfg.Sandbox.TasksMax, "sandbox-tasks-max", 0, "")
+	var home homeFlags
+	fs.StringVar(&home.source, "sandbox-home-source", "", "")
+	fs.StringVar(&home.env, "sandbox-home-env", "", "")
+	fs.Var((*stringListFlag)(&home.copies), "sandbox-home-copy", "")
+	fs.Var((*stringListFlag)(&home.binds), "sandbox-home-bind", "")
 	if err := fs.Parse(args); err != nil {
 		return shimConfig{}, fmt.Errorf("job-shim: parse: %w", err)
+	}
+	var err error
+	if cfg.Sandbox.Home, err = home.home(); err != nil {
+		return shimConfig{}, err
 	}
 	cfg.Command = fs.Args()
 	if len(cfg.Command) > 0 && cfg.Command[0] == "--" {
 		cfg.Command = cfg.Command[1:]
 	}
-	if err := checkShimConfig(cfg); err != nil {
+	if err = checkShimConfig(cfg); err != nil {
 		return shimConfig{}, err
 	}
 	return cfg, nil
@@ -177,11 +186,7 @@ func stopAtDeadline(cfg shimConfig, pid int) error {
 // scope. After any error the job is not running: one that had started is killed with its
 // process group.
 func startConfirmedJob(ctx context.Context, cfg shimConfig, proxy sandboxProxy, logFile *os.File) (*exec.Cmd, string, error) {
-	command, err := buildJobCommand(cfg.Command, cfg.Sandbox, sandboxBuildOptions{
-		Paths: sandboxPaths{EventLogDir: cfg.EventLogDir, SigningKey: cfg.SigningKey},
-		Env:   os.LookupEnv,
-		Proxy: proxy,
-	})
+	command, err := buildJobCommand(cfg.Command, cfg.Sandbox, shimBuildOptions(cfg, proxy, time.Now()))
 	if err != nil {
 		return nil, "", fmt.Errorf("job-shim: sandbox %s: %w", cfg.Name, err)
 	}
@@ -206,6 +211,26 @@ func startConfirmedJob(ctx context.Context, cfg shimConfig, proxy sandboxProxy, 
 		return nil, "", killAndCollect(cmd, err)
 	}
 	return cmd, started, nil
+}
+
+// shimBuildOptions are the options the shim builds a job's command with, for a start at now.
+func shimBuildOptions(cfg shimConfig, proxy sandboxProxy, now time.Time) sandboxBuildOptions {
+	return sandboxBuildOptions{
+		Paths: sandboxPaths{EventLogDir: cfg.EventLogDir, SigningKey: cfg.SigningKey},
+		Env:   os.LookupEnv,
+		Proxy: proxy,
+		Until: latestEnd(cfg, now),
+	}
+}
+
+// latestEnd is the latest time a job started at now can still run: its deadline, or the
+// longest any job may run, plus its stop grace.
+func latestEnd(cfg shimConfig, now time.Time) time.Time {
+	runtime := cfg.MaxRuntimeSeconds
+	if runtime == 0 {
+		runtime = config.MaxJobRuntimeSeconds
+	}
+	return now.Add(time.Duration(runtime+cfg.StopGraceSeconds) * time.Second)
 }
 
 func openAppendLog(path string) (*os.File, error) {

@@ -45,6 +45,16 @@ jobs:
       # memory_high: 1536M
       cpu_weight: 100
       tasks_max: 512
+      # A coding client's home, made fresh in <workspace>/.slot/home before each start
+      # (ADR-0009). The source lies in a root and is none of the operator's login folders;
+      # copy files must hash as named, bind files are bound read-only one by one. A bind's
+      # jwt names the token whose expiry must lie 10 minutes past max_runtime_seconds and the
+      # stop grace; a home needs max_runtime_seconds.
+      #   home:
+      #     source: /var/tmp/slot-home
+      #     env: CODEX_HOME
+      #     copy: [{file: config.toml, sha256: <64 hex>}]
+      #     bind: [{file: auth.json, jwt: tokens.access_token}]
   # An event-triggered job starts once per matching record in the event log:
   # - name: notify-on-sync
   #   command: [/usr/local/bin/epitropctl, notify]

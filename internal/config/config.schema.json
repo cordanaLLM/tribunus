@@ -283,6 +283,73 @@
                 "default": 512,
                 "minimum": 16,
                 "maximum": 32768
+              },
+              "home": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "source",
+                  "env"
+                ],
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "env": {
+                    "type": "string",
+                    "pattern": "^[A-Z_][A-Z0-9_]*$"
+                  },
+                  "copy": {
+                    "type": "array",
+                    "default": [],
+                    "maxItems": 8,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "file",
+                        "sha256"
+                      ],
+                      "properties": {
+                        "file": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "sha256": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        }
+                      }
+                    }
+                  },
+                  "bind": {
+                    "type": "array",
+                    "default": [],
+                    "maxItems": 8,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "file"
+                      ],
+                      "properties": {
+                        "file": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "jwt": {
+                          "type": "string",
+                          "default": "",
+                          "maxLength": 520
+                        }
+                      }
+                    }
+                  }
+                }
               }
             }
           }

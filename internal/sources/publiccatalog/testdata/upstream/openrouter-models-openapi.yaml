@@ -5,7 +5,7 @@
 # Extraction date: 2026-10-09
 # SPDX licence: MIT
 # Copyright holder: OpenRouter
-# Changes: provenance header added by Epitrop; extracted info, getModels path and model schema blocks, with every schema they reference
+# Changes: provenance header added by Epitrop; extracted info, servers, the Models tag, getModels path and model schema blocks, with every schema they reference
 
 openapi: 3.1.0
 info:
@@ -19,6 +19,13 @@ info:
     url: https://opensource.org/licenses/MIT
   title: OpenRouter API
   version: 1.0.0
+servers:
+  - description: Production server
+    url: https://openrouter.ai/api/v1
+    x-speakeasy-server-id: production
+tags:
+  - description: Model information endpoints
+    name: Models
 paths:
   /models:
     get:

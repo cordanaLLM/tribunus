@@ -10,7 +10,7 @@
       "fragments": [
         {
           "path": "internal/sources/litellmgateway/testdata/upstream/openai-models-openapi.yaml",
-          "body_sha256": "9faec20af7022946b4149309afaa787ee9291325972588b533fc7bccd41c2ce6"
+          "body_sha256": "af8b75a2f28e842a0433213750f784d7734018608c6ed1da60ce1f42ea880a0a"
         }
       ]
     },
@@ -40,7 +40,7 @@
       "fragments": [
         {
           "path": "internal/sources/publiccatalog/testdata/upstream/openrouter-models-openapi.yaml",
-          "body_sha256": "36939018bd263cd9695092bccbb353df54a22c7b7cc84e26537cec8a178ea482"
+          "body_sha256": "5966a492d5c6011a9a190cc2cb2a9efecfa6ad11d5ff77ccdd3b9e36230e7fc3"
         }
       ]
     },

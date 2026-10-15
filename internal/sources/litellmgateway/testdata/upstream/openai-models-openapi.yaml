@@ -5,7 +5,7 @@
 # Extraction date: 2026-10-09
 # SPDX licence: MIT
 # Copyright holder: OpenAI
-# Changes: provenance header added by Epitrop; extracted info, /models path and ListModelsResponse/Model schema blocks, with every schema they reference
+# Changes: provenance header added by Epitrop; extracted info, servers, the Models tag, /models path and ListModelsResponse/Model schema blocks, with every schema they reference
 
 openapi: 3.1.0
 info:
@@ -20,6 +20,11 @@ info:
   license:
     name: MIT
     identifier: MIT
+servers:
+  - url: https://api.openai.com/v1
+tags:
+  - name: Models
+    description: List and describe the various models available in the API.
 paths:
   /models:
     get:

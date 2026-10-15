@@ -82,3 +82,5 @@ Releases, their signed artefacts and how to verify them are described in [Releas
 ## Licence
 
 EUPL-1.2, for code and documents alike. See `LICENSE` and `REUSE.toml`.
+Third-party code that `epitropctl` includes, with the notice each licence asks to carry, is listed in
+`NOTICE.md`.

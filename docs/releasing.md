@@ -10,7 +10,7 @@ The flow follows Praetor's: the same GoReleaser layout, `changelog.d/` fragments
 
 | Asset | Content |
 | --- | --- |
-| `epitropctl_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows) | the binary for linux, darwin and windows on amd64 and arm64, with `README.md` and the licences |
+| `epitropctl_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows) | the binary for linux, darwin and windows on amd64 and arm64, with `README.md`, the licences and `NOTICE.md` (third-party notices) |
 | `<archive>.cyclonedx.json` | a CycloneDX SBOM for each archive (syft) |
 | `checksums.txt`, `checksums.txt.sigstore.json` | SHA-256 of every archive, every SBOM and the snapshot schema, and the keyless cosign bundle of that list |
 | `snapshot.schema.json` | the snapshot contract this release writes (`catalog/snapshot.schema.json`, `schema_version` 1) |

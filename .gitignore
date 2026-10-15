@@ -3,6 +3,9 @@ bin/
 *.out
 .DS_Store
 
+# npm installs of the locked tools (tools/markdownlint, tools/spectral)
+node_modules/
+
 # BEGIN praetor private artifacts (praetorctl adopt)
 .workingdir/
 .workingdir2/

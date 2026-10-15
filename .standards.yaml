@@ -68,14 +68,6 @@ exceptions:
   # Dated gaps for declared linters that no workflow runs (praetorctl audit, declared-linters).
   # gitleaks runs in ci.yml and needs no entry.
   - rule: declared-linters
-    tool: gocognit
-    reason: eight functions exceed the HISS-04 caps (three cognitive); the linter is enabled with their refactor (#133)
-    expires: "2027-01-11"
-  - rule: declared-linters
-    tool: gocyclo
-    reason: eight functions exceed the HISS-04 caps (five cyclomatic); the linter is enabled with their refactor (#133)
-    expires: "2027-01-11"
-  - rule: declared-linters
     tool: semgrep
     reason: the fleet semgrep rule set (praetor .config/semgrep/hiss-invariants.yml at b161971b437e) has no Go rule, so a job here would match nothing; gosec and golangci-lint run in ci.yml
     expires: "2027-01-11"

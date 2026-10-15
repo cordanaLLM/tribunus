@@ -122,6 +122,23 @@ jobs:
         run: bash tools/linterselftest/selftest.sh semgrep
       - name: semgrep scan
         run: semgrep scan --config .config/semgrep/hiss.yml --error --metrics=off --disable-version-check .
+      # spectral, declared by the api:public-contract facet, lints the OpenAPI snapshots under
+      # internal/sources/*/testdata/upstream with .spectral.yaml; warnings fail too. The CLI is
+      # locked in tools/spectral; the self-test plants a document without info and with a
+      # dangling reference and must see both reported.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tools/spectral/package-lock.json
+      - name: Install spectral
+        run: npm ci --ignore-scripts --no-audit --no-fund --prefix tools/spectral
+      - name: spectral self-test (planted findings must fail)
+        run: bash tools/linterselftest/selftest.sh spectral
+      - name: spectral lint
+        run: >-
+          tools/spectral/node_modules/.bin/spectral lint -F warn --ruleset .spectral.yaml
+          'internal/sources/*/testdata/upstream/*-openapi.yaml'
       # trivy, declared by the framework profile: misconfiguration and secret scans of the tree.
       # The release tarball is pinned by its sha256 from the upstream checksums file; the
       # self-test plants a HIGH Dockerfile finding and a CRITICAL token and must see both.

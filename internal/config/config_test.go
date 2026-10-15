@@ -976,3 +976,30 @@ func TestValidateNtfySink(t *testing.T) {
 		}
 	}
 }
+
+// Both limits are required, each within the bounds a sandbox's limits keep.
+func TestCheckMemoryLimits(t *testing.T) {
+	cases := []struct {
+		max, high, want string
+	}{
+		{"64M", "64M", ""},
+		{"2G", "1536M", ""},
+		{"64G", "64G", ""},
+		{"512M", "", "memory_high: is required"},
+		{"", "256M", "memory_max: is required"},
+		{"63M", "63M", "memory_max: must be 64M..64G"},
+		{"65G", "64G", "memory_max: must be 64M..64G"},
+		{"128M", "65535K", "memory_high: must be 64M..memory_max"},
+		{"128M", "129M", "memory_high: must be 64M..memory_max"},
+		{"128M", "lots", "memory_high: must be positive systemd size"},
+	}
+	for _, tc := range cases {
+		err := CheckMemoryLimits(tc.max, tc.high)
+		if tc.want == "" && err != nil {
+			t.Errorf("CheckMemoryLimits(%q, %q) = %v, want nil", tc.max, tc.high, err)
+		}
+		if tc.want != "" && (err == nil || err.Error() != tc.want) {
+			t.Errorf("CheckMemoryLimits(%q, %q) = %v, want %q", tc.max, tc.high, err, tc.want)
+		}
+	}
+}

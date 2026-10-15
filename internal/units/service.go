@@ -142,13 +142,7 @@ func (s *Service) appendChecked(ctx context.Context, build func(eventlog.State) 
 // Record appends one status record and returns the unit as it stands after it.
 func (s *Service) Record(ctx context.Context, id string, payload RecordPayload) (u eventlog.Unit, err error) {
 	ctx, span := telemetry.Default().StartSpan(ctx, "units.record", attribute.String("epitrop.unit", id))
-	defer func() {
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-		}
-		span.End()
-	}()
+	defer func() { finishSpan(span, err) }()
 	if err = readyContext(ctx, "record"); err != nil {
 		return eventlog.Unit{}, err
 	}
@@ -162,16 +156,33 @@ func (s *Service) Record(ctx context.Context, id string, payload RecordPayload) 
 	if err != nil {
 		return eventlog.Unit{}, fmt.Errorf("units: marshal payload: %w", err)
 	}
+	return s.appendUnitEvent(ctx, span, id, func(st eventlog.State) (eventlog.Event, bool, error) {
+		existing, exists := st.Units[id]
+		if valErr := validateRecordState(st, id, payload.Status, payload.Reopen); valErr != nil {
+			return eventlog.Event{}, false, valErr
+		}
+		changed := !exists || existing.Status != payload.Status
+		return eventlog.Event{Type: "unit.recorded", TaskID: id, Payload: body}, changed, nil
+	})
+}
+
+// finishSpan records a failed call's error on its span and ends the span.
+func finishSpan(span trace.Span, err error) {
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+	span.End()
+}
+
+// appendUnitEvent appends the event build returns and returns the unit as it stands after
+// it. A checkpoint follows when build reports that the unit's status changed.
+func (s *Service) appendUnitEvent(ctx context.Context, span trace.Span, id string, build func(eventlog.State) (eventlog.Event, bool, error)) (eventlog.Unit, error) {
 	var statusChanged bool
 	st, rec, recHash, err := s.appendCheckedRecord(ctx, func(st eventlog.State) (eventlog.Event, error) {
-		existing, exists := st.Units[id]
-		if !exists || existing.Status != payload.Status {
-			statusChanged = true
-		}
-		if valErr := validateRecordState(st, id, payload.Status, payload.Reopen); valErr != nil {
-			return eventlog.Event{}, valErr
-		}
-		return eventlog.Event{Type: "unit.recorded", TaskID: id, Payload: body}, nil
+		event, changed, buildErr := build(st)
+		statusChanged = changed
+		return event, buildErr
 	})
 	if err != nil {
 		return eventlog.Unit{}, err
@@ -200,13 +211,7 @@ func (s *Service) writeCheckpointSafe(ctx context.Context, span trace.Span, seq 
 // Preempt marks an active unit as preempted with a reason and actor.
 func (s *Service) Preempt(ctx context.Context, id string, reason string, by string) (u eventlog.Unit, err error) {
 	ctx, span := telemetry.Default().StartSpan(ctx, "units.preempt", attribute.String("epitrop.unit", id))
-	defer func() {
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-		}
-		span.End()
-	}()
+	defer func() { finishSpan(span, err) }()
 	if err = readyContext(ctx, "preempt"); err != nil {
 		return eventlog.Unit{}, err
 	}
@@ -217,30 +222,26 @@ func (s *Service) Preempt(ctx context.Context, id string, reason string, by stri
 	if err != nil {
 		return eventlog.Unit{}, fmt.Errorf("units: marshal preempt payload: %w", err)
 	}
-	var statusChanged bool
-	st, rec, recHash, err := s.appendCheckedRecord(ctx, func(st eventlog.State) (eventlog.Event, error) {
-		existing, exists := st.Units[id]
-		if !exists {
-			return eventlog.Event{}, fmt.Errorf("units: unit %q does not exist", id)
-		}
-		if valErr := transitionRefusal(existing.Status, string(graph.StatusBlocked), false); valErr != nil {
-			if IsTerminalStatus(existing.Status) {
-				return eventlog.Event{}, fmt.Errorf("units: %q is %s; cannot preempt", id, existing.Status)
-			}
-			return eventlog.Event{}, fmt.Errorf("units: %q: %w", id, valErr)
-		}
-		if existing.Status != string(graph.StatusBlocked) {
-			statusChanged = true
-		}
-		return eventlog.Event{Type: "unit.preempted", TaskID: id, Payload: body}, nil
+	return s.appendUnitEvent(ctx, span, id, func(st eventlog.State) (eventlog.Event, bool, error) {
+		return preemptEvent(st, id, body)
 	})
-	if err != nil {
-		return eventlog.Unit{}, err
+}
+
+// preemptEvent builds the preemption event of an active unit and reports whether it changes
+// the unit's status.
+func preemptEvent(st eventlog.State, id string, body []byte) (eventlog.Event, bool, error) {
+	existing, exists := st.Units[id]
+	if !exists {
+		return eventlog.Event{}, false, fmt.Errorf("units: unit %q does not exist", id)
 	}
-	if statusChanged {
-		s.writeCheckpointSafe(ctx, span, rec.Seq, recHash, st)
+	if valErr := transitionRefusal(existing.Status, string(graph.StatusBlocked), false); valErr != nil {
+		if IsTerminalStatus(existing.Status) {
+			return eventlog.Event{}, false, fmt.Errorf("units: %q is %s; cannot preempt", id, existing.Status)
+		}
+		return eventlog.Event{}, false, fmt.Errorf("units: %q: %w", id, valErr)
 	}
-	return st.Units[id], nil
+	changed := existing.Status != string(graph.StatusBlocked)
+	return eventlog.Event{Type: "unit.preempted", TaskID: id, Payload: body}, changed, nil
 }
 
 func validateRecordState(st eventlog.State, id string, status string, reopen bool) error {

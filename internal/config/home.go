@@ -72,20 +72,30 @@ func validateSandboxHome(sandbox SandboxConfig) error {
 	if len(home.Bind) == 0 && len(home.Copy) == 0 {
 		return fmt.Errorf("home: names no file to copy or bind")
 	}
+	names, err := homeFileNames(home)
+	if err != nil {
+		return err
+	}
+	return validateHomeNames(names)
+}
+
+// homeFileNames checks each copy's digest and each bind's token path and returns the file
+// names of both lists, copies first.
+func homeFileNames(home *SandboxHome) ([]string, error) {
 	names := make([]string, 0, len(home.Copy)+len(home.Bind))
 	for i := 0; i < len(home.Copy); i++ {
 		if !homeSHA256.MatchString(home.Copy[i].SHA256) {
-			return fmt.Errorf("home.copy/%d.sha256: not 64 lowercase hex digits", i)
+			return nil, fmt.Errorf("home.copy/%d.sha256: not 64 lowercase hex digits", i)
 		}
 		names = append(names, home.Copy[i].File)
 	}
 	for i := 0; i < len(home.Bind); i++ {
 		if home.Bind[i].JWT != "" && !homeJWTPath.MatchString(home.Bind[i].JWT) {
-			return fmt.Errorf("home.bind/%d.jwt: %q is no dotted path of 1..8 names", i, home.Bind[i].JWT)
+			return nil, fmt.Errorf("home.bind/%d.jwt: %q is no dotted path of 1..8 names", i, home.Bind[i].JWT)
 		}
 		names = append(names, home.Bind[i].File)
 	}
-	return validateHomeNames(names)
+	return names, nil
 }
 
 func validateHomeEnv(name string, allowed []string) error {

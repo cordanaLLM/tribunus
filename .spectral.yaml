@@ -1,0 +1,10 @@
+# spectral, declared by the api:public-contract facet. It lints the OpenAPI snapshots under
+# internal/sources/*/testdata/upstream, so every fixture stays a valid, self-contained document.
+extends: ["spectral:oas"]
+overrides:
+  # category D, expires 2027-02-12: the pinned upstream getModels operation has no description
+  # and the snapshot copies it verbatim; renew or drop when the pin moves.
+  - files:
+      - "internal/sources/publiccatalog/testdata/upstream/openrouter-models-openapi.yaml#/paths/~1models/get"
+    rules:
+      operation-description: "off"

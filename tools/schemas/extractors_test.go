@@ -58,6 +58,10 @@ func syntheticOpenRouterDocument(field string) string {
 	return `openapi: 3.1.0
 info:
   version: 1.0.0
+servers:
+  - url: https://api.invalid/api/v1
+tags:
+  - name: Models
 paths:
   /models:
     get:
@@ -199,5 +203,81 @@ func TestRecordDigest(t *testing.T) {
 	changed, err := recordDigest(&moved, doc, true)
 	if err != nil || !changed || moved.FullDocumentSHA256 != current {
 		t.Fatalf("repin: changed=%v err=%v digest=%q, want the new digest recorded", changed, err, moved.FullDocumentSHA256)
+	}
+}
+
+const referencingDocument = `openapi: 3.1.0
+info:
+  title: Synthetic
+  version: 1.0.0
+servers:
+  - url: https://api.invalid/v1
+tags:
+  - name: Chat
+    description: Chat endpoints.
+  - name: Models
+    description: Model endpoints.
+paths: {}
+components:
+  schemas:
+    Top:
+      $ref: "#/components/schemas/Middle"
+    Middle:
+      type: object
+      properties:
+        leaf:
+          $ref: "#/components/schemas/Leaf"
+        self:
+          $ref: "#/components/schemas/Middle"
+    Leaf:
+      type: string
+      example: dropped
+`
+
+func TestWithReferencedSchemasAddsTheTransitiveClosure(t *testing.T) {
+	fragment := "openapi: 3.1.0\ncomponents:\n  schemas:\n    Top:\n      $ref: \"#/components/schemas/Middle\"\n"
+	got, err := withReferencedSchemas(referencingDocument, fragment)
+	if err != nil {
+		t.Fatalf("withReferencedSchemas = %v", err)
+	}
+	if len(missingSchemas(got)) != 0 {
+		t.Fatalf("references still unresolved: %v\n%s", missingSchemas(got), got)
+	}
+	for _, name := range []string{"    Middle:\n", "    Leaf:\n"} {
+		if strings.Count(got, name) != 1 {
+			t.Errorf("want %q exactly once:\n%s", name, got)
+		}
+	}
+	if strings.Contains(got, "example:") {
+		t.Errorf("added schema kept its example:\n%s", got)
+	}
+}
+
+func TestWithReferencedSchemasRefusesAMissingSchema(t *testing.T) {
+	fragment := "components:\n  schemas:\n    Top:\n      $ref: \"#/components/schemas/Absent\"\n"
+	if _, err := withReferencedSchemas(referencingDocument, fragment); err == nil {
+		t.Fatal("withReferencedSchemas accepted a reference the document does not define")
+	}
+}
+
+func TestWithReferencedSchemasKeepsACompleteFragment(t *testing.T) {
+	fragment := "components:\n  schemas:\n    Leaf:\n      type: string\n"
+	got, err := withReferencedSchemas(referencingDocument, fragment)
+	if err != nil || got != fragment {
+		t.Fatalf("withReferencedSchemas = %q, %v; want the fragment unchanged", got, err)
+	}
+}
+
+func TestDocumentHeadTakesOnlyTheModelsTag(t *testing.T) {
+	got, err := documentHead(referencingDocument)
+	if err != nil {
+		t.Fatalf("documentHead = %v", err)
+	}
+	want := "openapi: 3.1.0\ninfo:\n  title: Synthetic\n  version: 1.0.0\nservers:\n  - url: https://api.invalid/v1\ntags:\n  - name: Models\n    description: Model endpoints.\n"
+	if got != want {
+		t.Fatalf("documentHead =\n%s\nwant\n%s", got, want)
+	}
+	if _, err := documentHead(strings.Replace(referencingDocument, "name: Models", "name: Other", 1)); err == nil {
+		t.Fatal("documentHead accepted a document without a Models tag")
 	}
 }

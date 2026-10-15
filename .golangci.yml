@@ -59,9 +59,6 @@ linters:
       - path: ^cmd/epitropctl/sync_test\.go$
         linters: [gocyclo]
       # category C, expires 2026-10-25, #133
-      - path: ^cmd/epitropctl/units\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
       - path: ^cmd/epitropctl/units_frontier_test\.go$
         linters: [gocognit]
       # category C, expires 2026-10-25, #133
@@ -77,16 +74,7 @@ linters:
       - path: ^cmd/epitropctl/units_test\.go$
         linters: [gocyclo]
       # category C, expires 2026-10-25, #133
-      - path: ^internal/config/config\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/config/config\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
       - path: ^internal/config/config_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/config/home\.go$
         linters: [gocyclo]
       # category C, expires 2026-10-25, #133
       - path: ^internal/config/home_test\.go$
@@ -237,15 +225,6 @@ linters:
         linters: [gocyclo]
       # category C, expires 2026-10-25, #133
       - path: ^internal/units/preempt_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/units/reducer\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/units/service\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/units/service\.go$
         linters: [gocyclo]
       # category C, expires 2026-10-25, #133
       - path: ^internal/units/units_test\.go$

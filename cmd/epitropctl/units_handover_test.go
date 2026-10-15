@@ -28,13 +28,25 @@ func captureHandover(t *testing.T, args ...string) (string, error) {
 func TestRunUnitsHandoverEndToEnd(t *testing.T) {
 	cfgPath, _ := writeUnitsConfig(t)
 	dir := t.TempDir()
+	id := "tekmora/epitrop#5"
+	reportPath := setupHandoverRecords(t, cfgPath, dir, id)
+	answers := filepath.Join(dir, "answers.tsv")
+	if err := os.WriteFile(answers, []byte("epitrop-licence\tEUPL-1.2\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(answers) = %v", err)
+	}
+	resume := filepath.Join(dir, "resume.md")
+	checkHandoverRounds(t, cfgPath, answers, resume, id, reportPath)
+	checkHandoverResumeNote(t, resume)
+}
+
+func setupHandoverRecords(t *testing.T, cfgPath string, dir string, id string) string {
+	t.Helper()
 	report := []byte(`{"unit":"tekmora/epitrop#5","outcome":"blocked","summary":"needs a name","questions":["DECISION epitrop-name: which","ASK epitrop-licence: which"]}` + "\n")
 	reportPath := filepath.Join(dir, slot.ReportFile)
 	if err := os.WriteFile(reportPath, report, 0o600); err != nil {
 		t.Fatalf("WriteFile(report) = %v", err)
 	}
 	sum := sha256.Sum256(report)
-	id := "tekmora/epitrop#5"
 	steps := [][]string{
 		{"set", "--config=" + cfgPath, id, "--status=implementing", "--lane=slot-1"},
 		{"set", "--config=" + cfgPath, id, "--status=blocked", "--evidence=" + reportPath + " sha256:" + hex.EncodeToString(sum[:]) + " lines:1"},
@@ -46,11 +58,11 @@ func TestRunUnitsHandoverEndToEnd(t *testing.T) {
 			t.Fatalf("runUnits(%q) = %v", steps[i], err)
 		}
 	}
-	answers := filepath.Join(dir, "answers.tsv")
-	if err := os.WriteFile(answers, []byte("epitrop-licence\tEUPL-1.2\n"), 0o600); err != nil {
-		t.Fatalf("WriteFile(answers) = %v", err)
-	}
-	resume := filepath.Join(dir, "resume.md")
+	return reportPath
+}
+
+func checkHandoverRounds(t *testing.T, cfgPath string, answers string, resume string, id string, reportPath string) {
+	t.Helper()
 	for round := 0; round < 2; round++ {
 		out, err := captureHandover(t, "--config="+cfgPath, "--repo=tekmora/epitrop", "--answers="+answers, "--resume-out="+resume)
 		if err != nil {
@@ -62,6 +74,10 @@ func TestRunUnitsHandoverEndToEnd(t *testing.T) {
 			t.Fatalf("round %d printed %q, want one unit with its one pending decision and one unread note", round, out)
 		}
 	}
+}
+
+func checkHandoverResumeNote(t *testing.T, resume string) {
+	t.Helper()
 	note, err := os.ReadFile(resume)
 	if err != nil || !strings.Contains(string(note), `- pending decision: "epitrop-name"`) || !strings.Contains(string(note), `"see the ledger"`) {
 		t.Fatalf("resume.md = %q, %v; want the pending decision and the unread note", note, err)

@@ -119,6 +119,13 @@ func TestSlotRunTakesTheWorkOfASandboxedRun(t *testing.T) {
 	}
 	branch := slot.Branch(slotTestUnit)
 	head := slotGit(t, run.repo, "rev-parse", "refs/heads/"+branch)
+	checkSandboxedRunReport(t, report, head)
+	checkSandboxedRunArtifacts(t, run, head, branch, printed)
+	checkSandboxedRunUnitAndStatus(t, run, branch)
+}
+
+func checkSandboxedRunReport(t *testing.T, report slot.Report, head string) {
+	t.Helper()
 	if report.Outcome != slot.OutcomeDone || report.Status != "review" || report.Head != head || !report.Published {
 		t.Fatalf("report = %+v, want a done run published at %s", report, head)
 	}
@@ -128,6 +135,10 @@ func TestSlotRunTakesTheWorkOfASandboxedRun(t *testing.T) {
 	if want := "brief starts with # Unit; wrote outside the workspace: no"; report.Summary != want {
 		t.Fatalf("summary = %q, want %q: the run reads its inputs and cannot leave its workspace", report.Summary, want)
 	}
+}
+
+func checkSandboxedRunArtifacts(t *testing.T, run slotRun, head string, branch string, printed string) {
+	t.Helper()
 	if _, statErr := os.Lstat(filepath.Join(run.outside, "escaped")); !os.IsNotExist(statErr) {
 		t.Fatalf("the run wrote outside its workspace (%v)", statErr)
 	}
@@ -143,6 +154,10 @@ func TestSlotRunTakesTheWorkOfASandboxedRun(t *testing.T) {
 	if err != nil || string(copied) != "ok 1\nok 2\n" {
 		t.Fatalf("evidence copy = %q, %v; want what the run wrote", copied, err)
 	}
+}
+
+func checkSandboxedRunUnitAndStatus(t *testing.T, run slotRun, branch string) {
+	t.Helper()
 	unit := slotUnit(t, run)
 	if unit.Status != "review" || unit.Branch != branch || unit.Worktree != run.workspace || unit.Evidence == nil || unit.Evidence.Path != filepath.Join(run.out, slot.ReportFile) {
 		t.Fatalf("unit = %+v, want review with the branch, the workspace and a pointer to the report", unit)
@@ -174,24 +189,34 @@ func TestSlotRunRefusesWhatASandboxedRunLeft(t *testing.T) {
 	}
 	for i := 0; i < len(cases); i++ {
 		t.Run(cases[i].name, func(t *testing.T) {
-			run := newSandboxedSlotRun(t, cases[i].script, cases[i].deadline)
-			before := slotGit(t, run.repo, "for-each-ref")
-			printed, report, err := runSandboxed(t, run)
-			if err == nil || !strings.Contains(err.Error(), "not-taken") || !strings.Contains(err.Error(), cases[i].want) {
-				t.Fatalf("slot run = %v, want it to fail as not-taken with %q", err, cases[i].want)
-			}
-			if report.Outcome != slot.OutcomeNotTaken || report.Status != "blocked" || report.Published || report.Job == nil || report.Job.Reason != cases[i].end {
-				t.Fatalf("report = %+v with job end %+v, want not-taken, blocked, job reason %q", report, report.Job, cases[i].end)
-			}
-			if !strings.Contains(printed, "unit\t"+slotTestUnit+"\tblocked\tnot-taken\n") || !strings.Contains(printed, "reason\t") {
-				t.Fatalf("printed %q, want the blocked unit and the reason", printed)
-			}
-			if after := slotGit(t, run.repo, "for-each-ref"); after != before {
-				t.Fatalf("refs = %q, want them unchanged %q", after, before)
-			}
-			if unit := slotUnit(t, run); unit.Status != "blocked" || unit.Evidence == nil {
-				t.Fatalf("unit = %+v, want blocked with a pointer to the report", unit)
-			}
+			checkSlotRunRefusedCase(t, cases[i].script, cases[i].deadline, cases[i].want, cases[i].end)
 		})
+	}
+}
+
+func checkSlotRunRefusedCase(t *testing.T, script string, deadline int, want string, end string) {
+	t.Helper()
+	run := newSandboxedSlotRun(t, script, deadline)
+	before := slotGit(t, run.repo, "for-each-ref")
+	printed, report, err := runSandboxed(t, run)
+	if err == nil || !strings.Contains(err.Error(), "not-taken") || !strings.Contains(err.Error(), want) {
+		t.Fatalf("slot run = %v, want it to fail as not-taken with %q", err, want)
+	}
+	if report.Outcome != slot.OutcomeNotTaken || report.Status != "blocked" || report.Published || report.Job == nil || report.Job.Reason != end {
+		t.Fatalf("report = %+v with job end %+v, want not-taken, blocked, job reason %q", report, report.Job, end)
+	}
+	checkSlotRunRefusedOutputAndRefs(t, printed, run, before)
+}
+
+func checkSlotRunRefusedOutputAndRefs(t *testing.T, printed string, run slotRun, before string) {
+	t.Helper()
+	if !strings.Contains(printed, "unit\t"+slotTestUnit+"\tblocked\tnot-taken\n") || !strings.Contains(printed, "reason\t") {
+		t.Fatalf("printed %q, want the blocked unit and the reason", printed)
+	}
+	if after := slotGit(t, run.repo, "for-each-ref"); after != before {
+		t.Fatalf("refs = %q, want them unchanged %q", after, before)
+	}
+	if unit := slotUnit(t, run); unit.Status != "blocked" || unit.Evidence == nil {
+		t.Fatalf("unit = %+v, want blocked with a pointer to the report", unit)
 	}
 }

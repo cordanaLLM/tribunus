@@ -59,15 +59,25 @@ func TestStartOnceRefusesWhatStartRefuses(t *testing.T) {
 func TestRecordedTellsHowAJobEnded(t *testing.T) {
 	job := testJob("once", []string{os.Args[0], "-test.run=TestHelperProcessJob"})
 	sup := testSupervisor(t, job)
+	checkRecordedBeforeStart(t, sup)
+	t.Setenv("EPITROP_TEST_JOB", "exit-7")
+	if err := sup.StartOnce(testContext(t), "once"); err != nil {
+		t.Fatalf("StartOnce() = %v, want nil", err)
+	}
+	waitForState(t, sup, "once", StateDead)
+	checkRecordedAfterExit(t, sup)
+}
+
+func checkRecordedBeforeStart(t *testing.T, sup *Supervisor) {
+	t.Helper()
 	before, err := sup.Recorded(testContext(t), "once")
 	if err != nil || before.LastEvent != "" || before.Since != "" {
 		t.Fatalf("Recorded(never started) = %+v, %v; want an empty record", before, err)
 	}
-	t.Setenv("EPITROP_TEST_JOB", "exit-7")
-	if err = sup.StartOnce(testContext(t), "once"); err != nil {
-		t.Fatalf("StartOnce() = %v, want nil", err)
-	}
-	waitForState(t, sup, "once", StateDead)
+}
+
+func checkRecordedAfterExit(t *testing.T, sup *Supervisor) {
+	t.Helper()
 	if !waitUntil(func() bool {
 		rec, recErr := sup.Recorded(testContext(t), "once")
 		return recErr == nil && rec.LastEvent == "job.exited"

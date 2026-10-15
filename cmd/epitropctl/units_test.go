@@ -145,6 +145,12 @@ func TestRunUnitsDispatchEndToEnd(t *testing.T) {
 		t.Fatalf("runUnits note: %v", err)
 	}
 
+	checkUnitsDispatchReviewAndInbox(t, cfgPath, id)
+	checkUnitsDispatchLandingAndResume(t, cfgPath, id)
+}
+
+func checkUnitsDispatchReviewAndInbox(t *testing.T, cfgPath string, id string) {
+	t.Helper()
 	setOut := captureStdoutUnits(t, func() {
 		reviewArgs := []string{id, "--status=review", "--config=" + cfgPath}
 		if err := runUnits(append([]string{"set"}, reviewArgs...)); err != nil {
@@ -164,7 +170,10 @@ func TestRunUnitsDispatchEndToEnd(t *testing.T) {
 	if !strings.Contains(inboxOut, `from reviewer: "first note for agent"`) {
 		t.Fatalf("inbox output = %q, want note 1 printed", inboxOut)
 	}
+}
 
+func checkUnitsDispatchLandingAndResume(t *testing.T, cfgPath string, id string) {
+	t.Helper()
 	landingOut := captureStdoutUnits(t, func() {
 		landingArgs := []string{id, "--status=landing", "--config=" + cfgPath}
 		if err := runUnits(append([]string{"set"}, landingArgs...)); err != nil {
@@ -181,6 +190,11 @@ func TestRunUnitsDispatchEndToEnd(t *testing.T) {
 			t.Fatalf("runUnits resume: %v", err)
 		}
 	})
+	checkUnitsDispatchResumeOutput(t, resumeOut, id)
+}
+
+func checkUnitsDispatchResumeOutput(t *testing.T, resumeOut string, id string) {
+	t.Helper()
 	if !strings.Contains(resumeOut, "id\tstatus\tupdated_at\tworktree\tbranch\tpr\tlane\trelaunch") {
 		t.Fatalf("resume header missing in: %q", resumeOut)
 	}
@@ -204,6 +218,12 @@ func TestRunUnitsSetRecordsAnEvidencePointer(t *testing.T) {
 	if err := runUnits([]string{"set", "--config=" + cfgPath, id, "--status=implementing"}); err != nil {
 		t.Fatalf("runUnits set: %v", err)
 	}
+	checkUnitsSetEvidenceRefusal(t, cfgPath, id)
+	checkUnitsSetEvidencePreserved(t, cfgPath, id)
+}
+
+func checkUnitsSetEvidenceRefusal(t *testing.T, cfgPath string, id string) {
+	t.Helper()
 	err := runUnits([]string{"set", "--config=" + cfgPath, id, "--status=review", "--evidence=out/result.json sha256:nothex lines:3"})
 	if err == nil || !strings.Contains(err.Error(), "evidence sha256 must be") {
 		t.Fatalf("runUnits set (malformed evidence) = %v, want the digest refusal", err)
@@ -216,11 +236,15 @@ func TestRunUnitsSetRecordsAnEvidencePointer(t *testing.T) {
 	if strings.Contains(before, `"evidence"`) || !strings.Contains(before, `"status": "implementing"`) && !strings.Contains(before, `"status":"implementing"`) {
 		t.Fatalf("show after a refused set = %s, want the unit unchanged and without evidence", before)
 	}
+}
+
+func checkUnitsSetEvidencePreserved(t *testing.T, cfgPath string, id string) {
+	t.Helper()
 	pointer := "--evidence=.workingdir/evidence/unit 22.md sha256:0123456789ab lines:57"
-	if err = runUnits([]string{"set", "--config=" + cfgPath, id, "--status=review", pointer}); err != nil {
+	if err := runUnits([]string{"set", "--config=" + cfgPath, id, "--status=review", pointer}); err != nil {
 		t.Fatalf("runUnits set (evidence): %v", err)
 	}
-	if err = runUnits([]string{"set", "--config=" + cfgPath, id, "--status=review", "--lane=orchestrator"}); err != nil {
+	if err := runUnits([]string{"set", "--config=" + cfgPath, id, "--status=review", "--lane=orchestrator"}); err != nil {
 		t.Fatalf("runUnits set (no evidence): %v", err)
 	}
 	after := captureStdoutUnits(t, func() {
@@ -253,6 +277,14 @@ func TestRunUnitsIdentityFromFileAndStdin(t *testing.T) {
 	if err := runUnits([]string{"set", fromStdin, "--status=ready", "--config=" + cfgPath, "--identity", "-"}); err != nil {
 		t.Fatalf("units set --identity -: %v", err)
 	}
+	checkUnitsIdentityShow(t, cfgPath, fromFile, fromStdin, key)
+	if err := runUnits([]string{"set", "tekmora/epitrop#3", "--status=ready", "--config=" + cfgPath, "--identity=" + filepath.Join(t.TempDir(), "missing.json")}); err == nil {
+		t.Fatal("units set with a missing identity file = nil, want an error")
+	}
+}
+
+func checkUnitsIdentityShow(t *testing.T, cfgPath string, fromFile string, fromStdin string, key string) {
+	t.Helper()
 	for _, id := range []string{fromFile, fromStdin} {
 		out := captureStdoutUnits(t, func() {
 			if err := runUnits([]string{"show", id, "--config=" + cfgPath}); err != nil {
@@ -270,9 +302,6 @@ func TestRunUnitsIdentityFromFileAndStdin(t *testing.T) {
 	})
 	if !strings.Contains(out, `"identity_key": "`+key+`"`) || !strings.Contains(out, `"target": "cordana/coding"`) {
 		t.Fatalf("show = %s, want identity_key and target as given", out)
-	}
-	if err := runUnits([]string{"set", "tekmora/epitrop#3", "--status=ready", "--config=" + cfgPath, "--identity=" + filepath.Join(t.TempDir(), "missing.json")}); err == nil {
-		t.Fatal("units set with a missing identity file = nil, want an error")
 	}
 }
 
@@ -310,6 +339,18 @@ func TestRunUnitsResumeReportsIgnoredRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
+	appendRacingUnitRecord(ctx, t, cfg, stateDir, id)
+	out, warning := captureResumeWarningAndOutput(t, cfgPath)
+	if !strings.Contains(string(warning), "did not apply 1 unit records") {
+		t.Fatalf("stderr = %q, want the ignored record reported", warning)
+	}
+	if strings.Contains(out, id) {
+		t.Fatalf("resume = %q, want the landed unit still not listed", out)
+	}
+}
+
+func appendRacingUnitRecord(ctx context.Context, t *testing.T, cfg config.Config, stateDir string, id string) {
+	t.Helper()
 	clk := clockwork.NewRealClock()
 	signer, err := eventlog.NewSignerFromKeyFile(ctx, cfg.EventLog.SigningKeyPath, stateDir, clk)
 	if err != nil {
@@ -322,6 +363,10 @@ func TestRunUnitsResumeReportsIgnoredRecords(t *testing.T) {
 	if _, err = writer.Append(ctx, eventlog.Event{Type: "unit.recorded", TaskID: id, Payload: []byte(`{"status":"implementing"}`)}); err != nil {
 		t.Fatalf("Append(racing record): %v", err)
 	}
+}
+
+func captureResumeWarningAndOutput(t *testing.T, cfgPath string) (string, []byte) {
+	t.Helper()
 	oldStderr := os.Stderr
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -341,12 +386,7 @@ func TestRunUnitsResumeReportsIgnoredRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadAll(stderr): %v", err)
 	}
-	if !strings.Contains(string(warning), "did not apply 1 unit records") {
-		t.Fatalf("stderr = %q, want the ignored record reported", warning)
-	}
-	if strings.Contains(out, id) {
-		t.Fatalf("resume = %q, want the landed unit still not listed", out)
-	}
+	return out, warning
 }
 
 func TestRunUnitsSetNamesTheMissingStatus(t *testing.T) {
@@ -362,18 +402,7 @@ func TestRunUnitsResumeWithStartFileEvidence(t *testing.T) {
 	idWithStart := "tekmora/epitrop#10"
 	idWithoutStart := "tekmora/epitrop#11"
 
-	outDir := filepath.Join(t.TempDir(), "out")
-	if err := os.MkdirAll(outDir, 0o750); err != nil {
-		t.Fatalf("MkdirAll(outDir): %v", err)
-	}
-	startBody := []byte("{\n  \"unit\": \"" + idWithStart + "\",\n  \"workspace\": \"/workspaces/slot-ws\",\n  \"branch\": \"unit/takeup\",\n  \"base\": \"abcd1234\",\n  \"job\": \"slot-harness\",\n  \"prepared_at\": \"2026-10-14T10:00:00Z\"\n}\n")
-	startPath := filepath.Join(outDir, slot.StartFile)
-	if err := os.WriteFile(startPath, startBody, 0o600); err != nil {
-		t.Fatalf("WriteFile(start.json): %v", err)
-	}
-	h := sha256.Sum256(startBody)
-	digest := hex.EncodeToString(h[:])
-	pointer := fmt.Sprintf("%s sha256:%s lines:8", startPath, digest)
+	outDir, pointer := setupStartFileEvidence(t, idWithStart)
 
 	setArgs1 := []string{"set", idWithStart, "--status=implementing", "--evidence=" + pointer, "--config=" + cfgPath}
 	if err := runUnits(setArgs1); err != nil {
@@ -390,6 +419,28 @@ func TestRunUnitsResumeWithStartFileEvidence(t *testing.T) {
 		}
 	})
 
+	checkResumeWithStartOutput(t, out, outDir, idWithStart, idWithoutStart)
+}
+
+func setupStartFileEvidence(t *testing.T, idWithStart string) (string, string) {
+	t.Helper()
+	outDir := filepath.Join(t.TempDir(), "out")
+	if err := os.MkdirAll(outDir, 0o750); err != nil {
+		t.Fatalf("MkdirAll(outDir): %v", err)
+	}
+	startBody := []byte("{\n  \"unit\": \"" + idWithStart + "\",\n  \"workspace\": \"/workspaces/slot-ws\",\n  \"branch\": \"unit/takeup\",\n  \"base\": \"abcd1234\",\n  \"job\": \"slot-harness\",\n  \"prepared_at\": \"2026-10-14T10:00:00Z\"\n}\n")
+	startPath := filepath.Join(outDir, slot.StartFile)
+	if err := os.WriteFile(startPath, startBody, 0o600); err != nil {
+		t.Fatalf("WriteFile(start.json): %v", err)
+	}
+	h := sha256.Sum256(startBody)
+	digest := hex.EncodeToString(h[:])
+	pointer := fmt.Sprintf("%s sha256:%s lines:8", startPath, digest)
+	return outDir, pointer
+}
+
+func checkResumeWithStartOutput(t *testing.T, out string, outDir string, idWithStart string, idWithoutStart string) {
+	t.Helper()
 	wantTakeUp := fmt.Sprintf("no: take up with slot resume --out %s (job slot-harness, workspace /workspaces/slot-ws)", outDir)
 	if !strings.Contains(out, idWithStart) || !strings.Contains(out, wantTakeUp) {
 		t.Fatalf("resume output = %q, want take up relaunch text %q", out, wantTakeUp)

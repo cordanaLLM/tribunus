@@ -58,6 +58,7 @@ func runSlotRun(args []string) error {
 		workspace: fs.String("workspace", "", "directory to make the run's workspace in; it must not exist"),
 		out:       fs.String("out", "", "directory for the run's report, result and evidence; it must not exist"),
 	}
+	detach := fs.Bool("detach", false, "start the run as a systemd user service of its own and return")
 	pos, err := parseInterspersedFlags(fs, args)
 	if err != nil {
 		return err
@@ -65,6 +66,9 @@ func runSlotRun(args []string) error {
 	req, err := slotRunRequest(f, pos)
 	if err != nil {
 		return err
+	}
+	if *detach {
+		return detachSlotRun(f, req)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), slotRunTimeout)
 	defer cancel()

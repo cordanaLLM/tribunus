@@ -30,6 +30,7 @@ const (
 	MaxStopGraceSeconds     = 300
 	MaxJobRuntimeSeconds    = 365 * 24 * 3600
 	MaxSandboxInputs        = 32
+	MaxSandboxInputRoots    = 32
 	MaxSandboxEnvAllow      = 64
 	MaxReleaseWatchRoutes   = 32
 	MaxReleaseWatchSources  = 16
@@ -107,6 +108,9 @@ type Config struct {
 	Admission    AdmissionConfig    `koanf:"admission" json:"admission"`
 	EventLog     EventLogConfig     `koanf:"event_log" json:"event_log"`
 	ReleaseWatch ReleaseWatchConfig `koanf:"release_watch" json:"release_watch"`
+	// SandboxInputRoots are the directories a sandboxed job's workspace and inputs must lie
+	// in once symlinks are resolved. With none, no job runs sandboxed.
+	SandboxInputRoots []string `koanf:"sandbox_input_roots" json:"sandbox_input_roots"`
 }
 
 type ReleaseWatchConfig struct {
@@ -267,6 +271,7 @@ func Default() Config {
 			PerSourceCap:     DefaultPerSourceCap,
 			Routes:           []ReleaseWatchRoute{},
 		},
+		SandboxInputRoots: []string{},
 	}
 }
 
@@ -677,6 +682,20 @@ func resolveSandboxInputs(paths []string, guard protectedPaths) ([]string, error
 type protectedPaths struct {
 	paths []string
 	home  string
+	// roots are the resolved sandbox_input_roots: the only directories a workspace or an
+	// input may lie in.
+	roots []string
+}
+
+// loginLocations are the places below HOME where shells, forges, clouds and coding clients
+// keep their logins. They are the second barrier behind the roots: a workspace or input
+// that overlaps one is refused, unless a root names that very location, which then opens
+// that location alone. A root that merely contains one opens none of it.
+var loginLocations = []string{
+	".ssh", ".gnupg", ".netrc", ".git-credentials", ".config/git/credentials", ".config/gh",
+	".docker", ".aws", ".azure", ".config/gcloud", ".kube", ".password-store", ".pki",
+	".local/share/keyrings", ".claude", ".claude.json", ".codex", ".gemini", ".config/opencode",
+	".local/share/opencode",
 }
 
 func anySandboxEnforced(jobs []JobConfig) bool {
@@ -702,7 +721,31 @@ func sandboxPathGuard(cfg Config, configPath string) (protectedPaths, error) {
 	if err != nil {
 		return protectedPaths{}, err
 	}
-	return protectedPaths{paths: paths, home: home}, nil
+	roots, err := resolveInputRoots(cfg.SandboxInputRoots, home)
+	if err != nil {
+		return protectedPaths{}, err
+	}
+	return protectedPaths{paths: paths, home: home, roots: roots}, nil
+}
+
+// resolveInputRoots resolves each root's symlinks. A root has to exist, and neither / nor a
+// directory containing HOME is one: either would open the user's whole home directory.
+func resolveInputRoots(roots []string, home string) ([]string, error) {
+	if len(roots) > MaxSandboxInputRoots {
+		return nil, fmt.Errorf("config: sandbox_input_roots: exceeds %d", MaxSandboxInputRoots)
+	}
+	out := make([]string, 0, len(roots))
+	for i := 0; i < len(roots); i++ {
+		resolved, err := resolveExistingAbs(roots[i])
+		if err != nil {
+			return nil, fmt.Errorf("config: sandbox_input_roots/%d: %w", i, err)
+		}
+		if pathContains(resolved, home) {
+			return nil, fmt.Errorf("config: sandbox_input_roots/%d: refuse %s, it is / or contains HOME %s", i, resolved, home)
+		}
+		out = append(out, resolved)
+	}
+	return out, nil
 }
 
 // sandboxExecutable finds the running Epitrop binary. The supervisor re-executes it as
@@ -741,6 +784,33 @@ func (guard protectedPaths) check(field string, path string) error {
 	for i := 0; i < len(guard.paths); i++ {
 		if pathOverlaps(path, guard.paths[i]) {
 			return fmt.Errorf("%s: overlaps protected path %s", field, guard.paths[i])
+		}
+	}
+	if !guard.inRoot(path) {
+		return fmt.Errorf("%s: %s lies in no sandbox_input_roots entry", field, path)
+	}
+	return guard.checkLogins(field, path)
+}
+
+func (guard protectedPaths) inRoot(path string) bool {
+	for i := 0; i < len(guard.roots); i++ {
+		if pathContains(guard.roots[i], path) {
+			return true
+		}
+	}
+	return false
+}
+
+// checkLogins refuses a path that overlaps a login location, unless the path lies in that
+// location and a root names exactly it.
+func (guard protectedPaths) checkLogins(field string, path string) error {
+	for i := 0; i < len(loginLocations); i++ {
+		login := filepath.Join(guard.home, filepath.FromSlash(loginLocations[i]))
+		if !pathOverlaps(path, login) {
+			continue
+		}
+		if !pathContains(login, path) || !slices.ContainsFunc(guard.roots, func(root string) bool { return samePath(root, login) }) {
+			return fmt.Errorf("%s: %s overlaps the login location %s, which no root names", field, path, login)
 		}
 	}
 	return nil

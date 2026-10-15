@@ -558,6 +558,16 @@
           }
         }
       }
+    },
+    "sandbox_input_roots": {
+      "type": "array",
+      "default": [],
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4096
+      }
     }
   }
 }

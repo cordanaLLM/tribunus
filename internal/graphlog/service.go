@@ -48,6 +48,12 @@ func NewService(dir string, signer *corereceipt.Signer, clk clock.Clock, limits 
 // Replay rebuilds the state the log holds. A log directory without events yet is an empty
 // state, not an error.
 func (s *Service) Replay(ctx context.Context) (eventlog.State, error) {
+	return s.replayWith(ctx, Reducer)
+}
+
+// replayWith replays the log with reducer; a log directory without events yet is an empty
+// state.
+func (s *Service) replayWith(ctx context.Context, reducer eventlog.Reducer) (eventlog.State, error) {
 	if err := readyContext(ctx, "replay"); err != nil {
 		return eventlog.State{}, err
 	}
@@ -57,7 +63,7 @@ func (s *Service) Replay(ctx context.Context) (eventlog.State, error) {
 	} else if err != nil {
 		return eventlog.State{}, fmt.Errorf("graphlog: stat %s: %w", events, err)
 	}
-	return eventlog.ReplayStable(ctx, s.dir, s.signer.PublicKey(), s.limits, Reducer)
+	return eventlog.ReplayStable(ctx, s.dir, s.signer.PublicKey(), s.limits, reducer)
 }
 
 // Show returns the graph the log holds and the number of stages its replay ignored.

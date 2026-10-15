@@ -144,6 +144,19 @@ type Unit struct {
 	ReadUpto      uint64          `json:"read_upto,omitempty"`
 	Evidence      *UnitEvidence   `json:"evidence,omitempty"`
 	Preempted     *UnitPreemption `json:"preempted,omitempty"`
+	// Node is the task graph node the unit was assigned from; empty for a unit recorded
+	// without an assignment.
+	Node string `json:"node,omitempty"`
+	// Released says why an assigned unit was given back to the graph.
+	Released *UnitRelease `json:"released,omitempty"`
+}
+
+// UnitRelease records why a unit's node went back to ready, at which log sequence number
+// and when.
+type UnitRelease struct {
+	Seq    uint64 `json:"seq"`
+	Reason string `json:"reason"`
+	At     string `json:"at"`
 }
 
 // UnitPreemption records why a unit was preempted, at which log sequence number and when.

@@ -44,7 +44,7 @@ var unitsStdin io.Reader = os.Stdin
 
 func runUnits(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("units command required: set, resume, show, note, inbox, preempt, or handover")
+		return fmt.Errorf("units command required: set, resume, show, note, inbox, preempt, handover, frontier, assign, or release")
 	}
 	switch args[0] {
 	case "set":
@@ -61,6 +61,12 @@ func runUnits(args []string) error {
 		return runUnitsPreempt(args[1:])
 	case "handover":
 		return runUnitsHandover(args[1:])
+	case "frontier":
+		return runUnitsFrontier(args[1:])
+	case "assign":
+		return runUnitsAssign(args[1:])
+	case "release":
+		return runUnitsRelease(args[1:])
 	}
 	return fmt.Errorf("unknown units command: %s", args[0])
 }

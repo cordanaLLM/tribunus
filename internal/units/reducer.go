@@ -40,6 +40,10 @@ func UnitReducer(st eventlog.State, rec eventlog.Record) (eventlog.State, error)
 		return reduceUnitNoteRead(st, rec)
 	case "unit.preempted":
 		return reduceUnitPreempted(st, rec)
+	case AssignedType:
+		return reduceUnitAssigned(st, rec)
+	case ReleasedType:
+		return reduceUnitReleased(st, rec)
 	}
 	return eventlog.State{}, fmt.Errorf("eventlog: seq %d: unknown event type %q", rec.Seq, rec.Type)
 }

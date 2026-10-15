@@ -11,6 +11,7 @@ import (
 	"github.com/tekmora/epitrop/internal/config"
 	"github.com/tekmora/epitrop/internal/eventlog"
 	"github.com/tekmora/epitrop/internal/graph"
+	"github.com/tekmora/epitrop/internal/units"
 )
 
 const (
@@ -39,9 +40,16 @@ type StagePayload struct {
 // append-only, so a failure there would stop every later replay for good. Such a stage is
 // not applied and is counted in State.GraphStagesIgnored, the same way on every replay.
 //
+// Two records of the run record move a node as well: unit.assigned takes it from ready to
+// claimed and unit.released back, so that assigning a node and opening its unit is one
+// record (see reduceAssignment).
+//
 // The graph is checked against the hard depth cap, not the configured depth: the configured
 // one binds new writes, and lowering it must not drop what the log already holds.
 func Reducer(st eventlog.State, rec eventlog.Record) (eventlog.State, error) {
+	if rec.Type == units.AssignedType || rec.Type == units.ReleasedType {
+		return reduceAssignment(st, rec)
+	}
 	if !strings.HasPrefix(rec.Type, "graph.") {
 		if eventlog.KnownDomain(rec.Type) {
 			return st, nil

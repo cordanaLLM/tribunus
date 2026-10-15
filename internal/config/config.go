@@ -610,6 +610,16 @@ func validateSandboxLimits(sandbox SandboxConfig) error {
 	return nil
 }
 
+// CheckMemoryLimits checks a hard and a soft memory limit as a sandbox's memory_max and
+// memory_high are checked: the hard limit within 64M..64G, the soft one within 64M and the
+// hard limit. Both are required here; a sandbox may leave its soft limit out.
+func CheckMemoryLimits(memoryMax string, memoryHigh string) error {
+	if memoryHigh == "" {
+		return errors.New("memory_high: is required")
+	}
+	return validateSandboxLimits(SandboxConfig{MemoryMax: memoryMax, MemoryHigh: memoryHigh, CPUWeight: minCPUWeight, TasksMax: minTasksMax})
+}
+
 // validateMemoryHigh checks the soft limit against the hard one. A soft limit above the hard
 // limit would never act; one below the floor of the hard limit would throttle every job.
 func validateMemoryHigh(value string, maxBytes int64) error {

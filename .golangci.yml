@@ -35,46 +35,7 @@ linters:
       - path: ^catalog/imports_test\.go$
         linters: [gocyclo]
       # category C, expires 2026-10-25, #133
-      - path: ^cmd/epitropctl/effects_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^cmd/epitropctl/graph_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^cmd/epitropctl/slot_detach_linux_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^cmd/epitropctl/slot_detach_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^cmd/epitropctl/slot_linux_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^cmd/epitropctl/slot_linux_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^cmd/epitropctl/slot_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^cmd/epitropctl/sync_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
       - path: ^cmd/epitropctl/units\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^cmd/epitropctl/units_frontier_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^cmd/epitropctl/units_frontier_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^cmd/epitropctl/units_handover_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^cmd/epitropctl/units_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^cmd/epitropctl/units_test\.go$
         linters: [gocyclo]
       # category C, expires 2026-10-25, #133
       - path: ^internal/config/config\.go$
@@ -194,49 +155,13 @@ linters:
       - path: ^internal/sources/ollamalocal/source_test\.go$
         linters: [gocognit]
       # category C, expires 2026-10-25, #133
-      - path: ^internal/supervisor/deadline_linux_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/supervisor/egress_linux_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
       - path: ^internal/supervisor/home_linux\.go$
         linters: [gocognit]
       # category C, expires 2026-10-25, #133
       - path: ^internal/supervisor/home_linux\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/supervisor/home_linux_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/supervisor/home_linux_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/supervisor/platform_unix_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/supervisor/refused_linux_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/supervisor/rt03_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/supervisor/scope_linux_test\.go$
-        linters: [gocognit]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/supervisor/scope_linux_test\.go$
         linters: [gocyclo]
       # category C, expires 2026-10-25, #133
       - path: ^internal/supervisor/shim\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/supervisor/startonce_linux_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/supervisor/supervisor_test\.go$
-        linters: [gocyclo]
-      # category C, expires 2026-10-25, #133
-      - path: ^internal/supervisor/trigger_test\.go$
         linters: [gocyclo]
       # category C, expires 2026-10-25, #133
       - path: ^internal/telemetry/telemetry_test\.go$

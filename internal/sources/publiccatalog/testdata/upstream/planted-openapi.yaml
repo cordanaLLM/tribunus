@@ -1,0 +1,9 @@
+openapi: 3.1.0
+info:
+  title: planted
+  version: 0.0.0
+paths: {}
+components:
+  schemas:
+    Planted:
+      $ref: "#/components/schemas/Missing"

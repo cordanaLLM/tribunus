@@ -3,6 +3,16 @@
   "extends": [
     "github>plurano/horistes"
   ],
+  "pip-compile": {
+    "description": "tools/semgrep/requirements.txt is a uv pip compile lock with hashes: Renovate moves semgrep in requirements.in and re-locks, so every transitive pin stays inside semgrep's own ranges",
+    "managerFilePatterns": [
+      "/^tools/semgrep/requirements\\.txt$/"
+    ]
+  },
+  "pip_requirements": {
+    "description": "off: it bumped the lock's transitive pins one by one, past ranges that pip install --no-deps never checks (click ~=8.4.2, exceptiongroup ~=1.2.0, importlib-metadata <8.8.0)",
+    "enabled": false
+  },
   "postUpdateOptions": [
     "gomodTidy"
   ],

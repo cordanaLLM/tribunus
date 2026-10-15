@@ -64,16 +64,22 @@ func prepareHome(sandbox config.SandboxConfig, until time.Time) error {
 	if err != nil {
 		return err
 	}
+	return fillHome(home, dir, until)
+}
+
+// fillHome copies each copy file into the fresh home and puts an empty file where each bind
+// file is bound, after checking that its token outlasts until.
+func fillHome(home *config.SandboxHome, dir string, until time.Time) error {
 	for i := 0; i < len(home.Copy); i++ {
-		if err = copyHomeFile(home.Source, dir, home.Copy[i]); err != nil {
+		if err := copyHomeFile(home.Source, dir, home.Copy[i]); err != nil {
 			return err
 		}
 	}
 	for i := 0; i < len(home.Bind); i++ {
-		if err = checkHomeBind(home.Source, home.Bind[i], until); err != nil {
+		if err := checkHomeBind(home.Source, home.Bind[i], until); err != nil {
 			return err
 		}
-		if err = writeHomeFile(filepath.Join(dir, home.Bind[i].File), nil); err != nil {
+		if err := writeHomeFile(filepath.Join(dir, home.Bind[i].File), nil); err != nil {
 			return err
 		}
 	}
@@ -87,29 +93,39 @@ func freshHomeDir(workspace string) (string, error) {
 	dir := workspace
 	for i := 0; i < len(parts); i++ {
 		dir = filepath.Join(dir, parts[i])
-		info, err := os.Lstat(dir)
-		if errors.Is(err, os.ErrNotExist) {
-			if err = os.Mkdir(dir, 0o700); err != nil {
-				return "", fmt.Errorf("home: %w", err)
-			}
-			continue
-		}
-		if err != nil {
-			return "", fmt.Errorf("home: %w", err)
-		}
-		if !info.IsDir() {
-			return "", fmt.Errorf("home: %s is no directory", dir)
-		}
-		if i == len(parts)-1 {
-			if err = os.RemoveAll(dir); err != nil {
-				return "", fmt.Errorf("home: remove the home of an earlier start: %w", err)
-			}
-			if err = os.Mkdir(dir, 0o700); err != nil {
-				return "", fmt.Errorf("home: %w", err)
-			}
+		if err := homeDirElement(dir, i == len(parts)-1); err != nil {
+			return "", err
 		}
 	}
 	return dir, nil
+}
+
+// homeDirElement makes one directory on the way to the home, or checks that the one there is
+// a real directory. The last element, the home itself, is removed and made again empty.
+func homeDirElement(dir string, last bool) error {
+	info, err := os.Lstat(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		if err = os.Mkdir(dir, 0o700); err != nil {
+			return fmt.Errorf("home: %w", err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("home: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("home: %s is no directory", dir)
+	}
+	if !last {
+		return nil
+	}
+	if err = os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("home: remove the home of an earlier start: %w", err)
+	}
+	if err = os.Mkdir(dir, 0o700); err != nil {
+		return fmt.Errorf("home: %w", err)
+	}
+	return nil
 }
 
 func copyHomeFile(source string, dir string, entry config.SandboxHomeCopy) error {

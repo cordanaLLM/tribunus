@@ -115,19 +115,10 @@ func (s *State) pruneSeenLocked() {
 	}
 }
 
-func writeTempFileAtomically(dir string, filename string, data []byte) (err error) {
-	tempFile, err := os.CreateTemp(dir, filename+".*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temp file in %s: %w", dir, err)
-	}
+// writeSyncClose writes data to the file, flushes it to disk and closes it; the file is
+// closed on every path.
+func writeSyncClose(tempFile *os.File, data []byte) error {
 	tempPath := tempFile.Name()
-	defer func() {
-		if err != nil {
-			if remErr := os.Remove(tempPath); remErr != nil && !os.IsNotExist(remErr) {
-				err = errors.Join(err, remErr)
-			}
-		}
-	}()
 	if _, writeErr := tempFile.Write(data); writeErr != nil {
 		if closeErr := tempFile.Close(); closeErr != nil {
 			return errors.Join(fmt.Errorf("write temp file %s: %w", tempPath, writeErr), closeErr)
@@ -142,6 +133,25 @@ func writeTempFileAtomically(dir string, filename string, data []byte) (err erro
 	}
 	if closeErr := tempFile.Close(); closeErr != nil {
 		return fmt.Errorf("close temp file %s: %w", tempPath, closeErr)
+	}
+	return nil
+}
+
+func writeTempFileAtomically(dir string, filename string, data []byte) (err error) {
+	tempFile, err := os.CreateTemp(dir, filename+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp file in %s: %w", dir, err)
+	}
+	tempPath := tempFile.Name()
+	defer func() {
+		if err != nil {
+			if remErr := os.Remove(tempPath); remErr != nil && !os.IsNotExist(remErr) {
+				err = errors.Join(err, remErr)
+			}
+		}
+	}()
+	if err = writeSyncClose(tempFile, data); err != nil {
+		return err
 	}
 	finalPath := filepath.Join(dir, filename)
 	if renErr := os.Rename(tempPath, finalPath); renErr != nil {

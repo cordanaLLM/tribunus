@@ -18,6 +18,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -317,15 +319,19 @@ func openAIModelsFragment(full string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return joinSections(
-		"openapi: 3.1.0",
+	head, err := documentHead(full)
+	if err != nil {
+		return "", err
+	}
+	return withReferencedSchemas(full, joinSections(
+		head,
 		"paths:",
 		strings.TrimRight(beforeMarker(path, "\n      x-oaiMeta:"), "\n"),
 		"components:",
 		"  schemas:",
 		strings.TrimRight(strings.TrimLeft(list, "\n"), "\n"),
 		strings.TrimRight(strings.TrimLeft(beforeMarker(model, "\n      x-oaiMeta:"), "\n"), "\n"),
-	), nil
+	))
 }
 
 func openRouterFragment(full string) (string, error) {
@@ -357,8 +363,12 @@ func openRouterFragment(full string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return joinSections(
-		"openapi: 3.1.0",
+	head, err := documentHead(doc)
+	if err != nil {
+		return "", err
+	}
+	return withReferencedSchemas(doc, joinSections(
+		head,
 		"paths:",
 		strings.TrimRight(path, "\n"),
 		"components:",
@@ -368,7 +378,102 @@ func openRouterFragment(full string) (string, error) {
 		strings.TrimRight(model, "\n"),
 		strings.TrimRight(arch, "\n"),
 		strings.TrimRight(pricing, "\n"),
-	), nil
+	))
+}
+
+// documentHead returns the openapi line with the document's info and servers blocks and its
+// Models tag, so that an extract is a complete OpenAPI document a linter can read.
+func documentHead(doc string) (string, error) {
+	info, err := extractYAMLBlock(doc, "info:")
+	if err != nil {
+		return "", err
+	}
+	servers, err := extractYAMLBlock(doc, "servers:")
+	if err != nil {
+		return "", err
+	}
+	tag, err := tagItem(doc, "Models")
+	if err != nil {
+		return "", err
+	}
+	return joinSections("openapi: 3.1.0", info, servers, "tags:", tag), nil
+}
+
+// tagItem returns the item of the document's top-level tags list that carries the name.
+func tagItem(doc, name string) (string, error) {
+	tags, err := extractYAMLBlock(doc, "tags:")
+	if err != nil {
+		return "", err
+	}
+	lines := strings.SplitAfter(tags, "\n")
+	starts := make([]int, 0, len(lines))
+	for i := 1; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], "  - ") {
+			starts = append(starts, i)
+		}
+	}
+	starts = append(starts, len(lines))
+	nameLine := regexp.MustCompile(`(?m)^  (- |  )name: ` + regexp.QuoteMeta(name) + `$`)
+	for k := 0; k+1 < len(starts); k++ {
+		item := strings.Join(lines[starts[k]:starts[k+1]], "")
+		if nameLine.MatchString(item) {
+			return item, nil
+		}
+	}
+	return "", fmt.Errorf("missing tag %q", name)
+}
+
+// maxSchemaRounds bounds the rounds that add referenced schemas; the deepest chain in the
+// pinned documents takes three.
+const maxSchemaRounds = 32
+
+var (
+	schemaRef      = regexp.MustCompile(`#/components/schemas/([A-Za-z0-9_.-]+)`)
+	schemaDefining = regexp.MustCompile(`(?m)^    ([A-Za-z0-9_.-]+):$`)
+)
+
+// withReferencedSchemas appends, from the upstream document, every schema the fragment
+// references but does not define, round by round, until each reference resolves.
+func withReferencedSchemas(doc, fragment string) (string, error) {
+	for round := 0; round < maxSchemaRounds; round++ {
+		missing := missingSchemas(fragment)
+		if len(missing) == 0 {
+			return fragment, nil
+		}
+		blocks := make([]string, 0, len(missing)+1)
+		blocks = append(blocks, fragment)
+		for i := 0; i < len(missing); i++ {
+			block, err := extractSchemaBlock(doc, missing[i])
+			if err != nil {
+				return "", err
+			}
+			blocks = append(blocks, strings.TrimRight(beforeMarker(block, "\n      x-oaiMeta:"), "\n"))
+		}
+		fragment = joinSections(blocks...)
+	}
+	return "", fmt.Errorf("schema references still unresolved after %d rounds", maxSchemaRounds)
+}
+
+// missingSchemas returns, sorted, the schema names the fragment references and its
+// components.schemas section does not define.
+func missingSchemas(fragment string) []string {
+	defined := map[string]bool{}
+	if at := strings.Index(fragment, "\n  schemas:\n"); at >= 0 {
+		names := schemaDefining.FindAllStringSubmatch(fragment[at:], -1)
+		for i := 0; i < len(names); i++ {
+			defined[names[i][1]] = true
+		}
+	}
+	var missing []string
+	refs := schemaRef.FindAllStringSubmatch(fragment, -1)
+	for i := 0; i < len(refs); i++ {
+		if !defined[refs[i][1]] {
+			defined[refs[i][1]] = true
+			missing = append(missing, refs[i][1])
+		}
+	}
+	sort.Strings(missing)
+	return missing
 }
 
 func yamlDocument(full string) string {
@@ -599,11 +704,11 @@ func provenanceLines(source schemaSource) []string {
 func extractionChange(id string) string {
 	switch id {
 	case "openai-openapi":
-		return "extracted /models path and ListModelsResponse/Model schema blocks"
+		return "extracted info, servers, the Models tag, /models path and ListModelsResponse/Model schema blocks, with every schema they reference"
 	case "litellm-price-map":
 		return "extracted the sample_spec entry"
 	case "openrouter-models":
-		return "extracted getModels path and model schema blocks"
+		return "extracted info, servers, the Models tag, getModels path and model schema blocks, with every schema they reference"
 	case "ollama-api":
 		return "derived /api/tags and /api/ps response shapes from examples"
 	case "codex-rate-limit-status-payload",

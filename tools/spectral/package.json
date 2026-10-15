@@ -1,0 +1,12 @@
+{
+  "name": "@tekmora/epitrop-spectral",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Locked spectral CLI that lints the repository's OpenAPI snapshots",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "@stoplight/spectral-cli": "6.17.0"
+  }
+}

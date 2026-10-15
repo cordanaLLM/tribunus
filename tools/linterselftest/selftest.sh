@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Plants findings in a temporary directory and requires the named scanner to fail on each,
 # so the tree scan that follows it in ci.yml is proven to catch them.
-# Usage: selftest.sh semgrep   (run from the repository root; reads .config/semgrep/hiss.yml)
+# Usage: selftest.sh semgrep|spectral   (run from the repository root; semgrep reads
+# .config/semgrep/hiss.yml, spectral reads .spectral.yaml and needs tools/spectral installed)
 set -euo pipefail
-tool="${1:?usage: selftest.sh semgrep}"
+tool="${1:?usage: selftest.sh semgrep|spectral}"
 plant="$(mktemp -d)"
 trap 'rm -r "$plant"' EXIT
 log="$plant/scan.log"
@@ -35,6 +36,29 @@ GO
     set +e
     semgrep scan --config .config/semgrep/hiss.yml --error --metrics=off --disable-version-check \
       --json "$plant" > "$log" 2>&1
+    rc=$?
+    set -e
+    ;;
+  spectral)
+    # An OpenAPI document without its required info object and with a reference to a schema it
+    # does not define.
+    cat > "$plant/planted-openapi.yaml" <<'YAML'
+openapi: 3.1.0
+paths:
+  /models:
+    get:
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Missing"
+YAML
+    expected=(oas3-schema invalid-ref)
+    set +e
+    tools/spectral/node_modules/.bin/spectral lint -F warn -f json --ruleset .spectral.yaml \
+      "$plant/planted-openapi.yaml" > "$log" 2>&1
     rc=$?
     set -e
     ;;

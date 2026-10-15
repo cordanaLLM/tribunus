@@ -76,10 +76,6 @@ exceptions:
     reason: eight functions exceed the HISS-04 caps (five cyclomatic); the linter is enabled with their refactor (#133)
     expires: "2027-01-11"
   - rule: declared-linters
-    tool: spectral
-    reason: the repository publishes no OpenAPI or AsyncAPI document; its only OpenAPI files are upstream snapshots under internal/sources/*/testdata
-    expires: "2027-01-11"
-  - rule: declared-linters
     tool: trivy
     reason: the engine's own trivy job is still pending (praetor .standards.yaml declared-linters exception); govulncheck runs VEX-aware in ci.yml; adopt the engine's job when it lands
     expires: "2027-01-11"

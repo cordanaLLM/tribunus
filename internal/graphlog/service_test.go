@@ -89,14 +89,24 @@ func mustCommit(t *testing.T, svc *Service, ops ...graph.Event) graph.Snapshot {
 func TestCommitAppendsOneRecordPerStage(t *testing.T) {
 	dir := t.TempDir()
 	svc := serviceAt(t, dir, 12)
-	if snap, ignored, err := svc.Show(testCtx(t)); err != nil || len(snap.Nodes) != 0 || ignored != 0 {
-		t.Fatalf("Show(no log yet) = %+v, %d, %v; want an empty graph", snap, ignored, err)
-	}
+	checkInitialEmptyShow(t, svc)
 	after := mustCommit(t, svc, addNode("a"), addNode("b"), addEdge("b", "a"))
 	if len(after.Nodes) != 2 || records(t, dir) != 1 {
 		t.Fatalf("after one stage: %d nodes, %d records; want 2 nodes in 1 record", len(after.Nodes), records(t, dir))
 	}
 	mustCommit(t, svc, graph.Event{Type: graph.EventStatusChanged, NodeID: "a", Status: graph.Status{Name: graph.StatusReady}})
+	checkSecondStageShow(t, dir)
+}
+
+func checkInitialEmptyShow(t *testing.T, svc *Service) {
+	t.Helper()
+	if snap, ignored, err := svc.Show(testCtx(t)); err != nil || len(snap.Nodes) != 0 || ignored != 0 {
+		t.Fatalf("Show(no log yet) = %+v, %d, %v; want an empty graph", snap, ignored, err)
+	}
+}
+
+func checkSecondStageShow(t *testing.T, dir string) {
+	t.Helper()
 	snap, ignored, err := serviceAt(t, dir, 12).Show(testCtx(t))
 	if err != nil || ignored != 0 || records(t, dir) != 2 {
 		t.Fatalf("Show() = %v, ignored %d, records %d; want nil, 0 and 2", err, ignored, records(t, dir))
@@ -201,6 +211,11 @@ func TestServiceRefusesWhatItCannotServe(t *testing.T) {
 		t.Errorf("NewService(depth at the cap, no clock) = %v, want nil", err)
 	}
 	svc := serviceAt(t, t.TempDir(), 12)
+	checkServiceContextRefusals(t, svc)
+}
+
+func checkServiceContextRefusals(t *testing.T, svc *Service) {
+	t.Helper()
 	if _, err := svc.Commit(context.Background(), []graph.Event{addNode("a")}); err == nil || !strings.Contains(err.Error(), "graphlog: commit requires a context deadline") {
 		t.Errorf("Commit(no deadline) = %v, want the service to refuse it", err)
 	}

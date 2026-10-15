@@ -72,21 +72,36 @@ func TestSlotRunDetachedOutlivesItsCaller(t *testing.T) {
 	if err != nil {
 		skipWithoutSandbox(t, "the caller's scope or the runner's service did not start", fmt.Sprintf("%v: %s", err, printed))
 	}
-	if want := "service\t" + service + "\n"; !strings.Contains(string(printed), want) {
-		t.Fatalf("slot run --detach printed %q, want %q", printed, want)
-	}
-	if _, statErr := os.Lstat(filepath.Join(run.out, slot.ReportFile)); !os.IsNotExist(statErr) {
-		t.Fatalf("the report stood when the command returned (%v): the caller waited for the run", statErr)
-	}
+	checkDetachedOutputAndReportAbsence(t, printed, service, run.out)
 	waitScopeEnded(ctx, t, caller)
-	limits := systemctlUser(ctx, "show", "--property=MemoryMax", "--property=MemoryHigh", service)
-	if !strings.Contains(limits, "MemoryMax=536870912") || !strings.Contains(limits, "MemoryHigh=402653184") {
-		t.Fatalf("service %s has %q, want MemoryMax=512M and MemoryHigh=384M", service, limits)
-	}
+	checkDetachedServiceLimits(t, ctx, service)
 	report := waitDetachedReport(ctx, t, run.out)
 	if report.Outcome == slot.OutcomeRefused {
 		skipWithoutSandbox(t, "the sandbox did not start", report.Reason)
 	}
+	checkDetachedFinalReport(t, report)
+}
+
+func checkDetachedOutputAndReportAbsence(t *testing.T, printed []byte, service string, runOut string) {
+	t.Helper()
+	if want := "service\t" + service + "\n"; !strings.Contains(string(printed), want) {
+		t.Fatalf("slot run --detach printed %q, want %q", printed, want)
+	}
+	if _, statErr := os.Lstat(filepath.Join(runOut, slot.ReportFile)); !os.IsNotExist(statErr) {
+		t.Fatalf("the report stood when the command returned (%v): the caller waited for the run", statErr)
+	}
+}
+
+func checkDetachedServiceLimits(t *testing.T, ctx context.Context, service string) {
+	t.Helper()
+	limits := systemctlUser(ctx, "show", "--property=MemoryMax", "--property=MemoryHigh", service)
+	if !strings.Contains(limits, "MemoryMax=536870912") || !strings.Contains(limits, "MemoryHigh=402653184") {
+		t.Fatalf("service %s has %q, want MemoryMax=512M and MemoryHigh=384M", service, limits)
+	}
+}
+
+func checkDetachedFinalReport(t *testing.T, report slot.Report) {
+	t.Helper()
 	if report.Outcome != slot.OutcomeDone || report.Status != "review" || !report.Published {
 		t.Fatalf("report = %+v, want a done run published after its caller ended", report)
 	}

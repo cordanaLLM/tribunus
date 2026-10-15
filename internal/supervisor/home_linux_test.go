@@ -102,6 +102,14 @@ func TestPrepareHomeMakesAFreshHome(t *testing.T) {
 	if err := prepareHome(sandbox, until); err != nil {
 		t.Fatalf("prepareHome() = %v, want nil", err)
 	}
+	checkHomeContents(t, dir)
+	if err := prepareHome(config.SandboxConfig{Workspace: sandbox.Workspace}, until); err != nil {
+		t.Errorf("prepareHome(no home) = %v, want nil", err)
+	}
+}
+
+func checkHomeContents(t *testing.T, dir string) {
+	t.Helper()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("ReadDir() = %v, want nil", err)
@@ -118,9 +126,6 @@ func TestPrepareHomeMakesAFreshHome(t *testing.T) {
 	}
 	if info, err := os.Stat(filepath.Join(dir, "auth.json")); err != nil || info.Size() != 0 || info.Mode().Perm() != 0o600 {
 		t.Errorf("auth.json placeholder = %v, %v, want an empty 0600 file the login is bound over", info, err)
-	}
-	if err = prepareHome(config.SandboxConfig{Workspace: sandbox.Workspace}, until); err != nil {
-		t.Errorf("prepareHome(no home) = %v, want nil", err)
 	}
 }
 
@@ -174,21 +179,26 @@ func TestPrepareHomeRefuses(t *testing.T) {
 		}, "home"},
 	}
 	for _, tc := range cases {
-		sandbox := homeTestSandbox(t, tc.exp)
-		if tc.edit != nil {
-			tc.edit(t, sandbox)
-		}
-		err := prepareHome(sandbox, tc.until)
-		if err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("%s: prepareHome() = %v, want an error holding %q", tc.name, err, tc.want)
-		}
-		if err != nil && strings.Contains(err.Error(), "rt-secret-value") {
-			t.Errorf("%s: prepareHome() error carries the refresh token: %v", tc.name, err)
-		}
+		checkPrepareHomeRefusalCase(t, tc.name, tc.exp, tc.until, tc.edit, tc.want)
 	}
 	expired := homeTestSandbox(t, until.Unix())
 	if err := prepareHome(expired, until); !errors.Is(err, errHomeToken) {
 		t.Errorf("prepareHome(expired) = %v, want errHomeToken", err)
+	}
+}
+
+func checkPrepareHomeRefusalCase(t *testing.T, name string, exp int64, until time.Time, edit func(*testing.T, config.SandboxConfig), want string) {
+	t.Helper()
+	sandbox := homeTestSandbox(t, exp)
+	if edit != nil {
+		edit(t, sandbox)
+	}
+	err := prepareHome(sandbox, until)
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("%s: prepareHome() = %v, want an error holding %q", name, err, want)
+	}
+	if err != nil && strings.Contains(err.Error(), "rt-secret-value") {
+		t.Errorf("%s: prepareHome() error carries the refresh token: %v", name, err)
 	}
 }
 

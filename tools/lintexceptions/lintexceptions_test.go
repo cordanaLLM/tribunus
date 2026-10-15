@@ -45,6 +45,23 @@ func TestThisCheckIsItselfCurrent(t *testing.T) {
 	}
 }
 
+func TestCheckAcceptsAnEmptyRulesList(t *testing.T) {
+	config := "linters:\n  exclusions:\n    rules: []\nissues:\n  uniq-by-line: false\n"
+	rules, err := Check(config, day(t, "2026-10-15"))
+	if err != nil || rules != 0 {
+		t.Fatalf("Check = %d, %v; want 0, nil", rules, err)
+	}
+}
+
+func TestCheckRefusesAnIndentedRuleAfterAnEmptyList(t *testing.T) {
+	config := "linters:\n  exclusions:\n    rules: []\n" +
+		"      - path: ^a\\.go$\n" +
+		"        linters: [gocyclo]\n"
+	if _, err := Check(config, day(t, "2026-10-15")); err == nil {
+		t.Fatal("Check accepted a rule without its comment after an empty list")
+	}
+}
+
 func TestCheckAcceptsDatedRules(t *testing.T) {
 	config := header +
 		"      # category C, expires 2026-10-25, #133\n" +

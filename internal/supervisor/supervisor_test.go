@@ -190,6 +190,11 @@ func TestLinuxKilledShimKillsJobBeforeLockFree(t *testing.T) {
 	waitForProcessGone(t, before.PID)
 	waitForUnlock(t, first, job)
 	second := testSupervisorAt(t, base, job)
+	checkReconcileAfterKilledShim(t, base, second, before)
+}
+
+func checkReconcileAfterKilledShim(t *testing.T, base testRuntimeConfig, second *Supervisor, before JobStatus) {
+	t.Helper()
 	if err := second.Reconcile(testContext(t)); err != nil {
 		t.Fatalf("Reconcile(lost) = %v, want nil", err)
 	}
@@ -635,6 +640,12 @@ func TestParseShimArgsStripsSentinelsAndRejectsFields(t *testing.T) {
 		Command:     []string{"/bin/true"},
 		Sandbox:     config.SandboxConfig{Mode: "off", Reason: "unit test"},
 	}
+	checkParseShimArgsCommand(t, base)
+	checkParseShimArgsRejectsMissingFields(t, base)
+}
+
+func checkParseShimArgsCommand(t *testing.T, base shimConfig) {
+	t.Helper()
 	cfg, err := parseShimArgs(shimArgs(t, base))
 	if err != nil || len(cfg.Command) != 1 || cfg.Command[0] != "/bin/true" {
 		t.Fatalf("parseShimArgs(valid) = %+v, %v, want stripped command", cfg, err)
@@ -646,6 +657,10 @@ func TestParseShimArgsStripsSentinelsAndRejectsFields(t *testing.T) {
 	if _, err = parseShimArgs([]string{"-bad"}); err == nil || !strings.Contains(err.Error(), "parse") {
 		t.Fatalf("parseShimArgs(bad flag) = %v, want parse error", err)
 	}
+}
+
+func checkParseShimArgsRejectsMissingFields(t *testing.T, base shimConfig) {
+	t.Helper()
 	tests := []struct {
 		name string
 		cfg  shimConfig
@@ -728,6 +743,21 @@ func TestShimErrorHelpers(t *testing.T) {
 		t.Fatalf("exitCode(plain) = %d, want -1", got)
 	}
 	path := filepath.Join(t.TempDir(), "append.log")
+	checkOpenAppendLogWrites(t, path)
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) = %v, want nil", path, err)
+	}
+	if string(body) != "one\ntwo\n" {
+		t.Fatalf("append log = %q, want both writes", body)
+	}
+	if _, err = openAppendLog(t.TempDir()); err == nil || !strings.Contains(err.Error(), "open log") {
+		t.Fatalf("openAppendLog(directory) = %v, want open error", err)
+	}
+}
+
+func checkOpenAppendLogWrites(t *testing.T, path string) {
+	t.Helper()
 	first, err := openAppendLog(path)
 	if err != nil {
 		t.Fatalf("openAppendLog(first) = %v, want nil", err)
@@ -747,16 +777,6 @@ func TestShimErrorHelpers(t *testing.T) {
 	}
 	if err = second.Close(); err != nil {
 		t.Fatalf("Close(second) = %v, want nil", err)
-	}
-	body, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("ReadFile(%s) = %v, want nil", path, err)
-	}
-	if string(body) != "one\ntwo\n" {
-		t.Fatalf("append log = %q, want both writes", body)
-	}
-	if _, err = openAppendLog(t.TempDir()); err == nil || !strings.Contains(err.Error(), "open log") {
-		t.Fatalf("openAppendLog(directory) = %v, want open error", err)
 	}
 }
 
@@ -1009,6 +1029,12 @@ func TestStartStatusStopReconcileErrorPaths(t *testing.T) {
 	if err := os.WriteFile(bad.cfg.EventLog.Dir, []byte("file"), 0o600); err != nil {
 		t.Fatalf("WriteFile(state-file) = %v, want nil", err)
 	}
+	checkBadEventLogDirErrorPaths(t, bad)
+	checkMissingShimErrorPaths(t)
+}
+
+func checkBadEventLogDirErrorPaths(t *testing.T, bad *Supervisor) {
+	t.Helper()
 	if err := bad.Start(testContext(t), "bad"); err == nil {
 		t.Fatal("Start(lock error) = nil, want error")
 	}
@@ -1024,6 +1050,10 @@ func TestStartStatusStopReconcileErrorPaths(t *testing.T) {
 	if err := bad.Stop(testContext(t), "missing"); !errors.Is(err, ErrUnknownJob) {
 		t.Fatalf("Stop(missing) = %v, want ErrUnknownJob", err)
 	}
+}
+
+func checkMissingShimErrorPaths(t *testing.T) {
+	t.Helper()
 	missingShim := testSupervisor(t, testJob("one", []string{"/bin/true"}), testJob("two", []string{"/bin/true"}))
 	missingShim.shimCommand = []string{filepath.Join(t.TempDir(), "missing-shim")}
 	if err := missingShim.Start(testContext(t), ""); err == nil || !strings.Contains(err.Error(), "start shim") {

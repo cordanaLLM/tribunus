@@ -25,16 +25,7 @@ func TestEffectsTelemetryCallSite(t *testing.T) {
 		t.Fatalf("Do() = %+v, %v, want executed", res, err)
 	}
 
-	spans := rec.Spans()
-	if len(spans) != 1 {
-		t.Fatalf("spans = %d, want 1", len(spans))
-	}
-	if spans[0].Name != "effects.do" {
-		t.Errorf("span name = %s, want effects.do", spans[0].Name)
-	}
-	if val, ok := rec.SpanAttr(spans[0], "epitrop.effect.key"); !ok || val != key.String() {
-		t.Errorf("attribute epitrop.effect.key = %q (found=%v), want %s", val, ok, key.String())
-	}
+	assertEffectsTelemetrySpans(t, rec, key)
 
 	if val := rec.Value(t, telemetry.MetricEffectRunsTotal, "outcome", "executed"); val != 1 {
 		t.Errorf("executed outcome = %d, want 1", val)
@@ -49,5 +40,19 @@ func TestEffectsTelemetryCallSite(t *testing.T) {
 
 	if val := rec.Value(t, telemetry.MetricEffectRunsTotal, "outcome", "skipped"); val != 1 {
 		t.Errorf("skipped outcome = %d, want 1", val)
+	}
+}
+
+func assertEffectsTelemetrySpans(t *testing.T, rec *telemetrytest.Recorder, key Key) {
+	t.Helper()
+	spans := rec.Spans()
+	if len(spans) != 1 {
+		t.Fatalf("spans = %d, want 1", len(spans))
+	}
+	if spans[0].Name != "effects.do" {
+		t.Errorf("span name = %s, want effects.do", spans[0].Name)
+	}
+	if val, ok := rec.SpanAttr(spans[0], "epitrop.effect.key"); !ok || val != key.String() {
+		t.Errorf("attribute epitrop.effect.key = %q (found=%v), want %s", val, ok, key.String())
 	}
 }

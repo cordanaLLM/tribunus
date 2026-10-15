@@ -671,28 +671,8 @@ func TestReplayStableBoundsItsRetriesAndSkipsThemForOtherErrors(t *testing.T) {
 
 func TestNormalizeLimitsDefaultsAndBoundaries(t *testing.T) {
 	clk := clock.NewFake()
-
-	got, err := normalizeLimits(Limits{Clock: clk})
-	if err != nil {
-		t.Fatalf("normalizeLimits(zero fields) = %v, want nil", err)
-	}
-	if got.LockTimeout != defaultLockTimeout || got.MaxReplayRecords != defaultReplayCap || got.MaxRecordBytes != MaxRecordBytes {
-		t.Fatalf("got defaults %+v, want lockTimeout=%v replayCap=%d recordBytes=%d", got, defaultLockTimeout, defaultReplayCap, MaxRecordBytes)
-	}
-
-	custom := Limits{
-		Clock:            clk,
-		LockTimeout:      1 * time.Nanosecond,
-		MaxReplayRecords: 1,
-		MaxRecordBytes:   1,
-	}
-	got, err = normalizeLimits(custom)
-	if err != nil {
-		t.Fatalf("normalizeLimits(boundary=1) = %v, want nil", err)
-	}
-	if got.LockTimeout != 1*time.Nanosecond || got.MaxReplayRecords != 1 || got.MaxRecordBytes != 1 {
-		t.Fatalf("got pass-through %+v, want boundary values 1", got)
-	}
+	checkNormalizeLimitsDefaults(t, clk)
+	checkNormalizeLimitsCustom(t, clk)
 
 	cases := []struct {
 		name    string
@@ -706,10 +686,43 @@ func TestNormalizeLimitsDefaultsAndBoundaries(t *testing.T) {
 		{"record bytes above cap", Limits{Clock: clk, MaxRecordBytes: MaxRecordBytes + 1}, "max record bytes must be 1..65536"},
 	}
 	for i := 0; i < len(cases); i++ {
-		_, err := normalizeLimits(cases[i].limits)
-		if err == nil || !strings.Contains(err.Error(), cases[i].wantErr) {
-			t.Errorf("%s: err = %v, want error containing %q", cases[i].name, err, cases[i].wantErr)
-		}
+		checkNormalizeLimitsError(t, cases[i].name, cases[i].limits, cases[i].wantErr)
+	}
+}
+
+func checkNormalizeLimitsDefaults(t *testing.T, clk clock.Clock) {
+	t.Helper()
+	got, err := normalizeLimits(Limits{Clock: clk})
+	if err != nil {
+		t.Fatalf("normalizeLimits(zero fields) = %v, want nil", err)
+	}
+	if got.LockTimeout != defaultLockTimeout || got.MaxReplayRecords != defaultReplayCap || got.MaxRecordBytes != MaxRecordBytes {
+		t.Fatalf("got defaults %+v, want lockTimeout=%v replayCap=%d recordBytes=%d", got, defaultLockTimeout, defaultReplayCap, MaxRecordBytes)
+	}
+}
+
+func checkNormalizeLimitsCustom(t *testing.T, clk clock.Clock) {
+	t.Helper()
+	custom := Limits{
+		Clock:            clk,
+		LockTimeout:      1 * time.Nanosecond,
+		MaxReplayRecords: 1,
+		MaxRecordBytes:   1,
+	}
+	got, err := normalizeLimits(custom)
+	if err != nil {
+		t.Fatalf("normalizeLimits(boundary=1) = %v, want nil", err)
+	}
+	if got.LockTimeout != 1*time.Nanosecond || got.MaxReplayRecords != 1 || got.MaxRecordBytes != 1 {
+		t.Fatalf("got pass-through %+v, want boundary values 1", got)
+	}
+}
+
+func checkNormalizeLimitsError(t *testing.T, name string, limits Limits, wantErr string) {
+	t.Helper()
+	_, err := normalizeLimits(limits)
+	if err == nil || !strings.Contains(err.Error(), wantErr) {
+		t.Errorf("%s: err = %v, want error containing %q", name, err, wantErr)
 	}
 }
 
@@ -745,43 +758,50 @@ func TestAtomicReplaceCleanupOnFailure(t *testing.T) {
 }
 
 func TestCloseWithCauseAndRemoveTemp(t *testing.T) {
-	t.Run("closeWithCause closes file and returns cause", func(t *testing.T) {
-		f, err := os.CreateTemp(t.TempDir(), "tmp-*")
-		if err != nil {
-			t.Fatalf("CreateTemp: %v", err)
-		}
-		cause := errors.New("initial-cause")
-		gotErr := closeWithCause(f, cause)
-		if !errors.Is(gotErr, cause) {
-			t.Fatalf("closeWithCause() = %v, want cause %v", gotErr, cause)
-		}
-		if err = f.Close(); err == nil {
-			t.Fatal("second Close() = nil, want error on already closed file")
-		}
-	})
+	t.Run("closeWithCause closes file and returns cause", testCloseWithCauseClosesFileAndReturnsCause)
+	t.Run("closeWithCause joins close error on already closed file", testCloseWithCauseJoinsCloseError)
+	t.Run("removeTemp ignores missing temp file", testRemoveTempIgnoresMissing)
+}
 
-	t.Run("closeWithCause joins close error on already closed file", func(t *testing.T) {
-		f, err := os.CreateTemp(t.TempDir(), "tmp-*")
-		if err != nil {
-			t.Fatalf("CreateTemp: %v", err)
-		}
-		if err = f.Close(); err != nil {
-			t.Fatalf("first Close: %v", err)
-		}
-		cause := errors.New("cause-err")
-		gotErr := closeWithCause(f, cause)
-		if !errors.Is(gotErr, cause) || !strings.Contains(gotErr.Error(), "eventlog: close") {
-			t.Fatalf("closeWithCause() = %v, want joined close error", gotErr)
-		}
-	})
+func testCloseWithCauseClosesFileAndReturnsCause(t *testing.T) {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "tmp-*")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	cause := errors.New("initial-cause")
+	gotErr := closeWithCause(f, cause)
+	if !errors.Is(gotErr, cause) {
+		t.Fatalf("closeWithCause() = %v, want cause %v", gotErr, cause)
+	}
+	if err = f.Close(); err == nil {
+		t.Fatal("second Close() = nil, want error on already closed file")
+	}
+}
 
-	t.Run("removeTemp ignores missing temp file", func(t *testing.T) {
-		cause := errors.New("my-cause")
-		gotErr := removeTemp(filepath.Join(t.TempDir(), "nonexistent"), cause)
-		if !errors.Is(gotErr, cause) || gotErr.Error() != cause.Error() {
-			t.Fatalf("removeTemp() = %v, want the cause alone: %v", gotErr, cause)
-		}
-	})
+func testCloseWithCauseJoinsCloseError(t *testing.T) {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "tmp-*")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	if err = f.Close(); err != nil {
+		t.Fatalf("first Close: %v", err)
+	}
+	cause := errors.New("cause-err")
+	gotErr := closeWithCause(f, cause)
+	if !errors.Is(gotErr, cause) || !strings.Contains(gotErr.Error(), "eventlog: close") {
+		t.Fatalf("closeWithCause() = %v, want joined close error", gotErr)
+	}
+}
+
+func testRemoveTempIgnoresMissing(t *testing.T) {
+	t.Helper()
+	cause := errors.New("my-cause")
+	gotErr := removeTemp(filepath.Join(t.TempDir(), "nonexistent"), cause)
+	if !errors.Is(gotErr, cause) || gotErr.Error() != cause.Error() {
+		t.Fatalf("removeTemp() = %v, want the cause alone: %v", gotErr, cause)
+	}
 }
 
 func TestAppendCheckedPositive(t *testing.T) {

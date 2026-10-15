@@ -109,10 +109,20 @@ func TestAssignClaimsTheNodeAndOpensItsUnitInOneRecord(t *testing.T) {
 		t.Fatalf("Assign(x) wrote %d records, want 1", after-before)
 	}
 	want := eventlog.Unit{ID: "tekmora/epitrop:x", Status: "claimed", Lane: "lane-a", By: "slot-1", Node: "x"}
+	checkAssignedUnit(t, unit, want)
+	checkAssignedServiceState(t, svc, want.ID)
+}
+
+func checkAssignedUnit(t *testing.T, unit, want eventlog.Unit) {
+	t.Helper()
 	if unit.ID != want.ID || unit.Status != want.Status || unit.Lane != want.Lane || unit.By != want.By || unit.Node != want.Node {
 		t.Fatalf("Assign(x) = %+v, want %+v", unit, want)
 	}
-	if got := unitsOf(t, svc).Units[want.ID]; got.Status != "claimed" || got.Node != "x" {
+}
+
+func checkAssignedServiceState(t *testing.T, svc *Service, wantID string) {
+	t.Helper()
+	if got := unitsOf(t, svc).Units[wantID]; got.Status != "claimed" || got.Node != "x" {
 		t.Fatalf("replayed unit = %+v, want claimed from x", got)
 	}
 	if got := nodeStatus(t, svc, "x"); got != graph.StatusClaimed {
@@ -201,15 +211,30 @@ func TestReleaseReturnsTheNodeAndDropsTheUnit(t *testing.T) {
 	if after := records(t, dir); after != before+1 {
 		t.Fatalf("Release(x) wrote %d records, want 1", after-before)
 	}
+	checkReleasedUnit(t, unit)
+	checkPostReleaseState(t, svc)
+	checkReassignAfterRelease(t, svc)
+}
+
+func checkReleasedUnit(t *testing.T, unit eventlog.Unit) {
+	t.Helper()
 	if unit.Status != "dropped" || unit.Released == nil || unit.Released.Reason != "slot died" || unit.By != "operator" {
 		t.Fatalf("Release(x) = %+v, want dropped with the reason", unit)
 	}
+}
+
+func checkPostReleaseState(t *testing.T, svc *Service) {
+	t.Helper()
 	if got := nodeStatus(t, svc, "x"); got != graph.StatusReady {
 		t.Fatalf("node x = %s, want ready", got)
 	}
 	if got := frontierIDs(t, svc); got != "x" {
 		t.Fatalf("Frontier() after the release = %s, want x", got)
 	}
+}
+
+func checkReassignAfterRelease(t *testing.T, svc *Service) {
+	t.Helper()
 	again, err := svc.Assign(testCtx(t), "tekmora/epitrop", "lane-b", "x", "")
 	if err != nil {
 		t.Fatalf("Assign(x) after the release = %v, want nil", err)
@@ -257,6 +282,17 @@ func assignRecord(t *testing.T, seq uint64, id string, payload any, typ string) 
 // move the graph refuses is counted, a malformed one fails the replay, and the other
 // domains skip both record types.
 func TestAssignmentRecordsTheWriterNeverWrites(t *testing.T) {
+	checkIgnoredAssignmentGraphStages(t)
+	assign := assignRecord(t, 2, "r:a", units.AssignPayload{Node: "a", Lane: "l"}, units.AssignedType)
+	checkIgnoredAssignmentUnitRecords(t, assign)
+	checkBadAssignmentRecords(t)
+	if next, err := eventlog.TaskReducer(eventlog.State{}, assign); err != nil || len(next.Tasks) != 0 {
+		t.Errorf("TaskReducer(unit.assigned) = %v, %+v; want it skipped", err, next)
+	}
+}
+
+func checkIgnoredAssignmentGraphStages(t *testing.T) {
+	t.Helper()
 	ready := []graph.Event{addNode("a"), setStatus("a", graph.StatusReady)}
 	assign := assignRecord(t, 2, "r:a", units.AssignPayload{Node: "a", Lane: "l"}, units.AssignedType)
 	st := reduce(t, stageRecord(t, 1, ready...), assign, assignRecord(t, 3, "r:a", units.AssignPayload{Node: "a", Lane: "l"}, units.AssignedType))
@@ -275,23 +311,32 @@ func TestAssignmentRecordsTheWriterNeverWrites(t *testing.T) {
 	if st.GraphStagesIgnored != 2 {
 		t.Fatalf("assignment of a blocked node and release of an implementing one: ignored = %d, want 2", st.GraphStagesIgnored)
 	}
-	unitsAfter := func(recs ...eventlog.Record) eventlog.State {
-		t.Helper()
-		st := eventlog.State{}
-		for i := 0; i < len(recs); i++ {
-			var err error
-			if st, err = units.UnitReducer(st, recs[i]); err != nil {
-				t.Fatalf("UnitReducer(seq %d) = %v, want nil", recs[i].Seq, err)
-			}
+}
+
+func replayUnitRecords(t *testing.T, recs ...eventlog.Record) eventlog.State {
+	t.Helper()
+	st := eventlog.State{}
+	for i := 0; i < len(recs); i++ {
+		var err error
+		if st, err = units.UnitReducer(st, recs[i]); err != nil {
+			t.Fatalf("UnitReducer(seq %d) = %v, want nil", recs[i].Seq, err)
 		}
-		return st
 	}
-	if st := unitsAfter(assign, assignRecord(t, 3, "r:a", units.AssignPayload{Node: "a", Lane: "m"}, units.AssignedType)); st.UnitRecordsIgnored != 1 || st.Units["r:a"].Lane != "l" {
+	return st
+}
+
+func checkIgnoredAssignmentUnitRecords(t *testing.T, assign eventlog.Record) {
+	t.Helper()
+	if st := replayUnitRecords(t, assign, assignRecord(t, 3, "r:a", units.AssignPayload{Node: "a", Lane: "m"}, units.AssignedType)); st.UnitRecordsIgnored != 1 || st.Units["r:a"].Lane != "l" {
 		t.Fatalf("second assignment of an open unit: %+v, want it ignored", st)
 	}
-	if st := unitsAfter(assign, assignRecord(t, 3, "r:a", units.ReleasePayload{Node: "b", Reason: "x"}, units.ReleasedType)); st.UnitRecordsIgnored != 1 || st.Units["r:a"].Status != "claimed" {
+	if st := replayUnitRecords(t, assign, assignRecord(t, 3, "r:a", units.ReleasePayload{Node: "b", Reason: "x"}, units.ReleasedType)); st.UnitRecordsIgnored != 1 || st.Units["r:a"].Status != "claimed" {
 		t.Fatalf("release naming another node: %+v, want it ignored", st)
 	}
+}
+
+func checkBadAssignmentRecords(t *testing.T) {
+	t.Helper()
 	bad := []eventlog.Record{
 		assignRecord(t, 1, "r:b", units.AssignPayload{Node: "a", Lane: "l"}, units.AssignedType),
 		assignRecord(t, 1, "r:a", units.AssignPayload{Node: "a"}, units.AssignedType),
@@ -305,8 +350,5 @@ func TestAssignmentRecordsTheWriterNeverWrites(t *testing.T) {
 		if _, err := units.UnitReducer(eventlog.State{}, bad[i]); err == nil {
 			t.Errorf("UnitReducer(bad record %d) = nil, want it refused", i)
 		}
-	}
-	if next, err := eventlog.TaskReducer(eventlog.State{}, assign); err != nil || len(next.Tasks) != 0 {
-		t.Errorf("TaskReducer(unit.assigned) = %v, %+v; want it skipped", err, next)
 	}
 }

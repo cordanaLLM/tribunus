@@ -31,11 +31,13 @@ type Telemetry struct {
 	slotRuns                 metric.Int64Counter
 	jobRuns                  metric.Int64Counter
 	checkpointWrites         metric.Int64Counter
+	admissionDecisions       metric.Int64Counter
 	graphTasks               metric.Int64Gauge
 	allowedEffectOutcome     map[string]struct{}
 	allowedSlotOutcome       map[string]struct{}
 	allowedJobOutcome        map[string]struct{}
 	allowedCheckpointOutcome map[string]struct{}
+	allowedAdmissionOutcome  map[string]struct{}
 	allowedGraphStatus       map[string]struct{}
 }
 
@@ -103,6 +105,8 @@ func (t *Telemetry) setCounter(name string, c metric.Int64Counter) {
 		t.jobRuns = c
 	case MetricCheckpointWritesTotal:
 		t.checkpointWrites = c
+	case MetricAdmissionDecisionsTotal:
+		t.admissionDecisions = c
 	}
 }
 
@@ -128,6 +132,8 @@ func (t *Telemetry) applyAllowedLimits(def metricdef.Def) {
 		t.allowedJobOutcome = toAllowSet(def.Limits["outcome"].Allow)
 	case MetricCheckpointWritesTotal:
 		t.allowedCheckpointOutcome = toAllowSet(def.Limits["outcome"].Allow)
+	case MetricAdmissionDecisionsTotal:
+		t.allowedAdmissionOutcome = toAllowSet(def.Limits["outcome"].Allow)
 	case MetricGraphTasks:
 		t.allowedGraphStatus = toAllowSet(def.Limits["status"].Allow)
 	}
@@ -181,6 +187,14 @@ func (t *Telemetry) CheckpointWrite(ctx context.Context, outcome string) {
 		return
 	}
 	t.add(ctx, t.checkpointWrites, t.allowedCheckpointOutcome, outcome)
+}
+
+// AdmissionDecision records one router alias admission decision outcome.
+func (t *Telemetry) AdmissionDecision(ctx context.Context, outcome string) {
+	if t == nil {
+		return
+	}
+	t.add(ctx, t.admissionDecisions, t.allowedAdmissionOutcome, outcome)
 }
 
 // GraphTasks records queue depth for each task status in counts.

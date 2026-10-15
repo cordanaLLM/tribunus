@@ -218,13 +218,7 @@ func TestReadResultRefusesEvidenceOutsideOrTooLarge(t *testing.T) {
 // A file that was swapped between the look and the open is refused: what is read has to be
 // the file that was checked.
 func TestReadOpenedRefusesAFileThatIsNotTheOneLookedAt(t *testing.T) {
-	dir := t.TempDir()
-	looked, opened := filepath.Join(dir, "looked"), filepath.Join(dir, "opened")
-	for _, path := range []string{looked, opened} {
-		if err := os.WriteFile(path, []byte("x\n"), 0o600); err != nil {
-			t.Fatalf("WriteFile() = %v, want nil", err)
-		}
-	}
+	looked, opened := createLookedAndOpenedFiles(t, t.TempDir())
 	before, err := os.Lstat(looked)
 	if err != nil {
 		t.Fatalf("Lstat() = %v, want nil", err)
@@ -248,6 +242,17 @@ func TestReadOpenedRefusesAFileThatIsNotTheOneLookedAt(t *testing.T) {
 	if body, err := readOpened(f, same, MaxResultBytes); err != nil || string(body) != "x\n" {
 		t.Fatalf("readOpened(the same file) = %q, %v; want its bytes", body, err)
 	}
+}
+
+func createLookedAndOpenedFiles(t *testing.T, dir string) (looked, opened string) {
+	t.Helper()
+	looked, opened = filepath.Join(dir, "looked"), filepath.Join(dir, "opened")
+	for _, path := range []string{looked, opened} {
+		if err := os.WriteFile(path, []byte("x\n"), 0o600); err != nil {
+			t.Fatalf("WriteFile() = %v, want nil", err)
+		}
+	}
+	return looked, opened
 }
 
 func TestResultSchemaIsACopy(t *testing.T) {

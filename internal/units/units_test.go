@@ -147,6 +147,12 @@ func TestStatusMovesFollowTheTaskGraphTable(t *testing.T) {
 		mustRecord(t, svc, unitA, RecordPayload{Status: status})
 	}
 	mustRecord(t, svc, unitB, RecordPayload{Status: "implementing"})
+	checkRefusedStatusMoves(t, svc, ctx)
+	checkIllegalMoveReplay(t, svc, ctx)
+}
+
+func checkRefusedStatusMoves(t *testing.T, svc *Service, ctx context.Context) {
+	t.Helper()
 	for _, next := range []string{"landed", "landing", "queued", "claimed", "proposed"} {
 		if _, err := svc.Record(ctx, unitB, RecordPayload{Status: next}); err == nil || !strings.Contains(err.Error(), "refused") {
 			t.Fatalf("Record(implementing -> %s) = %v, want the table's refusal", next, err)
@@ -157,6 +163,10 @@ func TestStatusMovesFollowTheTaskGraphTable(t *testing.T) {
 			t.Fatalf("Record(%s) = %v, want an unknown-status refusal", unknown, err)
 		}
 	}
+}
+
+func checkIllegalMoveReplay(t *testing.T, svc *Service, ctx context.Context) {
+	t.Helper()
 	// A racing writer's illegal move is in the log anyway: replay leaves it unapplied.
 	rawAppend(t, svc, "unit.recorded", unitB, `{"status":"landed"}`)
 	st, err := svc.Replay(ctx)
@@ -187,6 +197,14 @@ func TestEvidencePointerIsStickyAndReplaced(t *testing.T) {
 	svc := testService(t)
 	first := &eventlog.UnitEvidence{Path: ".workingdir/evidence/unit a.md", SHA256: "0123456789ab", Lines: 42}
 	unit := mustRecord(t, svc, unitA, RecordPayload{Status: "implementing", Evidence: first})
+	checkEvidenceFirstRecord(t, unit, first)
+	mustRecord(t, svc, unitA, RecordPayload{Status: "review", Lane: strPtr("orchestrator")})
+	checkEvidenceKeptAcrossReplay(t, svc)
+	checkEvidenceReplacedAndOther(t, svc)
+}
+
+func checkEvidenceFirstRecord(t *testing.T, unit eventlog.Unit, first *eventlog.UnitEvidence) {
+	t.Helper()
 	if unit.Evidence == nil || *unit.Evidence != *first {
 		t.Fatalf("evidence after the first record = %+v, want %+v", unit.Evidence, first)
 	}
@@ -194,11 +212,18 @@ func TestEvidencePointerIsStickyAndReplaced(t *testing.T) {
 	if unit.Evidence.Lines != 42 {
 		t.Fatalf("the unit shares the caller's pointer: lines = %d after the caller changed its copy, want 42", unit.Evidence.Lines)
 	}
-	mustRecord(t, svc, unitA, RecordPayload{Status: "review", Lane: strPtr("orchestrator")})
+}
+
+func checkEvidenceKeptAcrossReplay(t *testing.T, svc *Service) {
+	t.Helper()
 	kept, err := testService2(t, svc).Show(testContext(t), unitA)
 	if err != nil || kept.Evidence == nil || kept.Evidence.Path != ".workingdir/evidence/unit a.md" || kept.Evidence.SHA256 != "0123456789ab" || kept.Evidence.Lines != 42 {
 		t.Fatalf("evidence after a record without one = %+v, %v, want the first pointer kept across replay", kept.Evidence, err)
 	}
+}
+
+func checkEvidenceReplacedAndOther(t *testing.T, svc *Service) {
+	t.Helper()
 	second := &eventlog.UnitEvidence{Path: "out/result.json", SHA256: strings.Repeat("a", 64), Lines: 0}
 	replaced := mustRecord(t, svc, unitA, RecordPayload{Status: "review", Evidence: second})
 	if replaced.Evidence == nil || *replaced.Evidence != *second {
@@ -329,6 +354,13 @@ func TestIdentityRefusals(t *testing.T) {
 func TestInboxIsReadAtStageBoundaries(t *testing.T) {
 	svc := testService(t)
 	ctx := testContext(t)
+	note := checkInboxNoteCreation(t, svc, ctx)
+	checkUnreadNotesPersist(t, svc)
+	checkInboxReadsAndState(t, svc, ctx, note)
+}
+
+func checkInboxNoteCreation(t *testing.T, svc *Service, ctx context.Context) eventlog.UnitNote {
+	t.Helper()
 	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing"})
 	note, err := svc.Note(ctx, unitA, "reviewer", "rebase before landing")
 	if err != nil {
@@ -337,12 +369,21 @@ func TestInboxIsReadAtStageBoundaries(t *testing.T) {
 	if note.Seq != 2 {
 		t.Fatalf("note seq = %d, want 2: the sequence number of its own record", note.Seq)
 	}
+	return note
+}
+
+func checkUnreadNotesPersist(t *testing.T, svc *Service) {
+	t.Helper()
 	for i := 0; i < 2; i++ {
 		unit := mustRecord(t, svc, unitA, RecordPayload{Status: "implementing"})
 		if unread := UnreadNotes(unit); len(unread) != 1 || unread[0].Text != "rebase before landing" {
 			t.Fatalf("unread after set %d = %+v, want the note until the inbox is read", i, unread)
 		}
 	}
+}
+
+func checkInboxReadsAndState(t *testing.T, svc *Service, ctx context.Context, note eventlog.UnitNote) {
+	t.Helper()
 	read, err := testService2(t, svc).Inbox(ctx, unitA)
 	if err != nil || len(read) != 1 {
 		t.Fatalf("Inbox() after a restart = %+v, %v, want the one note", read, err)
@@ -465,6 +506,12 @@ func TestSharedLogReplaysBesideJobsAndTasks(t *testing.T) {
 func TestRecordAndNoteRefusals(t *testing.T) {
 	svc := testService(t)
 	ctx := testContext(t)
+	checkRecordRefusals(t, svc, ctx)
+	checkNoteRefusals(t, svc, ctx)
+}
+
+func checkRecordRefusals(t *testing.T, svc *Service, ctx context.Context) {
+	t.Helper()
 	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing"})
 	refusedFrom := logLength(t, svc)
 	records := []struct {
@@ -491,6 +538,10 @@ func TestRecordAndNoteRefusals(t *testing.T) {
 	if unit := mustRecord(t, svc, unitA, RecordPayload{Status: "implementing", Worktree: strPtr(strings.Repeat("a", MaxFieldBytes))}); len(unit.Worktree) != MaxFieldBytes {
 		t.Fatalf("a field of exactly %d bytes was not kept", MaxFieldBytes)
 	}
+}
+
+func checkNoteRefusals(t *testing.T, svc *Service, ctx context.Context) {
+	t.Helper()
 	before := logLength(t, svc)
 	notes := []struct {
 		name, id, from, text, want string
@@ -568,11 +619,7 @@ func TestConcurrentRecordTerminalRace(t *testing.T) {
 	mustRecord(t, svc, unitA, RecordPayload{Status: "landing"})
 
 	const total = 8
-	type result struct {
-		status string
-		err    error
-	}
-	results := make([]result, total)
+	results := make([]recordRaceResult, total)
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 	for i := 0; i < total; i++ {
@@ -585,32 +632,52 @@ func TestConcurrentRecordTerminalRace(t *testing.T) {
 			defer wg.Done()
 			<-start
 			_, err := svc.Record(ctx, unitA, RecordPayload{Status: target})
-			results[idx] = result{status: target, err: err}
+			results[idx] = recordRaceResult{status: target, err: err}
 		}(i, targetStatus)
 	}
 	close(start)
 	wg.Wait()
 
+	winningStatus := evaluateTerminalRaceResults(t, results)
+	checkTerminalRaceFinalState(t, svc, ctx, winningStatus)
+}
+
+type recordRaceResult struct {
+	status string
+	err    error
+}
+
+func checkRaceResultItem(t *testing.T, res recordRaceResult, winningStatus *string, successes *int) {
+	t.Helper()
+	if res.err == nil {
+		*successes++
+		if *winningStatus == "" {
+			*winningStatus = res.status
+		} else if *winningStatus != res.status {
+			t.Fatalf("successful call asked for %q, but winning status is %q", res.status, *winningStatus)
+		}
+		return
+	}
+	if !strings.Contains(res.err.Error(), "pass --reopen") {
+		t.Fatalf("error for %q = %v, want error containing 'pass --reopen'", res.status, res.err)
+	}
+}
+
+func evaluateTerminalRaceResults(t *testing.T, results []recordRaceResult) string {
+	t.Helper()
 	var winningStatus string
 	successes := 0
 	for _, res := range results {
-		if res.err == nil {
-			successes++
-			if winningStatus == "" {
-				winningStatus = res.status
-			} else if winningStatus != res.status {
-				t.Fatalf("successful call asked for %q, but winning status is %q", res.status, winningStatus)
-			}
-		} else {
-			if !strings.Contains(res.err.Error(), "pass --reopen") {
-				t.Fatalf("error for %q = %v, want error containing 'pass --reopen'", res.status, res.err)
-			}
-		}
+		checkRaceResultItem(t, res, &winningStatus, &successes)
 	}
 	if successes < 1 {
 		t.Fatalf("successes = %d, want at least 1", successes)
 	}
+	return winningStatus
+}
 
+func checkTerminalRaceFinalState(t *testing.T, svc *Service, ctx context.Context, winningStatus string) {
+	t.Helper()
 	st, err := svc.Replay(ctx)
 	if err != nil {
 		t.Fatalf("Replay: %v", err)
@@ -627,17 +694,7 @@ func TestConcurrentNoteAtMaxUnreadNotesBoundary(t *testing.T) {
 	svc := testService(t)
 	svc.limits.LockTimeout = time.Minute
 	ctx := testContext(t)
-	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing"})
-	writer, err := eventlog.Open(svc.dir, svc.signer, svc.limits)
-	if err != nil {
-		t.Fatalf("eventlog.Open: %v", err)
-	}
-	for i := 0; i < MaxUnreadNotes-1; i++ {
-		ev := eventlog.Event{Type: "unit.note", TaskID: unitA, Payload: json.RawMessage(`{"from":"peer","text":"note"}`)}
-		if _, err := writer.Append(ctx, ev); err != nil {
-			t.Fatalf("setup note %d: %v", i, err)
-		}
-	}
+	setupNoteRaceBoundary(t, svc, ctx)
 
 	const total = 8
 	var wg sync.WaitGroup
@@ -653,6 +710,27 @@ func TestConcurrentNoteAtMaxUnreadNotesBoundary(t *testing.T) {
 	wg.Wait()
 	close(errs)
 
+	evaluateNoteRaceErrors(t, errs)
+	checkNoteRaceFinalState(t, svc, ctx)
+}
+
+func setupNoteRaceBoundary(t *testing.T, svc *Service, ctx context.Context) {
+	t.Helper()
+	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing"})
+	writer, err := eventlog.Open(svc.dir, svc.signer, svc.limits)
+	if err != nil {
+		t.Fatalf("eventlog.Open: %v", err)
+	}
+	for i := 0; i < MaxUnreadNotes-1; i++ {
+		ev := eventlog.Event{Type: "unit.note", TaskID: unitA, Payload: json.RawMessage(`{"from":"peer","text":"note"}`)}
+		if _, err := writer.Append(ctx, ev); err != nil {
+			t.Fatalf("setup note %d: %v", i, err)
+		}
+	}
+}
+
+func evaluateNoteRaceErrors(t *testing.T, errs <-chan error) {
+	t.Helper()
 	successes := 0
 	alreadyHas := 0
 	for err := range errs {
@@ -667,6 +745,10 @@ func TestConcurrentNoteAtMaxUnreadNotesBoundary(t *testing.T) {
 	if successes != 1 || alreadyHas != 7 {
 		t.Fatalf("successes = %d, alreadyHas = %d, want 1 and 7", successes, alreadyHas)
 	}
+}
+
+func checkNoteRaceFinalState(t *testing.T, svc *Service, ctx context.Context) {
+	t.Helper()
 	st, err := svc.Replay(ctx)
 	if err != nil {
 		t.Fatalf("Replay: %v", err)
@@ -686,13 +768,7 @@ func TestConcurrentNoteAtMaxUnreadNotesBoundary(t *testing.T) {
 func TestConcurrentInboxOnlyOneReturnsNotes(t *testing.T) {
 	svc := testService(t)
 	ctx := testContext(t)
-	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing"})
-	if _, err := svc.Note(ctx, unitA, "peer", "first"); err != nil {
-		t.Fatalf("Note: %v", err)
-	}
-	if _, err := svc.Note(ctx, unitA, "peer", "second"); err != nil {
-		t.Fatalf("Note: %v", err)
-	}
+	checkConcurrentInboxNotesSetup(t, svc, ctx)
 
 	var notesA, notesB []eventlog.UnitNote
 	var errA, errB error
@@ -708,6 +784,23 @@ func TestConcurrentInboxOnlyOneReturnsNotes(t *testing.T) {
 	}()
 	wg.Wait()
 
+	checkConcurrentInboxResults(t, notesA, notesB, errA, errB)
+	checkConcurrentInboxReplay(t, svc, ctx)
+}
+
+func checkConcurrentInboxNotesSetup(t *testing.T, svc *Service, ctx context.Context) {
+	t.Helper()
+	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing"})
+	if _, err := svc.Note(ctx, unitA, "peer", "first"); err != nil {
+		t.Fatalf("Note: %v", err)
+	}
+	if _, err := svc.Note(ctx, unitA, "peer", "second"); err != nil {
+		t.Fatalf("Note: %v", err)
+	}
+}
+
+func checkConcurrentInboxResults(t *testing.T, notesA, notesB []eventlog.UnitNote, errA, errB error) {
+	t.Helper()
 	if errA != nil || errB != nil {
 		t.Fatalf("Inbox errors: A=%v, B=%v", errA, errB)
 	}
@@ -715,6 +808,10 @@ func TestConcurrentInboxOnlyOneReturnsNotes(t *testing.T) {
 	if (lenA != 2 || lenB != 0) && (lenA != 0 || lenB != 2) {
 		t.Fatalf("got lenA=%d, lenB=%d; want one 2 and other 0", lenA, lenB)
 	}
+}
+
+func checkConcurrentInboxReplay(t *testing.T, svc *Service, ctx context.Context) {
+	t.Helper()
 	st, err := svc.Replay(ctx)
 	if err != nil {
 		t.Fatalf("Replay: %v", err)

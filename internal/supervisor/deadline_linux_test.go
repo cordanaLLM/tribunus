@@ -163,6 +163,12 @@ func TestJobDeadlineBounds(t *testing.T) {
 		t.Fatalf("maxJobRuntime = %s, config allows %d s: the two bounds must be one", maxJobRuntime, config.MaxJobRuntimeSeconds)
 	}
 	base := validShimConfig(t, "bounds")
+	checkShimConfigBoundsCases(t, base)
+	checkJobRuntimeBounds(t)
+}
+
+func checkShimConfigBoundsCases(t *testing.T, base shimConfig) {
+	t.Helper()
 	cases := []struct {
 		name string
 		edit func(*shimConfig)
@@ -188,6 +194,10 @@ func TestJobDeadlineBounds(t *testing.T) {
 			t.Errorf("checkShimConfig(%s) = %v, want %q", cases[i].name, err, cases[i].want)
 		}
 	}
+}
+
+func checkJobRuntimeBounds(t *testing.T) {
+	t.Helper()
 	job := testJob("bounds", []string{"/bin/true"})
 	job.MaxRuntimeSeconds = config.MaxJobRuntimeSeconds + 1
 	if err := checkJobBounds(job); err == nil || !strings.Contains(err.Error(), "max_runtime_seconds must be") {

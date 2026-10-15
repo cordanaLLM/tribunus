@@ -76,10 +76,6 @@ exceptions:
     reason: eight functions exceed the HISS-04 caps (five cyclomatic); the linter is enabled with their refactor (#133)
     expires: "2027-01-11"
   - rule: declared-linters
-    tool: semgrep
-    reason: the fleet semgrep rule set (praetor .config/semgrep/hiss-invariants.yml at b161971b437e) has no Go rule, so a job here would match nothing; gosec and golangci-lint run in ci.yml
-    expires: "2027-01-11"
-  - rule: declared-linters
     tool: spectral
     reason: the repository publishes no OpenAPI or AsyncAPI document; its only OpenAPI files are upstream snapshots under internal/sources/*/testdata
     expires: "2027-01-11"

@@ -56,17 +56,28 @@ func testSupervisorWithClock(t *testing.T, rt testRuntimeConfig, clk clock.Clock
 	return sup
 }
 
+// recordCollector keeps the records one replay reduces. ReplayStable runs the reducer again from
+// the first record when the log moved under a replay (a shim appending job.exited), so a seq at or
+// below the last one kept starts a new pass and the records of the earlier pass are dropped.
+type recordCollector struct {
+	records []eventlog.Record
+}
+
+func (c *recordCollector) reduce(st eventlog.State, rec eventlog.Record) (eventlog.State, error) {
+	if len(c.records) > 0 && rec.Seq <= c.records[len(c.records)-1].Seq {
+		c.records = c.records[:0]
+	}
+	c.records = append(c.records, rec)
+	return JobReducer(st, rec)
+}
+
 func collectJobRecords(t *testing.T, sup *Supervisor) []eventlog.Record {
 	t.Helper()
-	var records []eventlog.Record
-	collectReducer := func(st eventlog.State, rec eventlog.Record) (eventlog.State, error) {
-		records = append(records, rec)
-		return JobReducer(st, rec)
-	}
-	if _, err := sup.replayStateWithReducer(testContext(t), collectReducer); err != nil {
+	var c recordCollector
+	if _, err := sup.replayStateWithReducer(testContext(t), c.reduce); err != nil {
 		t.Fatalf("replayStateWithReducer() = %v, want nil", err)
 	}
-	return records
+	return c.records
 }
 
 func collectTriggeredEvents(t *testing.T, sup *Supervisor, jobName string) []triggeredPayload {
@@ -622,6 +633,27 @@ func TestEventMatchCollectorKeepsEachSeqOnce(t *testing.T) {
 	}
 	if c.head != 4 {
 		t.Fatalf("head = %d, want 4", c.head)
+	}
+}
+
+func TestRecordCollectorKeepsEachSeqOnce(t *testing.T) {
+	var c recordCollector
+	recs := []eventlog.Record{
+		{Seq: 1, Type: "job.armed", TaskID: "job-a", Payload: []byte(`{"trigger":"t","at":"2026-10-14T01:59:00Z"}`)},
+		{Seq: 2, Type: "job.triggered", TaskID: "job-a", Payload: []byte(`{"trigger":"t","outcome":"started","due":"2026-10-17T02:00:00Z"}`)},
+	}
+	// Two passes over the same records, as ReplayStable makes when the log moved under a replay.
+	for pass := 0; pass < 2; pass++ {
+		st := eventlog.State{Jobs: map[string]eventlog.Job{}}
+		for i := 0; i < len(recs); i++ {
+			var err error
+			if st, err = c.reduce(st, recs[i]); err != nil {
+				t.Fatalf("reduce(pass %d, seq %d) = %v, want nil", pass, recs[i].Seq, err)
+			}
+		}
+	}
+	if len(c.records) != 2 || c.records[0].Seq != 1 || c.records[1].Seq != 2 {
+		t.Fatalf("records = %+v, want [seq 1, seq 2]", c.records)
 	}
 }
 

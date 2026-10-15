@@ -160,6 +160,16 @@
         "* 0-3 * * 1"
       ],
       "updateNotScheduled": false
+    },
+    {
+      "description": "semgrep runs on this setup-python version in ci.yml, and semgrep 1.181.0 declares Python up to 3.14: under 3.15 its engine is killed in the self-test (tekmora/epitrop pull request 194, nine of nine runs). Lift the cap when a semgrep release lists Python 3.15",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchDepNames": [
+        "python"
+      ],
+      "allowedVersions": "<3.15"
     }
   ]
 }

@@ -192,27 +192,34 @@ func (s *Service) filterAndOrderUnseen(items []ReleaseItem) []ReleaseItem {
 func (s *Service) deliverItem(ctx context.Context, sinks []config.ReleaseWatchSink, item ReleaseItem) (bool, error) {
 	anyFiled := false
 	for i := 0; i < len(sinks); i++ {
-		sink := sinks[i]
-		if sink.GitHubIssue != nil {
-			filed, err := DeliverGitHubIssue(ctx, s.client, s.state, sink.GitHubIssue, item)
-			if err != nil {
-				return false, err
-			}
-			if filed {
-				anyFiled = true
-			}
+		filed, err := s.deliverToSink(ctx, sinks[i], item)
+		if err != nil {
+			return false, err
 		}
-		if sink.Ntfy != nil {
-			filed, err := DeliverNtfy(ctx, s.client, s.state, sink.Ntfy, item)
-			if err != nil {
-				return false, err
-			}
-			if filed {
-				anyFiled = true
-			}
-		}
+		anyFiled = anyFiled || filed
 	}
 	return anyFiled, nil
+}
+
+// deliverToSink delivers the item to the one sink kind the entry names and reports whether
+// it filed anything.
+func (s *Service) deliverToSink(ctx context.Context, sink config.ReleaseWatchSink, item ReleaseItem) (bool, error) {
+	filed := false
+	if sink.GitHubIssue != nil {
+		delivered, err := DeliverGitHubIssue(ctx, s.client, s.state, sink.GitHubIssue, item)
+		if err != nil {
+			return false, err
+		}
+		filed = delivered
+	}
+	if sink.Ntfy != nil {
+		delivered, err := DeliverNtfy(ctx, s.client, s.state, sink.Ntfy, item)
+		if err != nil {
+			return false, err
+		}
+		filed = filed || delivered
+	}
+	return filed, nil
 }
 
 func (s *Service) Seed(ctx context.Context) error {

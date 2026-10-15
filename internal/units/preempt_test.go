@@ -5,6 +5,7 @@
 package units
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -21,6 +22,13 @@ func TestPreemptSuccessAndRelaunchRule(t *testing.T) {
 	mustRecord(t, svc, unitA, RecordPayload{Status: "implementing"})
 
 	u, err := svc.Preempt(ctx, unitA, "priority shift", "alice")
+	checkPreemptedFields(t, u, err)
+	checkPreemptedRelaunchRule(t, u)
+	checkClearedPreemptState(t, svc, ctx)
+}
+
+func checkPreemptedFields(t *testing.T, u eventlog.Unit, err error) {
+	t.Helper()
 	if err != nil {
 		t.Fatalf("Preempt() = %v, want nil", err)
 	}
@@ -39,7 +47,10 @@ func TestPreemptSuccessAndRelaunchRule(t *testing.T) {
 	if u.By != "alice" {
 		t.Fatalf("u.By = %s, want alice", u.By)
 	}
+}
 
+func checkPreemptedRelaunchRule(t *testing.T, u eventlog.Unit) {
+	t.Helper()
 	safe, relaunch := RelaunchRule(u)
 	if safe {
 		t.Fatal("RelaunchRule(preempted) = safe, want false")
@@ -47,7 +58,10 @@ func TestPreemptSuccessAndRelaunchRule(t *testing.T) {
 	if want := "preempted: priority shift"; relaunch != want {
 		t.Fatalf("RelaunchRule reason = %q, want %q", relaunch, want)
 	}
+}
 
+func checkClearedPreemptState(t *testing.T, svc *Service, ctx context.Context) {
+	t.Helper()
 	// Move out of blocked clears Preempted.
 	uCleared, err := svc.Record(ctx, unitA, RecordPayload{Status: "ready"})
 	if err != nil {

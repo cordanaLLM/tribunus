@@ -174,8 +174,12 @@ func slowSync(t *testing.T, d time.Duration) {
 }
 
 // appendConcurrently starts total writers at once, one record each, and returns their results.
+// The writers' context outlasts limits.LockTimeout: a cancelled context ends the lock wait
+// too, so a shorter one would cut every queue at its own deadline instead.
 func appendConcurrently(t testing.TB, dir string, signer *corereceipt.Signer, limits Limits, total int) []error {
 	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), limits.LockTimeout+10*time.Second)
+	defer cancel()
 	var wg sync.WaitGroup
 	errs := make(chan error, total)
 	for i := 0; i < total; i++ {
@@ -183,7 +187,7 @@ func appendConcurrently(t testing.TB, dir string, signer *corereceipt.Signer, li
 		go func(id int) {
 			defer wg.Done()
 			ev := Event{Type: "task.created", TaskID: "task-" + jsonInt(id), Payload: raw(`{"state":"open"}`)}
-			_, err := openWriter(t, dir, signer, limits).Append(testContext(t), ev)
+			_, err := openWriter(t, dir, signer, limits).Append(ctx, ev)
 			errs <- err
 		}(i)
 	}
@@ -288,6 +292,32 @@ func TestQueuedAppendersFailClosedWhenTheLockTimeoutIsShorterThanTheQueue(t *tes
 		t.Fatalf("no writer timed out, want at least one: %d writers at 40 ms each cannot all wait less than 100 ms", total)
 	}
 	requireContiguous(t, dir, total-timedOut)
+}
+
+// Sixteen queued writers on a real disk under load must all commit without timing out or
+// leaving gaps, and the test logs what an append cost (#83, #146). Under the workflow's
+// load sixteen appends have taken up to 15 s, past the default timeout, so the test waits as
+// the docs advise for a slow disk: with a timeout that only ends a failing run. The test
+// is gated by EPITROP_EVENTLOG_LOAD_TEST=1 because it needs real filesystem syncs under
+// write load; the eventlog-load.yml workflow runs it against a btrfs mount under stress-ng.
+func TestQueuedAppendersUnderLoad(t *testing.T) {
+	if os.Getenv("EPITROP_EVENTLOG_LOAD_TEST") != "1" {
+		t.Skip("real disk under load, run by workflow eventlog-load.yml")
+	}
+	const lockTimeout = 60 * time.Second
+	dir, signer, limits := testLog(t)
+	limits.LockTimeout = lockTimeout
+	const total = 16
+	start := time.Now()
+	errs := appendConcurrently(t, dir, signer, limits, total)
+	elapsed := time.Since(start)
+	t.Logf("%d queued appends took %s, %s an append", total, elapsed.Round(time.Millisecond), (elapsed / total).Round(time.Millisecond))
+	for i := 0; i < len(errs); i++ {
+		if errs[i] != nil {
+			t.Fatalf("queued Append() = %v, want nil", errs[i])
+		}
+	}
+	requireContiguous(t, dir, total)
 }
 
 // An append costs four syncs: the record's file and its directory, then HEAD's file and the

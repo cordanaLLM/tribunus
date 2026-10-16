@@ -13,6 +13,11 @@ import (
 	"github.com/tekmora/epitrop/internal/atomicfile"
 )
 
+// seenFileVersion is the format of the seen-set file this code reads and writes. A file
+// of another version is refused, not read as this one: a newer binary's file could hold
+// fields this one would drop on its next save.
+const seenFileVersion = 1
+
 type SeenFile struct {
 	Version int               `json:"version"`
 	Seen    map[string]string `json:"seen"`
@@ -44,6 +49,9 @@ func LoadState(stateDir string) (*State, error) {
 	var sf SeenFile
 	if err = json.Unmarshal(data, &sf); err != nil {
 		return nil, fmt.Errorf("parse seen-set %s: %w", filePath, err)
+	}
+	if sf.Version != seenFileVersion {
+		return nil, fmt.Errorf("seen-set %s has version %d, want %d", filePath, sf.Version, seenFileVersion)
 	}
 	if sf.Seen != nil {
 		s.seen = sf.Seen
@@ -81,7 +89,7 @@ func (s *State) Save() error {
 	s.pruneSeenLocked()
 
 	sf := SeenFile{
-		Version: 1,
+		Version: seenFileVersion,
 		Seen:    s.seen,
 	}
 	data, err := json.MarshalIndent(sf, "", "  ")

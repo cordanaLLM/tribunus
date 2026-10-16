@@ -42,7 +42,7 @@ epitropctl show --in=/tmp/snapshot.json
 epitropctl schema
 ```
 
-The snapshot is replaced atomically: `sync` writes a temporary file beside `--out`, flushes it and renames it over the old file (`internal/atomicfile`), so a reader or a crash never sees half a snapshot.
+The snapshot is replaced atomically: `sync` writes a temporary file beside `--out`, flushes it and renames it over the old file (`internal/atomicfile`), so a reader or a crash never sees half a snapshot. On Windows the rename is refused while another process holds `--out` open; `sync` then fails with that error and the old snapshot stays whole.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |

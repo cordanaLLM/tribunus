@@ -3,11 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -100,15 +103,32 @@ func TestWriteSnapshotFile_ReaderSeesWholeSnapshot(t *testing.T) {
 			}
 		}
 	}()
-	for i := 1; i <= rounds; i++ {
-		if err := writeSnapshotFile(path, versions[i%2]); err != nil {
-			t.Fatalf("round %d: writeSnapshotFile() = %v, want nil", i, err)
-		}
-	}
+	replaced := replaceSnapshotRounds(t, path, versions, rounds)
 	done.Store(true)
 	if n, ok := <-torn; ok {
 		t.Fatalf("a reader saw a snapshot of %d bytes, want one whole version of %d bytes", n, len(versions[0]))
 	}
+	t.Logf("replaced the snapshot %d times in %d rounds", replaced, rounds)
+	if replaced == 0 {
+		t.Fatalf("writeSnapshotFile() replaced the snapshot 0 times in %d rounds, want at least 1", rounds)
+	}
+}
+
+// replaceSnapshotRounds writes the two versions in turn and returns how many writes replaced
+// the file. Windows refuses a rename over a file a reader holds open: that write fails
+// loudly, the old snapshot stays whole, and the round does not count.
+func replaceSnapshotRounds(t *testing.T, path string, versions [][]byte, rounds int) int {
+	t.Helper()
+	replaced := 0
+	for i := 1; i <= rounds; i++ {
+		err := writeSnapshotFile(path, versions[i%2])
+		if err == nil {
+			replaced++
+		} else if runtime.GOOS != "windows" || !errors.Is(err, fs.ErrPermission) {
+			t.Fatalf("round %d: writeSnapshotFile() = %v, want nil", i, err)
+		}
+	}
+	return replaced
 }
 
 const fixtureRateLimitsLine = `{"timestamp":"2026-09-13T12:56:47.753Z","ordinal":1,"type":"event_msg","payload":{"rate_limits":{"limit_id":"codex","primary":{"used_percent":10.0,"window_minutes":10080,"resets_at":1789858494},"plan_type":"pro"}}}`

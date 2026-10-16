@@ -15,13 +15,14 @@ import (
 	corereceipt "github.com/golusoris/golusoris/core/crypto/receipt"
 )
 
-const maxStableReplayTries = 100
-
-func retryStable[T any](ctx context.Context, op func() (T, error)) (T, error) {
-	deadline := time.Now().Add(time.Second)
+// retryStable runs op until it succeeds, fails with an error no retry can fix, or budget
+// has passed. budget is the lock timeout: an append in flight holds the lock, so a writer
+// that waits longer would itself give up on the lock.
+func retryStable[T any](ctx context.Context, budget time.Duration, op func() (T, error)) (T, error) {
+	deadline := time.Now().Add(budget)
 	var last error
 	var zero T
-	for i := 0; i < maxStableReplayTries; i++ {
+	for i := 0; i < stableAttempts(budget); i++ {
 		res, err := op()
 		if err == nil || !transientReplayError(err) {
 			return res, err
@@ -37,12 +38,22 @@ func retryStable[T any](ctx context.Context, op func() (T, error)) (T, error) {
 	return zero, last
 }
 
+// stableBudget is how long a stable replay waits out an append in flight: the lock
+// timeout of limits, or its default when limits leaves it unset.
+func stableBudget(limits Limits) time.Duration {
+	if limits.LockTimeout > 0 {
+		return limits.LockTimeout
+	}
+	return defaultLockTimeout
+}
+
 // ReplayStable is Replay for a log that other processes append to. An append writes its
 // record and then HEAD; a replay that lands between the two reports a HEAD mismatch that
-// the next try no longer sees. It retries only that case, for at most a second; every
-// other error is returned at once.
+// the next try no longer sees, and on Windows a replay that opens a file while an append
+// renames it is refused with a sharing violation. It retries only those cases, for at most
+// the lock timeout of limits; every other error is returned at once.
 func ReplayStable(ctx context.Context, dir string, pubKeyHex string, limits Limits, reducer Reducer) (State, error) {
-	return retryStable(ctx, func() (State, error) {
+	return retryStable(ctx, stableBudget(limits), func() (State, error) {
 		return Replay(ctx, dir, pubKeyHex, limits, reducer)
 	})
 }
@@ -54,7 +65,7 @@ type replayCheckpointedResult struct {
 
 // ReplayCheckpointedStable is ReplayCheckpointed with the same retry helper as ReplayStable.
 func ReplayCheckpointedStable(ctx context.Context, dir string, pubKeyHex string, limits Limits, name string, reducer Reducer) (State, CheckpointUse, error) {
-	res, err := retryStable(ctx, func() (replayCheckpointedResult, error) {
+	res, err := retryStable(ctx, stableBudget(limits), func() (replayCheckpointedResult, error) {
 		st, use, rErr := ReplayCheckpointed(ctx, dir, pubKeyHex, limits, name, reducer)
 		return replayCheckpointedResult{state: st, use: use}, rErr
 	})
@@ -62,6 +73,9 @@ func ReplayCheckpointedStable(ctx context.Context, dir string, pubKeyHex string,
 }
 
 func transientReplayError(err error) bool {
+	if fileBusy(err) {
+		return true
+	}
 	text := err.Error()
 	if strings.Contains(text, "HEAD mismatch") || strings.Contains(text, "missing HEAD") {
 		return true
@@ -393,10 +407,19 @@ func seqFromName(name string) (uint64, error) {
 	return seq, nil
 }
 
-// sleepUntilNextTry waits 10 ms, or what is left until deadline when that is less. It
-// reports false when deadline has passed or ctx ended.
+// stableAttempts bounds retryStable's tries over budget: one every lockRetryDelay, as a
+// writer tries the lock, plus the first and the last.
+func stableAttempts(budget time.Duration) int {
+	if budget <= 0 {
+		return 1
+	}
+	return int(budget/lockRetryDelay) + 2
+}
+
+// sleepUntilNextTry waits lockRetryDelay, or what is left until deadline when that is less.
+// It reports false when deadline has passed or ctx ended.
 func sleepUntilNextTry(ctx context.Context, deadline time.Time) bool {
-	wait := 10 * time.Millisecond
+	wait := lockRetryDelay
 	if remaining := time.Until(deadline); remaining <= 0 {
 		return false
 	} else if remaining < wait {

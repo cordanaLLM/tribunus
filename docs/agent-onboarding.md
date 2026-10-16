@@ -52,6 +52,7 @@ Call models only through the router alias `cordana/auto`, the one alias the flee
 - `AGENTS.md`: canonical agent briefing, rendered by Praetor; the vendor files are compiled from it.
 - `docs/config.schema.json`: published Epitrop config schema; `internal/config.Load` validates files against the embedded byte-identical copy.
 - `internal/eventlog`: append-only signed event log; private signing key stays outside the Git working tree and must not be readable by group or others.
+- `internal/atomicfile`: the one way a file is replaced atomically (temporary file beside the target, fsync, rename, fsync of the directory); the event log, the release watch state and the slot resume note write through it.
 - `internal/supervisor`: declared background jobs, RT-03 sandboxed runner, lock-backed liveness, Linux shim death orphan prevention and replay-based re-adoption.
 - `internal/egressproxy`: the way out of a job with `sandbox.network: proxy` ([ADR-0006](adr/0006-proxy-socket-egress.md)). The shim runs a CONNECT proxy on a Unix socket outside the sandbox; it reaches the job's declared `sandbox.destinations` and nothing else. Inside the sandbox a relay carries the job's proxy requests to that socket: the hidden `epitropctl __egress-relay`, which the sandbox starts and nobody starts by hand.
 - `internal/releasewatch`: upstream release watch (`epitropctl watch run|seed`), run as a sandboxed job; files one issue per new release in the consuming repository.

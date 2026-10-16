@@ -9,6 +9,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/tekmora/epitrop/internal/atomicfile"
 )
 
 type SeenFile struct {
@@ -87,7 +89,7 @@ func (s *State) Save() error {
 		return fmt.Errorf("marshal seen-set: %w", err)
 	}
 	data = append(data, '\n')
-	return writeTempFileAtomically(s.stateDir, SeenFileName, data)
+	return atomicfile.Replace(filepath.Join(s.stateDir, SeenFileName), data, 0o600)
 }
 
 func (s *State) pruneSeenLocked() {
@@ -113,49 +115,4 @@ func (s *State) pruneSeenLocked() {
 	for i := 0; i < dropCount; i++ {
 		delete(s.seen, entries[i].id)
 	}
-}
-
-// writeSyncClose writes data to the file, flushes it to disk and closes it; the file is
-// closed on every path.
-func writeSyncClose(tempFile *os.File, data []byte) error {
-	tempPath := tempFile.Name()
-	if _, writeErr := tempFile.Write(data); writeErr != nil {
-		if closeErr := tempFile.Close(); closeErr != nil {
-			return errors.Join(fmt.Errorf("write temp file %s: %w", tempPath, writeErr), closeErr)
-		}
-		return fmt.Errorf("write temp file %s: %w", tempPath, writeErr)
-	}
-	if syncErr := tempFile.Sync(); syncErr != nil {
-		if closeErr := tempFile.Close(); closeErr != nil {
-			return errors.Join(fmt.Errorf("fsync temp file %s: %w", tempPath, syncErr), closeErr)
-		}
-		return fmt.Errorf("fsync temp file %s: %w", tempPath, syncErr)
-	}
-	if closeErr := tempFile.Close(); closeErr != nil {
-		return fmt.Errorf("close temp file %s: %w", tempPath, closeErr)
-	}
-	return nil
-}
-
-func writeTempFileAtomically(dir string, filename string, data []byte) (err error) {
-	tempFile, err := os.CreateTemp(dir, filename+".*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temp file in %s: %w", dir, err)
-	}
-	tempPath := tempFile.Name()
-	defer func() {
-		if err != nil {
-			if remErr := os.Remove(tempPath); remErr != nil && !os.IsNotExist(remErr) {
-				err = errors.Join(err, remErr)
-			}
-		}
-	}()
-	if err = writeSyncClose(tempFile, data); err != nil {
-		return err
-	}
-	finalPath := filepath.Join(dir, filename)
-	if renErr := os.Rename(tempPath, finalPath); renErr != nil {
-		return fmt.Errorf("rename %s to %s: %w", tempPath, finalPath, renErr)
-	}
-	return nil
 }

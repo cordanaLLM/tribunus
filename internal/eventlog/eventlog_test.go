@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -661,12 +662,48 @@ func TestTransientReplayErrorRecognizesHeadFailures(t *testing.T) {
 	if transientReplayError(errors.New("eventlog: seq 2: signature does not verify")) {
 		t.Fatal("transientReplayError(bad signature) = true, want false: only a HEAD race is worth a retry")
 	}
+	// Errno 32 is ERROR_SHARING_VIOLATION on Windows, where an append's rename causes it;
+	// elsewhere it is another error and no reason to retry.
+	busy := fmt.Errorf("eventlog: read HEAD.json: %w", &os.PathError{Op: "open", Path: "HEAD.json", Err: syscall.Errno(32)})
+	if got, want := transientReplayError(busy), runtime.GOOS == "windows"; got != want {
+		t.Fatalf("transientReplayError(errno 32 on %s) = %t, want %t", runtime.GOOS, got, want)
+	}
+}
+
+func TestStableBudgetIsTheLockTimeout(t *testing.T) {
+	if got := stableBudget(Limits{}); got != defaultLockTimeout {
+		t.Fatalf("stableBudget(no lock timeout) = %v, want the default %v", got, defaultLockTimeout)
+	}
+	if got := stableBudget(Limits{LockTimeout: 2 * time.Second}); got != 2*time.Second {
+		t.Fatalf("stableBudget(lock timeout 2s) = %v, want 2s", got)
+	}
+}
+
+// TestReplayStableWaitsOutASlowAppend: an append under write load takes about 0.9 s
+// (docs/architecture-v2.md, lock timeout), so a replay waits for HEAD as long as a writer
+// waits for the lock, not a fixed second.
+func TestReplayStableWaitsOutASlowAppend(t *testing.T) {
+	st, err := replayStableWithHeadBackAfter(t, 1500*time.Millisecond, 3*time.Second)
+	if err != nil || len(st.Tasks) != 1 {
+		t.Fatalf("ReplayStable(HEAD restored after 1.5s, lock timeout 3s) = %d tasks, %v, want 1, nil", len(st.Tasks), err)
+	}
 }
 
 // TestReplayStableWaitsOutAnAppendInFlight: a replay that lands between an append's record
 // and its HEAD write succeeds once HEAD is there.
 func TestReplayStableWaitsOutAnAppendInFlight(t *testing.T) {
+	st, err := replayStableWithHeadBackAfter(t, 60*time.Millisecond, defaultLockTimeout)
+	if err != nil || len(st.Tasks) != 1 {
+		t.Fatalf("ReplayStable(HEAD restored after 60ms) = %d tasks, %v, want 1, nil", len(st.Tasks), err)
+	}
+}
+
+// replayStableWithHeadBackAfter removes HEAD after one append, restores it after delay the
+// way an append writes it, and returns what ReplayStable saw meanwhile with lockTimeout.
+func replayStableWithHeadBackAfter(t *testing.T, delay, lockTimeout time.Duration) (State, error) {
+	t.Helper()
 	dir, signer, limits := testLog(t)
+	limits.LockTimeout = lockTimeout
 	appendEvent(t, dir, signer, limits, Event{Type: "task.created", TaskID: "task-1", Payload: raw(`{"state":"open"}`)})
 	head := filepath.Join(dir, "events", "HEAD.json")
 	body, err := os.ReadFile(head)
@@ -681,7 +718,7 @@ func TestReplayStableWaitsOutAnAppendInFlight(t *testing.T) {
 	}
 	restored := make(chan error, 1)
 	go func() {
-		time.Sleep(60 * time.Millisecond)
+		time.Sleep(delay)
 		// An append replaces HEAD atomically; os.WriteFile would show the replay an empty file.
 		restored <- atomicReplace(filepath.Dir(head), filepath.Base(head), body, 0o600)
 	}()
@@ -689,9 +726,7 @@ func TestReplayStableWaitsOutAnAppendInFlight(t *testing.T) {
 	if writeErr := <-restored; writeErr != nil {
 		t.Fatalf("restore HEAD = %v, want nil", writeErr)
 	}
-	if err != nil || len(st.Tasks) != 1 {
-		t.Fatalf("ReplayStable(HEAD restored after 60ms) = %d tasks, %v, want 1, nil", len(st.Tasks), err)
-	}
+	return st, err
 }
 
 func TestReplayStableBoundsItsRetriesAndSkipsThemForOtherErrors(t *testing.T) {

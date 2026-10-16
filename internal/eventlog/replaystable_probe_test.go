@@ -13,7 +13,7 @@ import (
 // goroutine wakes, how long the atomic HEAD write takes, when HEAD is back relative to
 // the start of ReplayStable, and how many rounds failed. It never fails on the numbers.
 func TestProbeReplayStableRestoreLatency(t *testing.T) {
-	const rounds = 60
+	const rounds = 300
 	var wake, write, visible, replay []time.Duration
 	failed := 0
 	for i := 0; i < rounds; i++ {
@@ -72,4 +72,76 @@ func probeSummary(d []time.Duration) string {
 	slices.Sort(s)
 	at := func(q int) time.Duration { return s[(len(s)-1)*q/100] }
 	return "min=" + s[0].String() + " p50=" + at(50).String() + " p90=" + at(90).String() + " p99=" + at(99).String() + " max=" + s[len(s)-1].String()
+}
+
+// TestProbeAtomicReplacePhases times each step of an atomic HEAD replace on its own, to find
+// which one carries the latency tail. A measurement, not a check.
+func TestProbeAtomicReplacePhases(t *testing.T) {
+	const rounds = 400
+	dir := t.TempDir()
+	body := make([]byte, 400)
+	names := []string{"create", "write", "chmod", "fsync", "close", "rename", "syncdir"}
+	phases := make([][]time.Duration, len(names))
+	for i := 0; i < rounds; i++ {
+		d := probeReplacePhases(t, dir, body)
+		for j := 0; j < len(d); j++ {
+			phases[j] = append(phases[j], d[j])
+		}
+	}
+	for j := 0; j < len(names); j++ {
+		t.Logf("PROBE phase %s %s", names[j], probeSummary(phases[j]))
+	}
+}
+
+func probeReplacePhases(t *testing.T, dir string, body []byte) []time.Duration {
+	t.Helper()
+	var d []time.Duration
+	mark := time.Now()
+	lap := func() {
+		now := time.Now()
+		d = append(d, now.Sub(mark))
+		mark = now
+	}
+	tmp, err := os.CreateTemp(dir, ".HEAD.json.tmp-*")
+	lap()
+	if err == nil {
+		_, err = tmp.Write(body)
+		lap()
+	}
+	if err == nil {
+		err = tmp.Chmod(0o600)
+		lap()
+	}
+	if err == nil {
+		err = syncFile(tmp)
+		lap()
+	}
+	if err == nil {
+		err = tmp.Close()
+		lap()
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), filepath.Join(dir, "HEAD.json"))
+		lap()
+	}
+	if err == nil {
+		err = probeSyncDir(dir)
+		lap()
+	}
+	if err != nil {
+		t.Fatalf("replace phase %d = %v, want nil", len(d), err)
+	}
+	return d
+}
+
+func probeSyncDir(dir string) error {
+	f, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	err = syncFile(f)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }

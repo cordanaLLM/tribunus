@@ -13,29 +13,47 @@ import (
 	"time"
 
 	corereceipt "github.com/golusoris/golusoris/core/crypto/receipt"
+	"github.com/golusoris/golusoris/core/retry"
+	"github.com/jonboulle/clockwork"
 )
 
 // retryStable runs op until it succeeds, fails with an error no retry can fix, or budget
-// has passed. budget is the lock timeout: an append in flight holds the lock, so a writer
-// that waits longer would itself give up on the lock.
+// has passed, trying every lockRetryDelay as a writer tries the lock. budget is the lock
+// timeout: an append in flight holds the lock, so a writer that waits longer would itself
+// give up on the lock. It returns op's own result and error, never retry's wrapping of them;
+// only an ended ctx adds its error.
 func retryStable[T any](ctx context.Context, budget time.Duration, op func() (T, error)) (T, error) {
-	deadline := time.Now().Add(budget)
-	var last error
-	var zero T
-	for i := 0; i < stableAttempts(budget); i++ {
-		res, err := op()
-		if err == nil || !transientReplayError(err) {
-			return res, err
-		}
-		last = err
-		if !sleepUntilNextTry(ctx, deadline) {
-			break
-		}
+	if budget <= 0 {
+		return op()
 	}
-	if err := ctx.Err(); err != nil {
+	policy := retry.Policy{
+		Initial:     lockRetryDelay,
+		Max:         lockRetryDelay,
+		Multiplier:  1,
+		MaxAttempts: stableAttempts(budget),
+		Retryable:   transientReplayError,
+	}
+	bounded, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	var res T
+	var last error
+	err := retry.Do(bounded, func(context.Context) error {
+		res, last = op()
+		return last
+	}, policy, clockwork.NewRealClock())
+	var zero T
+	switch {
+	case err == nil:
+		return res, nil
+	case errors.Is(err, retry.ErrPermanent):
+		return res, last
+	case ctx.Err() != nil:
+		return zero, fmt.Errorf("eventlog: replay: %w", ctx.Err())
+	case last != nil:
+		return zero, last
+	default:
 		return zero, fmt.Errorf("eventlog: replay: %w", err)
 	}
-	return zero, last
 }
 
 // stableBudget is how long a stable replay waits out an append in flight: the lock
@@ -414,23 +432,4 @@ func stableAttempts(budget time.Duration) int {
 		return 1
 	}
 	return int(budget/lockRetryDelay) + 2
-}
-
-// sleepUntilNextTry waits lockRetryDelay, or what is left until deadline when that is less.
-// It reports false when deadline has passed or ctx ended.
-func sleepUntilNextTry(ctx context.Context, deadline time.Time) bool {
-	wait := lockRetryDelay
-	if remaining := time.Until(deadline); remaining <= 0 {
-		return false
-	} else if remaining < wait {
-		wait = remaining
-	}
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
 }

@@ -90,10 +90,14 @@ func TestFetchLiteLLMPrices_Positive(t *testing.T) {
 	}))
 	defer server.Close()
 
-	records, err := fetchLiteLLMPrices(context.Background(), server.URL)
+	res, err := fetchLiteLLMPricesWithReport(context.Background(), server.URL)
 	if err != nil {
-		t.Fatalf("fetchLiteLLMPrices() = %v", err)
+		t.Fatalf("fetchLiteLLMPricesWithReport() = %v", err)
 	}
+	if res.Malformed != 0 {
+		t.Fatalf("res.Malformed = %d, want 0", res.Malformed)
+	}
+	records := res.Records
 	if len(records) != 1 {
 		t.Fatalf("got %d records, want 1 (sample_spec skipped)", len(records))
 	}
@@ -114,8 +118,8 @@ func TestFetchLiteLLMPrices_Positive(t *testing.T) {
 
 func TestFetchLiteLLMPrices_Negative(t *testing.T) {
 	t.Run("unreachable", func(t *testing.T) {
-		if _, err := fetchLiteLLMPrices(context.Background(), "http://127.0.0.1:1"); err == nil {
-			t.Fatal("fetchLiteLLMPrices() = nil error, want failure for an unreachable host")
+		if _, err := fetchLiteLLMPricesWithReport(context.Background(), "http://127.0.0.1:1"); err == nil {
+			t.Fatal("fetchLiteLLMPricesWithReport() = nil error, want failure for an unreachable host")
 		}
 	})
 
@@ -124,8 +128,8 @@ func TestFetchLiteLLMPrices_Negative(t *testing.T) {
 			_, _ = w.Write([]byte("[]")) //nolint:errcheck // an array, not the expected object; a write failure here would fail the test's own HTTP round trip, not silently corrupt anything
 		}))
 		defer server.Close()
-		if _, err := fetchLiteLLMPrices(context.Background(), server.URL); err == nil {
-			t.Fatal("fetchLiteLLMPrices() = nil error, want failure for a body that is not an object")
+		if _, err := fetchLiteLLMPricesWithReport(context.Background(), server.URL); err == nil {
+			t.Fatal("fetchLiteLLMPricesWithReport() = nil error, want failure for a body that is not an object")
 		}
 	})
 }
@@ -143,8 +147,8 @@ func TestFetchLiteLLMPrices_AllMalformedRefused(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if _, err := fetchLiteLLMPrices(context.Background(), server.URL); err == nil {
-		t.Fatal("fetchLiteLLMPrices() = nil error, want refusal when every model entry is malformed")
+	if _, err := fetchLiteLLMPricesWithReport(context.Background(), server.URL); err == nil {
+		t.Fatal("fetchLiteLLMPricesWithReport() = nil error, want refusal when every model entry is malformed")
 	}
 }
 
@@ -157,10 +161,14 @@ func TestFetchLiteLLMPrices_Boundary(t *testing.T) {
 	}))
 	defer server.Close()
 
-	records, err := fetchLiteLLMPrices(context.Background(), server.URL)
+	res, err := fetchLiteLLMPricesWithReport(context.Background(), server.URL)
 	if err != nil {
-		t.Fatalf("fetchLiteLLMPrices() = %v", err)
+		t.Fatalf("fetchLiteLLMPricesWithReport() = %v", err)
 	}
+	if res.Malformed != 0 {
+		t.Fatalf("res.Malformed = %d, want 0", res.Malformed)
+	}
+	records := res.Records
 	if len(records) != 1 || records[0].ContextWindow == nil || *records[0].ContextWindow != 4096 {
 		t.Fatalf("records = %+v, want one record with ContextWindow=4096 from the max_tokens fallback", records)
 	}
@@ -180,10 +188,14 @@ func TestFetchLiteLLMPrices_ResponseCap(t *testing.T) {
 	t.Run("exactly at cap", func(t *testing.T) {
 		server := serve(maxResponseBytes)
 		defer server.Close()
-		records, err := fetchLiteLLMPrices(context.Background(), server.URL)
+		res, err := fetchLiteLLMPricesWithReport(context.Background(), server.URL)
 		if err != nil {
-			t.Fatalf("fetchLiteLLMPrices() = %v, want success at cap", err)
+			t.Fatalf("fetchLiteLLMPricesWithReport() = %v, want success at cap", err)
 		}
+		if res.Malformed != 0 {
+			t.Fatalf("res.Malformed = %d, want 0", res.Malformed)
+		}
+		records := res.Records
 		if len(records) != 1 {
 			t.Fatalf("records count = %d, want 1", len(records))
 		}
@@ -192,9 +204,9 @@ func TestFetchLiteLLMPrices_ResponseCap(t *testing.T) {
 	t.Run("one byte over cap", func(t *testing.T) {
 		server := serve(maxResponseBytes + 1)
 		defer server.Close()
-		_, err := fetchLiteLLMPrices(context.Background(), server.URL)
+		_, err := fetchLiteLLMPricesWithReport(context.Background(), server.URL)
 		if !errors.Is(err, client.ErrBodyTooLarge) {
-			t.Fatalf("fetchLiteLLMPrices() err = %v, want ErrBodyTooLarge", err)
+			t.Fatalf("fetchLiteLLMPricesWithReport() err = %v, want ErrBodyTooLarge", err)
 		}
 	})
 }

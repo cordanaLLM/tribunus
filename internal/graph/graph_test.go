@@ -334,10 +334,10 @@ func TestApplyCommitErrorNamesCauseAndLeavesGraphUnchanged(t *testing.T) {
 		stage.AddEdge(Edge{NodeID: "b", DependsOn: "a"})
 	})
 	before := graphJCS(t, g)
-	next, err := g.Apply(Event{Type: EventEdgeAdded, Edge: Edge{NodeID: "a", DependsOn: "b"}})
+	next, err := g.ApplyStage([]Event{{Type: EventEdgeAdded, Edge: Edge{NodeID: "a", DependsOn: "b"}}})
 	requireErrContains(t, err, "cycle includes node")
 	if next != nil {
-		t.Fatalf("Apply(cycle) returned graph, want nil")
+		t.Fatalf("ApplyStage(cycle) returned graph, want nil")
 	}
 	requireEqualBytes(t, graphJCS(t, g), before)
 }
@@ -345,15 +345,15 @@ func TestApplyCommitErrorNamesCauseAndLeavesGraphUnchanged(t *testing.T) {
 func TestApplyReducerPureAndUnknownEventRefused(t *testing.T) {
 	g := mustGraph(t, 12)
 	before := graphJCS(t, g)
-	next, err := g.Apply(Event{Type: EventNodeAdded, Node: validNode("a")})
+	next, err := g.ApplyStage([]Event{{Type: EventNodeAdded, Node: validNode("a")}})
 	if err != nil {
-		t.Fatalf("Apply(node_added) = %v, want nil", err)
+		t.Fatalf("ApplyStage(node_added) = %v, want nil", err)
 	}
 	requireEqualBytes(t, graphJCS(t, g), before)
 	if bytes.Equal(graphJCS(t, next), before) {
-		t.Fatalf("Apply(node_added) did not change returned graph")
+		t.Fatalf("ApplyStage(node_added) did not change returned graph")
 	}
-	_, err = g.Apply(Event{Type: "graph.unknown"})
+	_, err = g.ApplyStage([]Event{{Type: "graph.unknown"}})
 	requireErrContains(t, err, "event type")
 	requireEqualBytes(t, graphJCS(t, g), before)
 }
@@ -364,8 +364,8 @@ func TestNilGraphAPIsReturnErrors(t *testing.T) {
 		_, err := g.Clone()
 		return err
 	})
-	requireNoPanicErrContains(t, "Apply", "nil graph", func() error {
-		_, err := g.Apply(Event{Type: "graph.unknown"})
+	requireNoPanicErrContains(t, "ApplyStage", "nil graph", func() error {
+		_, err := g.ApplyStage([]Event{{Type: "graph.unknown"}})
 		return err
 	})
 	requireNoPanicErrContains(t, "Snapshot", "nil graph", func() error {

@@ -49,11 +49,6 @@ type liteLLMPriceResult struct {
 	Malformed int
 }
 
-func fetchLiteLLMPrices(ctx context.Context, url string) ([]catalog.Record, error) {
-	res, err := fetchLiteLLMPricesWithReport(ctx, url)
-	return res.Records, err
-}
-
 func fetchLiteLLMPricesWithReport(ctx context.Context, url string) (liteLLMPriceResult, error) {
 	body, err := httpfetch.Get(ctx, url, requestTimeout, maxResponseBytes)
 	if err != nil {

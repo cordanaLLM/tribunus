@@ -54,10 +54,14 @@ func TestFetchOpenRouter_Positive(t *testing.T) {
 	}))
 	defer server.Close()
 
-	records, err := fetchOpenRouter(context.Background(), server.URL)
+	res, err := fetchOpenRouterWithReport(context.Background(), server.URL)
 	if err != nil {
-		t.Fatalf("fetchOpenRouter() = %v", err)
+		t.Fatalf("fetchOpenRouterWithReport() = %v", err)
 	}
+	if res.Rejected != 0 {
+		t.Fatalf("res.Rejected = %d, want 0", res.Rejected)
+	}
+	records := res.Records
 	if len(records) != 1 {
 		t.Fatalf("got %d records, want 1", len(records))
 	}
@@ -87,8 +91,8 @@ func mustReadFixture(t *testing.T, path string) []byte {
 
 func TestFetchOpenRouter_Negative(t *testing.T) {
 	t.Run("unreachable", func(t *testing.T) {
-		if _, err := fetchOpenRouter(context.Background(), "http://127.0.0.1:1"); err == nil {
-			t.Fatal("fetchOpenRouter() = nil error, want failure for an unreachable host")
+		if _, err := fetchOpenRouterWithReport(context.Background(), "http://127.0.0.1:1"); err == nil {
+			t.Fatal("fetchOpenRouterWithReport() = nil error, want failure for an unreachable host")
 		}
 	})
 
@@ -97,8 +101,8 @@ func TestFetchOpenRouter_Negative(t *testing.T) {
 			_, _ = w.Write([]byte("{not json")) //nolint:errcheck // test httptest server response; a write failure here would fail the test's own HTTP round trip, not silently corrupt anything
 		}))
 		defer server.Close()
-		if _, err := fetchOpenRouter(context.Background(), server.URL); err == nil {
-			t.Fatal("fetchOpenRouter() = nil error, want failure for a malformed body")
+		if _, err := fetchOpenRouterWithReport(context.Background(), server.URL); err == nil {
+			t.Fatal("fetchOpenRouterWithReport() = nil error, want failure for a malformed body")
 		}
 	})
 }
@@ -111,10 +115,11 @@ func TestFetchOpenRouter_Boundary(t *testing.T) {
 	}))
 	defer server.Close()
 
-	records, err := fetchOpenRouter(context.Background(), server.URL)
+	res, err := fetchOpenRouterWithReport(context.Background(), server.URL)
 	if err != nil {
-		t.Fatalf("fetchOpenRouter() = %v", err)
+		t.Fatalf("fetchOpenRouterWithReport() = %v", err)
 	}
+	records := res.Records
 	if len(records) != 1 {
 		t.Fatalf("got %d records, want 1", len(records))
 	}
@@ -135,10 +140,11 @@ func TestFetchOpenRouter_VariablePriceIsAbsent(t *testing.T) {
 	}))
 	defer server.Close()
 
-	records, err := fetchOpenRouter(context.Background(), server.URL)
+	res, err := fetchOpenRouterWithReport(context.Background(), server.URL)
 	if err != nil {
-		t.Fatalf("fetchOpenRouter() = %v", err)
+		t.Fatalf("fetchOpenRouterWithReport() = %v", err)
 	}
+	records := res.Records
 	if len(records) != 1 {
 		t.Fatalf("got %d records, want 1", len(records))
 	}
@@ -227,10 +233,11 @@ func TestFetchOpenRouter_ResponseCap(t *testing.T) {
 	t.Run("exactly at cap", func(t *testing.T) {
 		server := serve(maxResponseBytes)
 		defer server.Close()
-		records, err := fetchOpenRouter(context.Background(), server.URL)
+		res, err := fetchOpenRouterWithReport(context.Background(), server.URL)
 		if err != nil {
-			t.Fatalf("fetchOpenRouter() = %v, want success at cap", err)
+			t.Fatalf("fetchOpenRouterWithReport() = %v, want success at cap", err)
 		}
+		records := res.Records
 		if len(records) != 1 {
 			t.Fatalf("records count = %d, want 1", len(records))
 		}
@@ -239,9 +246,9 @@ func TestFetchOpenRouter_ResponseCap(t *testing.T) {
 	t.Run("one byte over cap", func(t *testing.T) {
 		server := serve(maxResponseBytes + 1)
 		defer server.Close()
-		_, err := fetchOpenRouter(context.Background(), server.URL)
+		_, err := fetchOpenRouterWithReport(context.Background(), server.URL)
 		if !errors.Is(err, client.ErrBodyTooLarge) {
-			t.Fatalf("fetchOpenRouter() err = %v, want ErrBodyTooLarge", err)
+			t.Fatalf("fetchOpenRouterWithReport() err = %v, want ErrBodyTooLarge", err)
 		}
 	})
 }

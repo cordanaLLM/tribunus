@@ -1,0 +1,51 @@
+name: Soak
+
+# The soak tests run a component for hundreds of cycles and check that its state, memory,
+# processes and file descriptors stay within fixed bounds. They are opt-in (EPITROP_SOAK=1),
+# so the default go test stays fast; this job runs them weekly and on demand.
+on:
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  soak:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: 'go.mod'
+      - name: Run the soak tests
+        # Each package runs on its own, so a package whose soak test skipped or is missing
+        # fails the job instead of hiding behind another package's pass.
+        env:
+          EPITROP_SOAK: '1'
+        run: |
+          set -o pipefail
+          status=0
+          for pkg in ./internal/releasewatch/ ./internal/supervisor/; do
+            log="$RUNNER_TEMP/soak-$(basename "$pkg").log"
+            go test -count=1 -run '^TestSoak' -v "$pkg" 2>&1 | tee "$log" || status=1
+            if ! grep -q -- '--- PASS: TestSoak' "$log"; then
+              echo "::error::$pkg: no soak test passed"
+              status=1
+            fi
+            if grep -q -- '--- SKIP: TestSoak' "$log"; then
+              echo "::error::$pkg: a soak test skipped"
+              status=1
+            fi
+            {
+              echo "### $pkg"
+              echo '```text'
+              grep -o 'soak: .*' "$log" || echo 'no measured bounds'
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          done
+          exit "$status"

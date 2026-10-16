@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	corereceipt "github.com/golusoris/golusoris/core/crypto/receipt"
 	"github.com/jonboulle/clockwork"
 	"github.com/tekmora/epitrop/internal/config"
 	"github.com/tekmora/epitrop/internal/eventlog"
@@ -18,15 +19,27 @@ import (
 	"github.com/tekmora/epitrop/internal/units"
 )
 
+const eventLogOpenTimeout = 30 * time.Second
+
 var newUnitsService = func(cfg config.Config) (*units.Service, error) {
-	clk := clockwork.NewRealClock()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	signer, err := eventlog.NewSignerFromKeyFile(ctx, cfg.EventLog.SigningKeyPath, cfg.EventLog.Dir, clk)
+	signer, clk, err := eventLogSigner(cfg)
 	if err != nil {
 		return nil, err
 	}
 	return units.NewService(cfg.EventLog.Dir, signer, clk, eventLogLimits(cfg, clk))
+}
+
+// eventLogSigner opens the signing key for the event log with a bounded context and
+// returns the signer and the clock used to initialize it.
+func eventLogSigner(cfg config.Config) (*corereceipt.Signer, clockwork.Clock, error) {
+	clk := clockwork.NewRealClock()
+	ctx, cancel := context.WithTimeout(context.Background(), eventLogOpenTimeout)
+	defer cancel()
+	signer, err := eventlog.NewSignerFromKeyFile(ctx, cfg.EventLog.SigningKeyPath, cfg.EventLog.Dir, clk)
+	if err != nil {
+		return nil, nil, fmt.Errorf("epitropctl: event-log signer %s: %w", cfg.EventLog.SigningKeyPath, err)
+	}
+	return signer, clk, nil
 }
 
 // eventLogLimits are the limits a command reads and writes the event log under: the

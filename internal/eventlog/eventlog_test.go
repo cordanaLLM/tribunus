@@ -175,6 +175,13 @@ func slowSync(t *testing.T, d time.Duration) {
 // appendConcurrently starts total writers at once, one record each, and returns their results.
 func appendConcurrently(t testing.TB, dir string, signer *corereceipt.Signer, limits Limits, total int) []error {
 	t.Helper()
+	return appendConcurrentlyWithin(t, testContext(t), dir, signer, limits, total)
+}
+
+// appendConcurrentlyWithin is appendConcurrently under the caller's context, for a test
+// whose writers may wait longer than testContext allows.
+func appendConcurrentlyWithin(t testing.TB, ctx context.Context, dir string, signer *corereceipt.Signer, limits Limits, total int) []error {
+	t.Helper()
 	var wg sync.WaitGroup
 	errs := make(chan error, total)
 	for i := 0; i < total; i++ {
@@ -182,7 +189,7 @@ func appendConcurrently(t testing.TB, dir string, signer *corereceipt.Signer, li
 		go func(id int) {
 			defer wg.Done()
 			ev := Event{Type: "task.created", TaskID: "task-" + jsonInt(id), Payload: raw(`{"state":"open"}`)}
-			_, err := openWriter(t, dir, signer, limits).Append(testContext(t), ev)
+			_, err := openWriter(t, dir, signer, limits).Append(ctx, ev)
 			errs <- err
 		}(i)
 	}
@@ -291,7 +298,7 @@ func TestQueuedAppendersFailClosedWhenTheLockTimeoutIsShorterThanTheQueue(t *tes
 
 // Sixteen queued writers on a real disk under load must all commit without timing out or
 // leaving gaps, and the test logs what an append cost (#83, #146). Under the workflow's
-// load the queue can outlast the default timeout (3 of 10 runs did), so the test waits as
+// load sixteen appends have taken up to 15 s, past the default timeout, so the test waits as
 // the docs advise for a slow disk: with a timeout that only ends a failing run. The test
 // is gated by EPITROP_EVENTLOG_LOAD_TEST=1 because it needs real filesystem syncs under
 // write load; the eventlog-load.yml workflow runs it against a btrfs mount under stress-ng.
@@ -303,8 +310,11 @@ func TestQueuedAppendersUnderLoad(t *testing.T) {
 	dir, signer, limits := testLog(t)
 	limits.LockTimeout = lockTimeout
 	const total = 16
+	// testContext ends after 5 s, and a cancelled context ends the lock wait too.
+	ctx, cancel := context.WithTimeout(t.Context(), lockTimeout+10*time.Second)
+	defer cancel()
 	start := time.Now()
-	errs := appendConcurrently(t, dir, signer, limits, total)
+	errs := appendConcurrentlyWithin(t, ctx, dir, signer, limits, total)
 	elapsed := time.Since(start)
 	t.Logf("%d queued appends took %s, %s an append", total, elapsed.Round(time.Millisecond), (elapsed / total).Round(time.Millisecond))
 	for i := 0; i < len(errs); i++ {

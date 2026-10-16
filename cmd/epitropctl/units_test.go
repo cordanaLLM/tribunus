@@ -34,7 +34,7 @@ func writeUnitsConfig(t *testing.T) (string, string) {
 		t.Fatalf("MkdirAll(state/.git) = %v", err)
 	}
 	cfgPath := filepath.Join(base, "config.json")
-	body := fmt.Sprintf(`{"event_log":{"dir":"%s","signing_key_path":"%s"}}`, stateDir, keyPath)
+	body := fmt.Sprintf(`{"event_log":{"dir":%s,"signing_key_path":%s}}`, jsonQuote(stateDir), jsonQuote(keyPath))
 	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
 		t.Fatalf("WriteFile(config) = %v", err)
 	}

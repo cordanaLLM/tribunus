@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -12,8 +13,12 @@ import (
 const testHomeSum = "2b2b6ccccf382af02ad9641bc858d389999f79ced50cbd5213b79298f79091b0"
 
 func testHome() *SandboxHome {
+	source := "/srv/slot-home"
+	if !filepath.IsAbs(source) {
+		source = filepath.Join(os.TempDir(), "slot-home")
+	}
 	return &SandboxHome{
-		Source: "/srv/slot-home", Env: "CODEX_HOME",
+		Source: source, Env: "CODEX_HOME",
 		Copy: []SandboxHomeCopy{{File: "config.toml", SHA256: testHomeSum}},
 		Bind: []SandboxHomeBind{{File: "auth.json", JWT: "tokens.access_token"}},
 	}
@@ -101,6 +106,9 @@ func (w sandboxPathWorld) loadHome(t *testing.T, roots []string, source string, 
 // A home's source is checked as an input is: in a root, clear of login locations and of the
 // protected paths. It must not lie in the workspace either, which the job writes.
 func TestLoadSandboxHomeSource(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the sandbox does not run on Windows")
+	}
 	w := newSandboxPathWorld(t)
 	w.plantLogins(t)
 	ws := filepath.Join(w.root, "ws")

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -613,6 +614,9 @@ func TestListenBoundaryDestinationsAndSocketPath(t *testing.T) {
 }
 
 func TestListenMakesAPrivateSocketDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the egress proxy does not run on Windows")
+	}
 	server := startServer(t, Options{Destinations: []string{"gateway.example:443"}})
 	info, err := os.Stat(server.dir)
 	if err != nil || info.Mode().Perm() != 0o700 {

@@ -7,6 +7,7 @@ package eventlog
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	corereceipt "github.com/golusoris/golusoris/core/crypto/receipt"
@@ -307,6 +308,9 @@ func TestCheckpointWrongSignerOrCommandSkipped(t *testing.T) {
 // TestCheckpointDirectoryUnreadableIsListed shows that a checkpoint directory replay cannot
 // read gives a full replay with the cause listed, never a silent one.
 func TestCheckpointDirectoryUnreadableIsListed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("reading a file as a directory does not error on windows")
+	}
 	dir, signer, limits := testLog(t)
 	ctx := testContext(t)
 	appendEvent(t, dir, signer, limits, Event{Type: "task.created", TaskID: "task-1", Payload: raw(`{"state":"open"}`)})

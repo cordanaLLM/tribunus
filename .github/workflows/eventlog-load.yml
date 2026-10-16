@@ -1,0 +1,126 @@
+name: Event log under load
+
+# Acceptance for issue #83 and #146: queued appenders must pass repeatedly
+# within the default lock timeout when the temporary directory is hosted on a
+# btrfs filesystem under write load. A path filter runs this workflow only on
+# changes to the event log implementation or dependencies, sparing runner time
+# on unrelated changes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'internal/eventlog/**'
+      - '.github/workflows/eventlog-load.yml'
+      - 'go.mod'
+      - 'go.sum'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'internal/eventlog/**'
+      - '.github/workflows/eventlog-load.yml'
+      - 'go.mod'
+      - 'go.sum'
+
+permissions:
+  contents: read
+
+jobs:
+  load:
+    name: btrfs under load
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: 'go.mod'
+      - name: Install btrfs-progs and stress-ng
+        # btrfs-progs provides mkfs.btrfs to format the loopback image; stress-ng provides
+        # the concurrent CPU and disk write load that exercises the default lock timeout.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends btrfs-progs stress-ng
+      - name: Mount loopback btrfs filesystem
+        # A 4 GiB loopback image formatted as btrfs and mounted as TMPDIR ensures Go tests
+        # allocate temporary event log directories directly on btrfs.
+        run: |
+          IMG="$RUNNER_TEMP/btrfs.img"
+          MNT="$RUNNER_TEMP/btrfs"
+          fallocate -l 4G "$IMG"
+          DEV=$(sudo losetup --find --show "$IMG")
+          echo "$DEV" > "$RUNNER_TEMP/loopdev"
+          sudo mkfs.btrfs -q "$DEV"
+          mkdir -p "$MNT"
+          sudo mount "$DEV" "$MNT"
+          sudo chown "$(id -u):$(id -g)" "$MNT"
+          echo "TMPDIR=$MNT" >> "$GITHUB_ENV"
+          findmnt -T "$MNT"
+          FSTYPE=$(findmnt -n -o FSTYPE -T "$MNT")
+          if [ "$FSTYPE" != "btrfs" ]; then
+            echo "Expected filesystem btrfs, got $FSTYPE" >&2
+            exit 1
+          fi
+      - name: Start background stress load
+        # stress-ng applies continuous disk and CPU load to the btrfs mount so that the
+        # queue of concurrent event log writers contends with real background I/O.
+        run: |
+          stress-ng --cpu "$(nproc)" --hdd 2 --hdd-bytes 512M --temp-path "$RUNNER_TEMP/btrfs" --timeout 15m &
+          echo $! > "$RUNNER_TEMP/stress-ng.pid"
+          sleep 2
+          uptime
+      - name: Verify queued appenders within default lock timeout under load
+        # Runs the load test 10 times consecutively under stress-ng write pressure.
+        # Every run must pass and none may skip; any lock timeout or error fails the step.
+        run: |
+          set -o pipefail
+          OUT="$RUNNER_TEMP/load-test.log"
+          EPITROP_EVENTLOG_LOAD_TEST=1 go test -count=10 -run '^TestQueuedAppendersWithinTheDefaultLockTimeout$' -v ./internal/eventlog/ 2>&1 | tee "$OUT"
+          if grep -q -- "--- SKIP" "$OUT"; then
+            echo "Test was skipped; expected to run on btrfs under load" >&2
+            exit 1
+          fi
+          PASS_COUNT=$(awk '/--- PASS: TestQueuedAppendersWithinTheDefaultLockTimeout/ { n++ } END { print n + 0 }' "$OUT")
+          if [ "$PASS_COUNT" -ne 10 ]; then
+            echo "Expected 10 pass results, got $PASS_COUNT" >&2
+            exit 1
+          fi
+      - name: Benchmark queued appenders
+        # BenchmarkQueuedAppenders measures queue latency (ns/append) under load and
+        # writes the result along with current system load to the GitHub step summary.
+        run: |
+          set -o pipefail
+          BENCH_LOG="$RUNNER_TEMP/bench.log"
+          go test -run '^$' -bench BenchmarkQueuedAppenders -benchtime=10x ./internal/eventlog/ 2>&1 | tee "$BENCH_LOG"
+          NS_LINE=$(grep "ns/append" "$BENCH_LOG")
+          LOAD_AVG=$(uptime)
+          echo "$NS_LINE ($LOAD_AVG)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Cleanup stress-ng and btrfs loopback mount
+        # Stops background stress-ng by its recorded PID (never pkill), unmounts the btrfs
+        # filesystem, and detaches the loop device even if previous steps failed.
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/stress-ng.pid" ]; then
+            PID=$(cat "$RUNNER_TEMP/stress-ng.pid")
+            if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+              if ! kill "$PID"; then
+                echo "stress-ng $PID ended before the stop"
+              fi
+              tries=0
+              while kill -0 "$PID" 2>/dev/null && [ "$tries" -lt 30 ]; do
+                tries=$((tries + 1))
+                sleep 0.2
+              done
+            fi
+          fi
+          MNT="$RUNNER_TEMP/btrfs"
+          if findmnt "$MNT" >/dev/null 2>&1; then
+            sudo umount "$MNT"
+          fi
+          if [ -f "$RUNNER_TEMP/loopdev" ]; then
+            DEV=$(cat "$RUNNER_TEMP/loopdev")
+            if [ -n "$DEV" ]; then
+              sudo losetup -d "$DEV"
+            fi
+          fi

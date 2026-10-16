@@ -289,6 +289,27 @@ func TestQueuedAppendersFailClosedWhenTheLockTimeoutIsShorterThanTheQueue(t *tes
 	requireContiguous(t, dir, total-timedOut)
 }
 
+// Sixteen queued writers on a real disk under load must all commit within the default
+// lock timeout without timing out or leaving gaps (#83, #146). The test is gated by
+// EPITROP_EVENTLOG_LOAD_TEST=1 because it needs real filesystem syncs under write load;
+// the eventlog-load.yml workflow runs it against a btrfs mount under stress-ng.
+func TestQueuedAppendersWithinTheDefaultLockTimeout(t *testing.T) {
+	if os.Getenv("EPITROP_EVENTLOG_LOAD_TEST") != "1" {
+		t.Skip("real disk under load, run by workflow eventlog-load.yml")
+	}
+	const lockTimeout = defaultLockTimeout
+	dir, signer, limits := testLog(t)
+	limits.LockTimeout = lockTimeout
+	const total = 16
+	errs := appendConcurrently(t, dir, signer, limits, total)
+	for i := 0; i < len(errs); i++ {
+		if errs[i] != nil {
+			t.Fatalf("queued Append() = %v, want nil", errs[i])
+		}
+	}
+	requireContiguous(t, dir, total)
+}
+
 // An append costs four syncs: the record's file and its directory, then HEAD's file and the
 // directory again. The cost of queued writers in the docs is counted from this number, and
 // the slow-disk tests slow down exactly these calls.

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tekmora/epitrop/catalog"
+	"github.com/tekmora/epitrop/internal/atomicfile"
 	"github.com/tekmora/epitrop/internal/sources/codexlocal"
 	"github.com/tekmora/epitrop/internal/sources/litellmgateway"
 	"github.com/tekmora/epitrop/internal/sources/ollamalocal"
@@ -301,18 +302,15 @@ func formatSourceLine(name string, o sourceOutcome) string {
 	return line
 }
 
-// writeSnapshotFile writes data to path, creating parent directories as
-// needed. path comes from a local CLI flag the operator controls directly,
-// not untrusted input, so a plain create-or-truncate write is sufficient.
+// writeSnapshotFile replaces path with data atomically, creating parent directories as
+// needed, so a reader or a crash never sees a half-written snapshot.
 func writeSnapshotFile(path string, data []byte) error {
 	if dir := filepath.Dir(path); dir != "." {
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return fmt.Errorf("create output directory %s: %w", dir, err)
 		}
 	}
-	// #nosec G703 -- path is the --out flag the operator supplies directly,
-	// the same trust level as any other path the operator passes.
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := atomicfile.Replace(path, data, 0o600); err != nil {
 		return fmt.Errorf("write snapshot %s: %w", path, err)
 	}
 	return nil

@@ -42,6 +42,8 @@ epitropctl show --in=/tmp/snapshot.json
 epitropctl schema
 ```
 
+The snapshot is replaced atomically: `sync` writes a temporary file beside `--out`, flushes it and renames it over the old file (`internal/atomicfile`), so a reader or a crash never sees half a snapshot.
+
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--sources` | all four, in the order of the table below | comma-separated; an empty, duplicate or unknown entry is an error |

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -369,11 +370,30 @@ func TestKeyInRepoTreeRefused(t *testing.T) {
 }
 
 func TestKeyMode0644Refused(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Go reports 0666 for every writable file on Windows; the mode check does not run there")
+	}
 	base := t.TempDir()
 	keyPath := filepath.Join(base, "seed.hex")
 	writeKey(t, keyPath, 0o644)
-	_, err := NewSignerFromKeyFile(testContext(t), keyPath, filepath.Join("/var/tmp", "epitrop-eventlog-test"), testLimits().Clock)
+	_, err := NewSignerFromKeyFile(testContext(t), keyPath, filepath.Join(t.TempDir(), "epitrop-eventlog-test"), testLimits().Clock)
 	assertErrContains(t, err, "group or other")
+}
+
+func TestKeyModeWindowsAccepts0666(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-specific test: windows reports 0666 for all files")
+	}
+	base := t.TempDir()
+	keyPath := filepath.Join(base, "seed.hex")
+	writeKey(t, keyPath, 0o666)
+	signer, err := NewSignerFromKeyFile(testContext(t), keyPath, filepath.Join(base, "eventlog"), testLimits().Clock)
+	if err != nil {
+		t.Fatalf("NewSignerFromKeyFile() = %v, want nil on windows", err)
+	}
+	if signer == nil {
+		t.Fatal("signer is nil, want non-nil")
+	}
 }
 
 func TestMaxReplayRecordsExceeded(t *testing.T) {

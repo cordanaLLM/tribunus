@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/tekmora/epitrop/internal/atomicfile"
 	"github.com/tekmora/epitrop/internal/eventlog"
 	"github.com/tekmora/epitrop/internal/units"
 )
@@ -238,21 +238,7 @@ func writeResumeUnit(b *bytes.Buffer, h HandoverUnit) {
 // WriteResumeNote replaces path with body through a file beside it, so a reader never sees
 // half a note.
 func WriteResumeNote(path string, body []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
-	if err != nil {
-		return fmt.Errorf("slot: resume note: %w", err)
-	}
-	_, err = tmp.Write(body)
-	if closeErr := tmp.Close(); closeErr != nil && err == nil {
-		err = closeErr
-	}
-	if err == nil {
-		err = os.Rename(tmp.Name(), path)
-	}
-	if err != nil {
-		if removeErr := os.Remove(tmp.Name()); removeErr != nil && !os.IsNotExist(removeErr) {
-			err = errors.Join(err, removeErr)
-		}
+	if err := atomicfile.Replace(path, body, 0o600); err != nil {
 		return fmt.Errorf("slot: write resume note %s: %w", path, err)
 	}
 	return nil

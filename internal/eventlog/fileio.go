@@ -11,7 +11,7 @@ import (
 // syncFile writes a file's or a directory's data to disk. An append calls it four times,
 // twice for the record and twice for HEAD, and that is what an append costs on a slow disk.
 // The tests replace it to make a disk slow.
-var syncFile = func(f *os.File) error { return f.Sync() }
+var syncFile = atomicfile.Sync
 
 func atomicReplace(dir string, name string, body []byte, mode os.FileMode) error {
 	dst := filepath.Join(dir, name)

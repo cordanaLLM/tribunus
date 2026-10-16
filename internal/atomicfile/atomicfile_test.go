@@ -148,7 +148,7 @@ func TestSyncHookCountsTwoCallsOnSuccess(t *testing.T) {
 	calls := 0
 	syncFn := func(f *os.File) error {
 		calls++
-		return f.Sync()
+		return Sync(f)
 	}
 	if err := ReplaceWithSync(target, []byte("durable"), 0o600, syncFn); err != nil {
 		t.Fatalf("ReplaceWithSync() = %v, want nil", err)
@@ -198,7 +198,7 @@ func TestSyncHookFailingOnDirSyncReturnsError(t *testing.T) {
 		if calls == 2 {
 			return dirSyncErr
 		}
-		return f.Sync()
+		return Sync(f)
 	}
 	err := ReplaceWithSync(target, []byte("data"), 0o600, syncFn)
 	if err == nil {
@@ -259,5 +259,20 @@ func TestRemoveTempIgnoresMissing(t *testing.T) {
 	gotErr := removeTemp(filepath.Join(t.TempDir(), "nonexistent"), cause)
 	if !errors.Is(gotErr, cause) || gotErr.Error() != cause.Error() {
 		t.Fatalf("removeTemp() = %v, want the cause alone: %v", gotErr, cause)
+	}
+}
+
+func TestSyncFlushesADirectoryOnEveryPlatform(t *testing.T) {
+	dir, err := os.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open dir: %v", err)
+	}
+	t.Cleanup(func() {
+		if cerr := dir.Close(); cerr != nil {
+			t.Errorf("close dir: %v", cerr)
+		}
+	})
+	if err = Sync(dir); err != nil {
+		t.Fatalf("Sync(directory) = %v, want nil", err)
 	}
 }

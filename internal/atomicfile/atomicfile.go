@@ -5,21 +5,38 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 )
+
+// Sync flushes f to disk. On Windows it skips a directory: Windows flushes no directory
+// handle (FlushFileBuffers on one fails with Access is denied), and NTFS journals the
+// rename itself.
+func Sync(f *os.File) error {
+	if runtime.GOOS == "windows" {
+		info, err := f.Stat()
+		if err != nil {
+			return fmt.Errorf("atomicfile: stat %s: %w", f.Name(), err)
+		}
+		if info.IsDir() {
+			return nil
+		}
+	}
+	return f.Sync()
+}
 
 // Replace atomically replaces path with body, setting permissions to mode.
 // It writes to a temporary file beside path, flushes it with fsync, closes it,
-// renames it to path, and flushes the parent directory.
+// renames it to path, and flushes the parent directory (see Sync for Windows).
 // On any failure, the temporary file is removed and errors are joined.
 func Replace(path string, body []byte, mode os.FileMode) error {
-	return ReplaceWithSync(path, body, mode, (*os.File).Sync)
+	return ReplaceWithSync(path, body, mode, Sync)
 }
 
 // ReplaceWithSync atomically replaces path with body and mode, using syncFn to flush
 // the temporary file and parent directory to disk.
 func ReplaceWithSync(path string, body []byte, mode os.FileMode, syncFn func(*os.File) error) error {
 	if syncFn == nil {
-		syncFn = (*os.File).Sync
+		syncFn = Sync
 	}
 	dir := filepath.Dir(path)
 	base := filepath.Base(path)

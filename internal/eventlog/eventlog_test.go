@@ -670,6 +670,51 @@ func TestTransientReplayErrorRecognizesHeadFailures(t *testing.T) {
 	}
 }
 
+var errStableTransient = errors.New("eventlog: missing HEAD with last seq 1")
+
+// transientTwice fails transiently twice, then returns 7, and counts its calls.
+func transientTwice(calls *int) func() (int, error) {
+	return func() (int, error) {
+		*calls++
+		if *calls < 3 {
+			return 0, errStableTransient
+		}
+		return 7, nil
+	}
+}
+
+func TestRetryStableTriesUntilTheErrorIsNotTransient(t *testing.T) {
+	calls := 0
+	if got, err := retryStable(testContext(t), time.Second, transientTwice(&calls)); got != 7 || err != nil || calls != 3 {
+		t.Fatalf("retryStable(transient twice) = %d, %v after %d calls, want 7, nil after 3", got, err, calls)
+	}
+	calls = 0
+	if _, err := retryStable(testContext(t), 0, transientTwice(&calls)); !errors.Is(err, errStableTransient) || calls != 1 {
+		t.Fatalf("retryStable(budget 0) = %v after %d calls, want the transient error after 1", err, calls)
+	}
+	ctx, cancel := context.WithCancel(testContext(t))
+	cancel()
+	calls = 0
+	if _, err := retryStable(ctx, time.Second, transientTwice(&calls)); !errors.Is(err, context.Canceled) || calls != 0 {
+		t.Fatalf("retryStable(ended context) = %v after %d calls, want context.Canceled after 0", err, calls)
+	}
+}
+
+// TestRetryStableReturnsTheOperationsOwnError: callers see op's error as op returned it,
+// never core/retry's wrapping of it.
+func TestRetryStableReturnsTheOperationsOwnError(t *testing.T) {
+	permanent := errors.New("eventlog: seq 2: signature does not verify")
+	calls := 0
+	_, err := retryStable(testContext(t), time.Second, func() (int, error) { calls++; return 0, permanent })
+	if err == nil || err.Error() != permanent.Error() || calls != 1 {
+		t.Fatalf("retryStable(permanent) = %v after %d calls, want %q after 1", err, calls, permanent)
+	}
+	_, err = retryStable(testContext(t), 30*time.Millisecond, func() (int, error) { return 0, errStableTransient })
+	if err == nil || err.Error() != errStableTransient.Error() {
+		t.Fatalf("retryStable(transient past the budget) = %v, want %q", err, errStableTransient)
+	}
+}
+
 func TestStableAttemptsCoverTheBudget(t *testing.T) {
 	tests := []struct {
 		budget time.Duration

@@ -70,23 +70,25 @@ jobs:
           echo $! > "$RUNNER_TEMP/stress-ng.pid"
           sleep 2
           uptime
-      - name: Verify queued appenders within default lock timeout under load
+      - name: Verify queued appenders under load
         # Runs the load test 10 times consecutively under stress-ng write pressure.
         # Every run must pass and none may skip; any lock timeout or error fails the step.
         run: |
           set -o pipefail
           OUT="$RUNNER_TEMP/load-test.log"
-          EPITROP_EVENTLOG_LOAD_TEST=1 go test -count=10 -run '^TestQueuedAppendersWithinTheDefaultLockTimeout$' -v ./internal/eventlog/ 2>&1 | tee "$OUT"
+          EPITROP_EVENTLOG_LOAD_TEST=1 go test -count=10 -run '^TestQueuedAppendersUnderLoad$' -v ./internal/eventlog/ 2>&1 | tee "$OUT"
           if grep -q -- "--- SKIP" "$OUT"; then
             echo "Test was skipped; expected to run on btrfs under load" >&2
             exit 1
           fi
-          PASS_COUNT=$(awk '/--- PASS: TestQueuedAppendersWithinTheDefaultLockTimeout/ { n++ } END { print n + 0 }' "$OUT")
+          PASS_COUNT=$(awk '/--- PASS: TestQueuedAppendersUnderLoad/ { n++ } END { print n + 0 }' "$OUT")
           if [ "$PASS_COUNT" -ne 10 ]; then
             echo "Expected 10 pass results, got $PASS_COUNT" >&2
             exit 1
           fi
+          grep -o '[0-9]* queued appends took .*' "$OUT" >> "$GITHUB_STEP_SUMMARY"
       - name: Benchmark queued appenders
+        if: success() || failure()
         # BenchmarkQueuedAppenders measures queue latency (ns/append) under load and
         # writes the result along with current system load to the GitHub step summary.
         run: |

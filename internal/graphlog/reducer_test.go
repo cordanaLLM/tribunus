@@ -13,6 +13,7 @@ import (
 	corereceipt "github.com/golusoris/golusoris/core/crypto/receipt"
 	"github.com/tekmora/epitrop/internal/config"
 	"github.com/tekmora/epitrop/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/eventlog/eventlogtest"
 	"github.com/tekmora/epitrop/internal/graph"
 	"github.com/tekmora/epitrop/internal/supervisor"
 	"github.com/tekmora/epitrop/internal/units"
@@ -47,15 +48,7 @@ func stageRecord(t *testing.T, seq uint64, ops ...graph.Event) eventlog.Record {
 // reduce applies records in order and fails the test on the first error.
 func reduce(t *testing.T, recs ...eventlog.Record) eventlog.State {
 	t.Helper()
-	st := eventlog.State{}
-	for i := 0; i < len(recs); i++ {
-		next, err := Reducer(st, recs[i])
-		if err != nil {
-			t.Fatalf("Reducer(seq %d) = %v, want nil", recs[i].Seq, err)
-		}
-		st = next
-	}
-	return st
+	return eventlogtest.Reduce(t, Reducer, recs...)
 }
 
 func dependsOn(t *testing.T, st eventlog.State, id string) []string {
@@ -168,10 +161,9 @@ func TestMalformedStageRecordFailsTheReplay(t *testing.T) {
 		{"an operation of an unknown type", eventlog.Record{Seq: 7, Type: StageCommitted, Payload: json.RawMessage(`{"ops":[{"type":"graph.node_renamed"}]}`)}, `seq 7: operation 0 has unknown type "graph.node_renamed"`},
 	}
 	for i := 0; i < len(cases); i++ {
-		_, err := Reducer(eventlog.State{}, cases[i].rec)
-		if err == nil || !strings.Contains(err.Error(), cases[i].want) {
-			t.Errorf("%s: Reducer() = %v, want an error holding %q", cases[i].name, err, cases[i].want)
-		}
+		t.Run(cases[i].name, func(t *testing.T) {
+			eventlogtest.AssertRejects(t, Reducer, cases[i].rec, cases[i].want)
+		})
 	}
 }
 

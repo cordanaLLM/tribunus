@@ -10,9 +10,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // fixtureSourceDir is the v0.1.0 fixture set; testdata/v0.1.0/generate.sh wrote it with
@@ -374,5 +376,84 @@ func checkUpgradeNegativeSeenVersion(t *testing.T, bin string) {
 	}
 	if got := ntfyDeliveries.Load(); got != 0 {
 		t.Errorf("ntfy deliveries = %d, want 0 when the state is refused", got)
+	}
+}
+
+// v010JobReason is the sandbox reason fixture-job had under v0.1.0; the config here keeps it,
+// so the status row reads the same before and after the upgrade.
+const v010JobReason = "fixture: writes one line and exits"
+
+// prepareUpgradeJobs copies the v0.1.0 jobs fixture (one finished run of fixture-job) and
+// writes a config that declares the same job.
+func prepareUpgradeJobs(t *testing.T) (cfgPath, eventLogDir string) {
+	t.Helper()
+	base := jobsTempDir(t)
+	eventLogDir = filepath.Join(base, "jobs")
+	copyUpgradeDir(t, filepath.Join(fixtureSourceDir(t), "jobs"), eventLogDir)
+	if err := os.MkdirAll(filepath.Join(eventLogDir, ".git"), 0o700); err != nil {
+		t.Fatalf("MkdirAll(jobs/.git) = %v", err)
+	}
+	keyPath := filepath.Join(base, "seed.hex")
+	if err := os.WriteFile(keyPath, []byte(hex.EncodeToString(bytes.Repeat([]byte{7}, 32))), 0o600); err != nil {
+		t.Fatalf("WriteFile(seed.hex) = %v", err)
+	}
+	body := `{"event_log":{"dir":` + jsonQuote(eventLogDir) + `,"signing_key_path":` + jsonQuote(keyPath) +
+		`},"jobs":[{"name":"fixture-job","command":["/bin/true"],"log_path":` + jsonQuote(filepath.Join(base, "fixture-job.log")) +
+		`,"sandbox":{"mode":"off","reason":` + jsonQuote(v010JobReason) + `}}]}`
+	cfgPath = filepath.Join(base, "config.json")
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("WriteFile(%s) = %v", cfgPath, err)
+	}
+	return cfgPath, eventLogDir
+}
+
+// waitForFile polls for path for up to 10 s and fails the test when it does not appear; the
+// restarted job writes its job.exited record after jobs start has returned.
+func waitForFile(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for i := 0; i < 200 && time.Now().Before(deadline); i++ {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("%s did not appear: %v", path, err)
+	}
+}
+
+// TestSystemUpgrade_Jobs: the current binary reports the job run v0.1.0 recorded, and starts
+// the job again on top of that state: the shim appends after the v0.1.0 records and replaces
+// the v0.1.0 job record.
+func TestSystemUpgrade_Jobs(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the supervisor runs on Linux only")
+	}
+	bin := buildCLI(t)
+	cfgPath, eventLogDir := prepareUpgradeJobs(t)
+	wantRow := "fixture-job\tdead\t0\t\t0\toff: " + v010JobReason + "\n"
+	stdout, stderr, code, err := runSystemCLI(t, bin, "jobs", "status", "--config="+cfgPath, "fixture-job")
+	assertCLIExitZero(t, "jobs status", stdout, stderr, code, err)
+	if stdout != wantRow {
+		t.Fatalf("jobs status on v0.1.0 state = %q, want %q", stdout, wantRow)
+	}
+
+	recordPath := filepath.Join(eventLogDir, "jobs", "fixture-job.json")
+	before, err := os.ReadFile(recordPath) // #nosec G304 -- path is the copied test fixture.
+	if err != nil {
+		t.Fatalf("ReadFile(%s) = %v", recordPath, err)
+	}
+	stdout, stderr, code, err = runSystemCLI(t, bin, "jobs", "start", "--config="+cfgPath, "fixture-job")
+	assertCLIExitZero(t, "jobs start", stdout, stderr, code, err)
+	waitForFile(t, filepath.Join(eventLogDir, "events", "00000000000000000004.json"))
+	after, err := os.ReadFile(recordPath) // #nosec G304 -- path is the copied test fixture.
+	if err != nil || bytes.Equal(after, before) {
+		t.Fatalf("job record after the restart = %s, err = %v, want a new record", after, err)
+	}
+	stdout, stderr, code, err = runSystemCLI(t, bin, "jobs", "status", "--config="+cfgPath, "fixture-job")
+	assertCLIExitZero(t, "jobs status", stdout, stderr, code, err)
+	if stdout != wantRow {
+		t.Fatalf("jobs status after the restart = %q, want %q", stdout, wantRow)
 	}
 }

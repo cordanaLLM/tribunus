@@ -20,6 +20,61 @@ func testWrite(w http.ResponseWriter, s string) {
 	_, _ = w.Write([]byte(s)) //nolint:errcheck // test mock response write
 }
 
+func readIssuePayload(w http.ResponseWriter, r *http.Request) (GitHubIssuePayload, bool) {
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return GitHubIssuePayload{}, false
+	}
+	var p GitHubIssuePayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return GitHubIssuePayload{}, false
+	}
+	return p, true
+}
+
+func testGitHubNtfyConfig(t *testing.T, repo string, perSourceCap int) config.Config {
+	t.Helper()
+	cfg := config.Default()
+	cfg.ReleaseWatch = config.ReleaseWatchConfig{
+		StateDir:         t.TempDir(),
+		RateLimitFloor:   100,
+		MaxActionsPerRun: 12,
+		PerSourceCap:     perSourceCap,
+		Routes: []config.ReleaseWatchRoute{{
+			Name:    "rt",
+			Sources: []config.ReleaseWatchSource{{GitHub: repo}},
+			Sinks:   []config.ReleaseWatchSink{{Ntfy: &config.NtfySink{Topic: "top"}}},
+		}},
+	}
+	return cfg
+}
+
+func tokenRuleConfig(t *testing.T) config.Config {
+	t.Helper()
+	cfg := config.Default()
+	cfg.ReleaseWatch = config.ReleaseWatchConfig{
+		StateDir:         t.TempDir(),
+		RateLimitFloor:   10,
+		MaxActionsPerRun: 12,
+		PerSourceCap:     3,
+		Routes: []config.ReleaseWatchRoute{
+			{
+				Name:    "rt-gh",
+				Sources: []config.ReleaseWatchSource{{GitHub: "owner/upstream"}},
+				Sinks:   []config.ReleaseWatchSink{{Ntfy: &config.NtfySink{Topic: "topic"}}},
+			},
+			{
+				Name:    "rt-hf",
+				Sources: []config.ReleaseWatchSource{{HuggingFaceOrg: "TestOrg"}},
+				Sinks:   []config.ReleaseWatchSink{{Ntfy: &config.NtfySink{Topic: "topic"}}},
+			},
+		},
+	}
+	return cfg
+}
+
 func TestPlantedReleaseFilingAndSeenSetSecondPass(t *testing.T) {
 	var postCount int32
 	var postedBody string
@@ -28,19 +83,8 @@ func TestPlantedReleaseFilingAndSeenSetSecondPass(t *testing.T) {
 	ghServer := newPlantedReleaseServer(&postCount, &postedTitle, &postedBody)
 	defer ghServer.Close()
 
-	stateDir := t.TempDir()
-	cfg := config.Default()
-	cfg.ReleaseWatch = config.ReleaseWatchConfig{
-		StateDir:         stateDir,
-		RateLimitFloor:   100,
-		MaxActionsPerRun: 12,
-		PerSourceCap:     3,
-		Routes: []config.ReleaseWatchRoute{{
-			Name:    "route-a",
-			Sources: []config.ReleaseWatchSource{{GitHub: "owner/upstream"}},
-			Sinks:   []config.ReleaseWatchSink{{GitHubIssue: &config.GitHubIssueSink{Repo: "owner/consumer"}}},
-		}},
-	}
+	cfg := oneRouteConfig(t, 100)
+	stateDir := cfg.ReleaseWatch.StateDir
 
 	svc, err := NewService(cfg, ClientOptions{
 		GitHubBase: ghServer.URL,
@@ -81,14 +125,8 @@ func newPlantedReleaseServer(postCount *int32, postedTitle, postedBody *string) 
 			testWrite(w, `[]`)
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/issues"):
 			atomic.AddInt32(postCount, 1)
-			data, err := io.ReadAll(r.Body)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			var payload GitHubIssuePayload
-			if err := json.Unmarshal(data, &payload); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
+			payload, ok := readIssuePayload(w, r)
+			if !ok {
 				return
 			}
 			*postedTitle = payload.Title
@@ -131,19 +169,8 @@ func TestMarkerAlreadyPresentInExistingIssue(t *testing.T) {
 	ghServer := newMarkerPresentServer(&postCalled)
 	defer ghServer.Close()
 
-	stateDir := t.TempDir()
-	cfg := config.Default()
-	cfg.ReleaseWatch = config.ReleaseWatchConfig{
-		StateDir:         stateDir,
-		RateLimitFloor:   100,
-		MaxActionsPerRun: 12,
-		PerSourceCap:     3,
-		Routes: []config.ReleaseWatchRoute{{
-			Name:    "route-a",
-			Sources: []config.ReleaseWatchSource{{GitHub: "owner/upstream"}},
-			Sinks:   []config.ReleaseWatchSink{{GitHubIssue: &config.GitHubIssueSink{Repo: "owner/consumer"}}},
-		}},
-	}
+	cfg := oneRouteConfig(t, 100)
+	stateDir := cfg.ReleaseWatch.StateDir
 
 	svc, err := NewService(cfg, ClientOptions{
 		GitHubBase: ghServer.URL,
@@ -257,14 +284,8 @@ func newRestartMidPassServer(filedReleases *[]string, deliverFailSecond *bool) *
 }
 
 func handleRestartMidPassPost(w http.ResponseWriter, r *http.Request, filedReleases *[]string, deliverFailSecond *bool) {
-	data, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	var p GitHubIssuePayload
-	if err := json.Unmarshal(data, &p); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	p, ok := readIssuePayload(w, r)
+	if !ok {
 		return
 	}
 	if strings.Contains(p.Body, "v1.0.0") {
@@ -399,18 +420,7 @@ func testSourceFailureMalformedJSON(t *testing.T) {
 	}))
 	defer ghServer.Close()
 
-	cfg := config.Default()
-	cfg.ReleaseWatch = config.ReleaseWatchConfig{
-		StateDir:         t.TempDir(),
-		RateLimitFloor:   100,
-		MaxActionsPerRun: 12,
-		PerSourceCap:     3,
-		Routes: []config.ReleaseWatchRoute{{
-			Name:    "rt",
-			Sources: []config.ReleaseWatchSource{{GitHub: "bad/json"}},
-			Sinks:   []config.ReleaseWatchSink{{Ntfy: &config.NtfySink{Topic: "top"}}},
-		}},
-	}
+	cfg := testGitHubNtfyConfig(t, "bad/json", 3)
 	svc, err := NewService(cfg, ClientOptions{GitHubBase: ghServer.URL})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
@@ -445,18 +455,7 @@ func testEmptyReleasesFallsBackToTags(t *testing.T) {
 	}))
 	defer ghServer.Close()
 
-	cfg := config.Default()
-	cfg.ReleaseWatch = config.ReleaseWatchConfig{
-		StateDir:         t.TempDir(),
-		RateLimitFloor:   100,
-		MaxActionsPerRun: 12,
-		PerSourceCap:     3,
-		Routes: []config.ReleaseWatchRoute{{
-			Name:    "rt",
-			Sources: []config.ReleaseWatchSource{{GitHub: "tags/fallback"}},
-			Sinks:   []config.ReleaseWatchSink{{Ntfy: &config.NtfySink{Topic: "top"}}},
-		}},
-	}
+	cfg := testGitHubNtfyConfig(t, "tags/fallback", 3)
 	svc, err := NewService(cfg, ClientOptions{
 		GitHubBase: ghServer.URL,
 		NtfyBase:   ghServer.URL,
@@ -483,18 +482,7 @@ func testEmptyReleasesAndTagsNotAnError(t *testing.T) {
 	}))
 	defer ghServer.Close()
 
-	cfg := config.Default()
-	cfg.ReleaseWatch = config.ReleaseWatchConfig{
-		StateDir:         t.TempDir(),
-		RateLimitFloor:   100,
-		MaxActionsPerRun: 12,
-		PerSourceCap:     3,
-		Routes: []config.ReleaseWatchRoute{{
-			Name:    "rt",
-			Sources: []config.ReleaseWatchSource{{GitHub: "empty/repo"}},
-			Sinks:   []config.ReleaseWatchSink{{Ntfy: &config.NtfySink{Topic: "top"}}},
-		}},
-	}
+	cfg := testGitHubNtfyConfig(t, "empty/repo", 3)
 	svc, err := NewService(cfg, ClientOptions{GitHubBase: ghServer.URL, NtfyBase: ghServer.URL})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
@@ -523,18 +511,7 @@ func TestDraftAndPrereleaseSkipped(t *testing.T) {
 	}))
 	defer ghServer.Close()
 
-	cfg := config.Default()
-	cfg.ReleaseWatch = config.ReleaseWatchConfig{
-		StateDir:         t.TempDir(),
-		RateLimitFloor:   100,
-		MaxActionsPerRun: 12,
-		PerSourceCap:     5,
-		Routes: []config.ReleaseWatchRoute{{
-			Name:    "rt",
-			Sources: []config.ReleaseWatchSource{{GitHub: "owner/repo"}},
-			Sinks:   []config.ReleaseWatchSink{{Ntfy: &config.NtfySink{Topic: "top"}}},
-		}},
-	}
+	cfg := testGitHubNtfyConfig(t, "owner/repo", 5)
 	svc, err := NewService(cfg, ClientOptions{GitHubBase: ghServer.URL, NtfyBase: ghServer.URL})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
@@ -651,29 +628,7 @@ func TestTokenRuleAndRedirectIsolation(t *testing.T) {
 	defer ntfyServer.Close()
 
 	var stdout, stderr bytes.Buffer
-	cfg := config.Default()
-	cfg.ReleaseWatch = config.ReleaseWatchConfig{
-		StateDir:         t.TempDir(),
-		RateLimitFloor:   10,
-		MaxActionsPerRun: 12,
-		PerSourceCap:     3,
-		Routes: []config.ReleaseWatchRoute{
-			{
-				Name: "rt-gh",
-				Sources: []config.ReleaseWatchSource{
-					{GitHub: "owner/upstream"},
-				},
-				Sinks: []config.ReleaseWatchSink{{Ntfy: &config.NtfySink{Topic: "topic"}}},
-			},
-			{
-				Name: "rt-hf",
-				Sources: []config.ReleaseWatchSource{
-					{HuggingFaceOrg: "TestOrg"},
-				},
-				Sinks: []config.ReleaseWatchSink{{Ntfy: &config.NtfySink{Topic: "topic"}}},
-			},
-		},
-	}
+	cfg := tokenRuleConfig(t)
 
 	svc, err := NewService(cfg, ClientOptions{
 		GitHubBase:      ghServer.URL,
@@ -754,19 +709,8 @@ func TestFilingWithoutGitHubTokenErrors(t *testing.T) {
 	}))
 	defer ghServer.Close()
 
-	stateDir := t.TempDir()
-	cfg := config.Default()
-	cfg.ReleaseWatch = config.ReleaseWatchConfig{
-		StateDir:         stateDir,
-		RateLimitFloor:   100,
-		MaxActionsPerRun: 12,
-		PerSourceCap:     3,
-		Routes: []config.ReleaseWatchRoute{{
-			Name:    "rt",
-			Sources: []config.ReleaseWatchSource{{GitHub: "owner/upstream"}},
-			Sinks:   []config.ReleaseWatchSink{{GitHubIssue: &config.GitHubIssueSink{Repo: "owner/consumer"}}},
-		}},
-	}
+	cfg := oneRouteConfig(t, 100)
+	stateDir := cfg.ReleaseWatch.StateDir
 
 	var stdout bytes.Buffer
 	svc, err := NewService(cfg, ClientOptions{
@@ -869,14 +813,8 @@ func newCapsPerSourceServer(posted *[]string) *httptest.Server {
 }
 
 func handleCapsPerSourcePost(w http.ResponseWriter, r *http.Request, posted *[]string) {
-	data, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	var p GitHubIssuePayload
-	if err := json.Unmarshal(data, &p); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	p, ok := readIssuePayload(w, r)
+	if !ok {
 		return
 	}
 	*posted = append(*posted, p.Title)

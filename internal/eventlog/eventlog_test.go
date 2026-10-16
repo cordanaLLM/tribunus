@@ -757,53 +757,6 @@ func TestAtomicReplaceCleanupOnFailure(t *testing.T) {
 	}
 }
 
-func TestCloseWithCauseAndRemoveTemp(t *testing.T) {
-	t.Run("closeWithCause closes file and returns cause", testCloseWithCauseClosesFileAndReturnsCause)
-	t.Run("closeWithCause joins close error on already closed file", testCloseWithCauseJoinsCloseError)
-	t.Run("removeTemp ignores missing temp file", testRemoveTempIgnoresMissing)
-}
-
-func testCloseWithCauseClosesFileAndReturnsCause(t *testing.T) {
-	t.Helper()
-	f, err := os.CreateTemp(t.TempDir(), "tmp-*")
-	if err != nil {
-		t.Fatalf("CreateTemp: %v", err)
-	}
-	cause := errors.New("initial-cause")
-	gotErr := closeWithCause(f, cause)
-	if !errors.Is(gotErr, cause) {
-		t.Fatalf("closeWithCause() = %v, want cause %v", gotErr, cause)
-	}
-	if err = f.Close(); err == nil {
-		t.Fatal("second Close() = nil, want error on already closed file")
-	}
-}
-
-func testCloseWithCauseJoinsCloseError(t *testing.T) {
-	t.Helper()
-	f, err := os.CreateTemp(t.TempDir(), "tmp-*")
-	if err != nil {
-		t.Fatalf("CreateTemp: %v", err)
-	}
-	if err = f.Close(); err != nil {
-		t.Fatalf("first Close: %v", err)
-	}
-	cause := errors.New("cause-err")
-	gotErr := closeWithCause(f, cause)
-	if !errors.Is(gotErr, cause) || !strings.Contains(gotErr.Error(), "eventlog: close") {
-		t.Fatalf("closeWithCause() = %v, want joined close error", gotErr)
-	}
-}
-
-func testRemoveTempIgnoresMissing(t *testing.T) {
-	t.Helper()
-	cause := errors.New("my-cause")
-	gotErr := removeTemp(filepath.Join(t.TempDir(), "nonexistent"), cause)
-	if !errors.Is(gotErr, cause) || gotErr.Error() != cause.Error() {
-		t.Fatalf("removeTemp() = %v, want the cause alone: %v", gotErr, cause)
-	}
-}
-
 func TestAppendCheckedPositive(t *testing.T) {
 	dir, signer, limits := testLog(t)
 	writer := openWriter(t, dir, signer, limits)

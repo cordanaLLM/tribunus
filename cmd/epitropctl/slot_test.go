@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,7 +76,7 @@ func newSlotRun(t *testing.T, job func(slotRun) string) slotRun {
 	if err := os.WriteFile(brief, []byte("# Unit\nAdd the retry.\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile(brief) = %v, want nil", err)
 	}
-	template := `{"sandbox_input_roots": ["` + base + `"], "event_log": {"dir": "` + state + `", "signing_key_path": "` + keyPath + `"}, "jobs": [` + job(run) + `]}`
+	template := `{"sandbox_input_roots": [` + jsonQuote(base) + `], "event_log": {"dir": ` + jsonQuote(state) + `, "signing_key_path": ` + jsonQuote(keyPath) + `}, "jobs": [` + job(run) + `]}`
 	if err := os.WriteFile(run.template, []byte(template+"\n"), 0o600); err != nil {
 		t.Fatalf("WriteFile(template) = %v, want nil", err)
 	}
@@ -169,7 +170,8 @@ func slotArgsWithoutFlag(args []string, flag string) []string {
 func checkSlotRefusalCase(t *testing.T, name string, args []string, want string, run slotRun) {
 	t.Helper()
 	printed, err := captureSlot(t, args)
-	if err == nil || !strings.Contains(err.Error(), want) {
+	matched := err != nil && (strings.Contains(err.Error(), want) || (want == "no such file" && errors.Is(err, fs.ErrNotExist)))
+	if !matched {
 		t.Errorf("%s: slot = %v, want an error holding %q", name, err, want)
 	}
 	if printed != "" {

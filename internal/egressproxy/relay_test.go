@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -245,6 +246,9 @@ func TestParseRelayArgsKeepsTheCommandWhole(t *testing.T) {
 // TestRelayExitCodes: the relay ends with the command's code, so the supervisor above it
 // reads the job's result and not the relay's.
 func TestRelayExitCodes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the relay runs inside the sandbox, which does not run on Windows")
+	}
 	socket := shortDir(t) + "/none"
 	tests := []struct {
 		name    string
@@ -355,6 +359,9 @@ func TestRelayWithoutAServerGivesNoTunnel(t *testing.T) {
 // unread resets it. That is the program's way to end a tunnel, open or refused, and the
 // relay writes nothing about it into the job's output.
 func TestRelaySaysNothingWhenItsClientResets(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the relay runs inside the sandbox, which does not run on Windows")
+	}
 	target := upstream(t)
 	server := startServer(t, Options{Destinations: []string{target}})
 	self, err := os.Executable()
@@ -377,6 +384,9 @@ func TestRelaySaysNothingWhenItsClientResets(t *testing.T) {
 // TestRelayNamesEveryFaultOnOneLine: what the relay says goes into the job's log, where a
 // line without the relay's name would read as the job's own.
 func TestRelayNamesEveryFaultOnOneLine(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the relay runs inside the sandbox, which does not run on Windows")
+	}
 	listen := freeLoopback(t)
 	socket := shortDir(t) + "/none"
 	self, err := os.Executable()

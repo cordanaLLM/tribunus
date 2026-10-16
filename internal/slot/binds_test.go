@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -201,6 +202,9 @@ func TestCheckRawChanges(t *testing.T) {
 }
 
 func TestSupervisedBinds(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the slot sandbox does not run on Windows")
+	}
 	sandbox := config.SandboxConfig{
 		Mode: "enforce", Workspace: "/ws", Inputs: []string{"/in"},
 		Home: &config.SandboxHome{

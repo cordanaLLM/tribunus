@@ -22,7 +22,7 @@ func retryStable[T any](ctx context.Context, budget time.Duration, op func() (T,
 	deadline := time.Now().Add(budget)
 	var last error
 	var zero T
-	for i := 0; i < lockAttempts(budget); i++ {
+	for i := 0; i < stableAttempts(budget); i++ {
 		res, err := op()
 		if err == nil || !transientReplayError(err) {
 			return res, err
@@ -405,4 +405,32 @@ func seqFromName(name string) (uint64, error) {
 		return 0, fmt.Errorf("eventlog: parse seq from %s: %w", name, err)
 	}
 	return seq, nil
+}
+
+// stableAttempts bounds retryStable's tries over budget: one every lockRetryDelay, as a
+// writer tries the lock, plus the first and the last.
+func stableAttempts(budget time.Duration) int {
+	if budget <= 0 {
+		return 1
+	}
+	return int(budget/lockRetryDelay) + 2
+}
+
+// sleepUntilNextTry waits lockRetryDelay, or what is left until deadline when that is less.
+// It reports false when deadline has passed or ctx ended.
+func sleepUntilNextTry(ctx context.Context, deadline time.Time) bool {
+	wait := lockRetryDelay
+	if remaining := time.Until(deadline); remaining <= 0 {
+		return false
+	} else if remaining < wait {
+		wait = remaining
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }

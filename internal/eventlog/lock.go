@@ -9,78 +9,50 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/gofrs/flock"
 )
 
+// lockRetryDelay is how long acquireLock waits between two tries of a held lock.
+const lockRetryDelay = 10 * time.Millisecond
+
+// fileLock is the exclusive lock on the events directory: flock(2) on Unix, LockFileEx on
+// Windows, both through gofrs/flock.
 type fileLock struct {
-	file *os.File
+	lock *flock.Flock
 }
 
 func acquireLock(ctx context.Context, eventsDir string, timeout time.Duration) (*fileLock, error) {
 	path := filepath.Join(eventsDir, ".lock")
-	// #nosec G304 -- the events directory comes from operator config and the
-	// lock file name is fixed; nothing is read from it.
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	lock := flock.New(path, flock.SetFlag(os.O_CREATE|os.O_RDWR))
+	locked, err := tryLock(ctx, lock, timeout)
 	if err != nil {
-		return nil, fmt.Errorf("eventlog: open lock %s: %w", path, err)
-	}
-	locked, err := waitLock(ctx, file, timeout)
-	if err != nil {
-		return nil, closeLockFile(file, err)
+		return nil, fmt.Errorf("eventlog: lock %s: %w", path, err)
 	}
 	if !locked {
-		return nil, closeLockFile(file, fmt.Errorf("%w: %s", ErrLockTimeout, path))
+		return nil, fmt.Errorf("%w: %s", ErrLockTimeout, path)
 	}
-	return &fileLock{file: file}, nil
+	return &fileLock{lock: lock}, nil
 }
 
-func closeLockFile(file *os.File, cause error) error {
-	if err := file.Close(); err != nil {
-		return errors.Join(cause, fmt.Errorf("eventlog: close lock %s: %w", file.Name(), err))
-	}
-	return cause
-}
-
-// waitLock, lockAttempts and sleepUntilNextTry are the platform-neutral retry loop around
-// tryLock, which lock_unix.go (flock) and lock_windows.go (LockFileEx) each provide.
-
-func waitLock(ctx context.Context, file *os.File, timeout time.Duration) (bool, error) {
-	deadline := time.Now().Add(timeout)
-	for attempts := 0; attempts < lockAttempts(timeout); attempts++ {
-		ok, err := tryLock(file)
-		if ok || err != nil {
-			return ok, err
-		}
-		if !sleepUntilNextTry(ctx, deadline) {
-			return false, nil
-		}
-	}
-	return false, nil
-}
-
-func lockAttempts(timeout time.Duration) int {
+// tryLock tries once when timeout is not positive and otherwise until timeout or ctx ends,
+// which both report as not locked.
+func tryLock(ctx context.Context, lock *flock.Flock, timeout time.Duration) (bool, error) {
 	if timeout <= 0 {
-		return 1
+		return lock.TryLock()
 	}
-	attempts := int(timeout/(10*time.Millisecond)) + 2
-	if attempts < 2 {
-		return 2
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	locked, err := lock.TryLockContext(waitCtx, lockRetryDelay)
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return false, nil
 	}
-	return attempts
+	return locked, err
 }
 
-func sleepUntilNextTry(ctx context.Context, deadline time.Time) bool {
-	wait := 10 * time.Millisecond
-	if remaining := time.Until(deadline); remaining <= 0 {
-		return false
-	} else if remaining < wait {
-		wait = remaining
+func (l *fileLock) Close() error {
+	if err := l.lock.Unlock(); err != nil {
+		return fmt.Errorf("eventlog: unlock %s: %w", l.lock.Path(), err)
 	}
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
+	return nil
 }

@@ -5,15 +5,60 @@ package eventlog
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
 
 func TestAcquireLock(t *testing.T) {
-	t.Run("missing directory fails with open lock", testAcquireLockMissingDir)
+	t.Run("missing directory fails as not found", testAcquireLockMissingDir)
 	t.Run("timeout while held and reacquire after close", testAcquireLockTimeoutAndReacquire)
+	t.Run("a held lock and no time to wait", testAcquireLockZeroTimeout)
+	t.Run("a held lock and an ended context", testAcquireLockEndedContext)
+}
+
+// holdLock takes the lock on dir for the rest of the test.
+func holdLock(t *testing.T, dir string) {
+	t.Helper()
+	held, err := acquireLock(context.Background(), dir, time.Second)
+	if err != nil {
+		t.Fatalf("acquireLock(held) = %v, want nil", err)
+	}
+	t.Cleanup(func() {
+		if err := held.Close(); err != nil {
+			t.Errorf("held.Close() = %v, want nil", err)
+		}
+	})
+}
+
+func testAcquireLockZeroTimeout(t *testing.T) {
+	dir := t.TempDir()
+	free, err := acquireLock(context.Background(), dir, 0)
+	if err != nil {
+		t.Fatalf("acquireLock(free, 0) = %v, want nil: one try takes a free lock", err)
+	}
+	if err = free.Close(); err != nil {
+		t.Fatalf("free.Close() = %v, want nil", err)
+	}
+	holdLock(t, dir)
+	if _, err = acquireLock(context.Background(), dir, 0); !errors.Is(err, ErrLockTimeout) {
+		t.Fatalf("acquireLock(held, 0) = %v, want ErrLockTimeout", err)
+	}
+}
+
+func testAcquireLockEndedContext(t *testing.T) {
+	dir := t.TempDir()
+	holdLock(t, dir)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := time.Now()
+	if _, err := acquireLock(ctx, dir, time.Minute); !errors.Is(err, ErrLockTimeout) {
+		t.Fatalf("acquireLock(held, ended context) = %v, want ErrLockTimeout", err)
+	}
+	if waited := time.Since(start); waited > 5*time.Second {
+		t.Fatalf("acquireLock(held, ended context) waited %s, want it to return at once", waited)
+	}
 }
 
 func testAcquireLockMissingDir(t *testing.T) {
@@ -26,8 +71,8 @@ func testAcquireLockMissingDir(t *testing.T) {
 		}
 		t.Fatal("acquireLock(missing dir) succeeded, want error")
 	}
-	if !strings.Contains(err.Error(), "open lock") {
-		t.Fatalf("acquireLock(missing dir) = %v, want error containing %q", err, "open lock")
+	if !errors.Is(err, fs.ErrNotExist) || errors.Is(err, ErrLockTimeout) {
+		t.Fatalf("acquireLock(missing dir) = %v, want a not-exist error, no timeout", err)
 	}
 }
 

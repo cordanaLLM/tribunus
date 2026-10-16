@@ -670,6 +670,24 @@ func TestTransientReplayErrorRecognizesHeadFailures(t *testing.T) {
 	}
 }
 
+func TestStableAttemptsCoverTheBudget(t *testing.T) {
+	tests := []struct {
+		budget time.Duration
+		want   int
+	}{
+		{-time.Second, 1},
+		{0, 1},
+		{lockRetryDelay - 1, 2},
+		{lockRetryDelay, 3},
+		{time.Second, 102},
+	}
+	for i := 0; i < len(tests); i++ {
+		if got := stableAttempts(tests[i].budget); got != tests[i].want {
+			t.Fatalf("stableAttempts(%v) = %d, want %d", tests[i].budget, got, tests[i].want)
+		}
+	}
+}
+
 func TestStableBudgetIsTheLockTimeout(t *testing.T) {
 	if got := stableBudget(Limits{}); got != defaultLockTimeout {
 		t.Fatalf("stableBudget(no lock timeout) = %v, want the default %v", got, defaultLockTimeout)

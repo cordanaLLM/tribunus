@@ -4,6 +4,7 @@ go 1.27.2
 
 require (
 	github.com/adhocore/gronx v1.20.5
+	github.com/gofrs/flock v0.13.1
 	github.com/golusoris/golusoris v0.16.5
 	github.com/golusoris/golusoris/core v0.10.2
 	github.com/jonboulle/clockwork v0.5.0

@@ -392,3 +392,22 @@ func seqFromName(name string) (uint64, error) {
 	}
 	return seq, nil
 }
+
+// sleepUntilNextTry waits 10 ms, or what is left until deadline when that is less. It
+// reports false when deadline has passed or ctx ended.
+func sleepUntilNextTry(ctx context.Context, deadline time.Time) bool {
+	wait := 10 * time.Millisecond
+	if remaining := time.Until(deadline); remaining <= 0 {
+		return false
+	} else if remaining < wait {
+		wait = remaining
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}

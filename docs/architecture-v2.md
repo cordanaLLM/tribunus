@@ -246,6 +246,23 @@ Every model call goes through a router alias. No concrete model name appears in 
   3. The wave runner (#39).
 - Consequence: each cutover runs beside the script it replaces until the events match. The first cutover already removes the restart losses.
 
+## Code that waits for its command
+
+`deadcode ./...` (golang.org/x/tools v0.52.0) lists functions no command reaches. `deadcode -test ./...` lists none, so tests reach all of them. Each waits for the issue named below.
+
+| Package | What waits | Issue |
+| :--- | :--- | :--- |
+| `internal/admission` | gate, gateway prober | [#16](https://github.com/tekmora/epitrop/issues/16), [#14](https://github.com/tekmora/epitrop/issues/14) (0.5) |
+| `internal/edges` | `Check` | [#114](https://github.com/tekmora/epitrop/issues/114) (0.5) |
+| `internal/effects` | side-effect ledger `Do`, `Open` | [#38](https://github.com/tekmora/epitrop/issues/38) (0.4) |
+| `internal/eventlog` | `TaskReducer` | [#39](https://github.com/tekmora/epitrop/issues/39) (0.4) |
+| `internal/graph` | `StatusFromClaim` | [#38](https://github.com/tekmora/epitrop/issues/38) (0.4) |
+| `internal/telemetry` | `EffectRun`, `AdmissionDecision` | [#38](https://github.com/tekmora/epitrop/issues/38), [#16](https://github.com/tekmora/epitrop/issues/16) |
+| `internal/slot` | `ReadResult`, `ResultSchema` (reader and schema of a slot's result) | no issue yet |
+| `internal/config` | `SchemaJSON` (embedded config schema, compared with `docs/config.schema.json` by tests) | no issue yet |
+| `internal/releasewatch` | `Service.State`, `State.Count` (read-back for tests) | no issue yet |
+| `internal/telemetry/telemetrytest`, `tools/lintexceptions` | test helpers, stay | - |
+
 ## Milestones
 
 Milestones 0.1 to 0.6 and the interfaces with Praetor are in the [roadmap](roadmap.md).

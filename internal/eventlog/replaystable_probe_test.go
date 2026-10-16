@@ -34,6 +34,7 @@ func TestProbeReplayStableRestoreLatency(t *testing.T) {
 func probeReplayStableRound(t *testing.T) (wake, write, visible, replay time.Duration, err error) {
 	t.Helper()
 	dir, signer, limits := testLog(t)
+	limits.LockTimeout = defaultLockTimeout
 	appendEvent(t, dir, signer, limits, Event{Type: "task.created", TaskID: "task-1", Payload: raw(`{"state":"open"}`)})
 	head := filepath.Join(dir, "events", "HEAD.json")
 	body, readErr := os.ReadFile(head)

@@ -297,7 +297,7 @@ func TestQueuedAppendersWithinTheDefaultLockTimeout(t *testing.T) {
 	if os.Getenv("EPITROP_EVENTLOG_LOAD_TEST") != "1" {
 		t.Skip("real disk under load, run by workflow eventlog-load.yml")
 	}
-	const lockTimeout = defaultLockTimeout
+	const lockTimeout = 1 * time.Millisecond
 	dir, signer, limits := testLog(t)
 	limits.LockTimeout = lockTimeout
 	const total = 16

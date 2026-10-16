@@ -174,15 +174,12 @@ func slowSync(t *testing.T, d time.Duration) {
 }
 
 // appendConcurrently starts total writers at once, one record each, and returns their results.
+// The writers' context outlasts limits.LockTimeout: a cancelled context ends the lock wait
+// too, so a shorter one would cut every queue at its own deadline instead.
 func appendConcurrently(t testing.TB, dir string, signer *corereceipt.Signer, limits Limits, total int) []error {
 	t.Helper()
-	return appendConcurrentlyWithin(t, testContext(t), dir, signer, limits, total)
-}
-
-// appendConcurrentlyWithin is appendConcurrently under the caller's context, for a test
-// whose writers may wait longer than testContext allows.
-func appendConcurrentlyWithin(t testing.TB, ctx context.Context, dir string, signer *corereceipt.Signer, limits Limits, total int) []error {
-	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), limits.LockTimeout+10*time.Second)
+	defer cancel()
 	var wg sync.WaitGroup
 	errs := make(chan error, total)
 	for i := 0; i < total; i++ {
@@ -311,11 +308,8 @@ func TestQueuedAppendersUnderLoad(t *testing.T) {
 	dir, signer, limits := testLog(t)
 	limits.LockTimeout = lockTimeout
 	const total = 16
-	// testContext ends after 5 s, and a cancelled context ends the lock wait too.
-	ctx, cancel := context.WithTimeout(t.Context(), lockTimeout+10*time.Second)
-	defer cancel()
 	start := time.Now()
-	errs := appendConcurrentlyWithin(t, ctx, dir, signer, limits, total)
+	errs := appendConcurrently(t, dir, signer, limits, total)
 	elapsed := time.Since(start)
 	t.Logf("%d queued appends took %s, %s an append", total, elapsed.Round(time.Millisecond), (elapsed / total).Round(time.Millisecond))
 	for i := 0; i < len(errs); i++ {

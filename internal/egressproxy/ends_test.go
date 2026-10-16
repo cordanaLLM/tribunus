@@ -244,7 +244,8 @@ func TestRelayOneSetsTheTunnelDeadline(t *testing.T) {
 	// One windows/amd64 run of about 36 timed out here (main d593720); about 1,000 probe trials
 	// per Windows architecture, half-close and relayOne alike, lost nothing.
 	if runtime.GOOS == "windows" {
-		t.Skip("the relay runs inside the sandbox, which does not run on Windows")
+		skipOnWindowsUntil(t, windowsRelaySkipExpires, time.Now(),
+			"exception category D (120 days from 2026-10-16): the relay runs inside the sandbox, which does not run on Windows")
 	}
 	tests := []struct {
 		name        string

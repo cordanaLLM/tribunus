@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -47,25 +48,77 @@ func runWatch(args []string) error {
 	return fmt.Errorf("unknown watch command: %s", args[0])
 }
 
-func runWatchAction(action string, args []string) error {
+type watchFlags struct {
+	configPath string
+	once       bool
+	interval   time.Duration
+	githubBase string
+	hfBase     string
+	ntfyBase   string
+}
+
+func validateBaseURL(action, flagName, raw string) error {
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || !u.IsAbs() || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("watch %s: --%s must be an absolute http(s) URL", action, flagName)
+	}
+	return nil
+}
+
+func parseWatchFlags(action string, args []string) (watchFlags, error) {
 	fs := flag.NewFlagSet("watch "+action, flag.ContinueOnError)
 	configPath := fs.String("config", "", "configuration file")
 	once := fs.Bool("once", false, "run one pass then exit")
 	interval := fs.Duration("interval", time.Hour, "interval between poll passes")
+	githubBase := fs.String("github-base", "", "override GitHub API base URL (for tests and offline mirrors)")
+	hfBase := fs.String("huggingface-base", "", "override Hugging Face API base URL (for tests and offline mirrors)")
+	ntfyBase := fs.String("ntfy-base", "", "override ntfy base URL (for tests and offline mirrors)")
 	if err := fs.Parse(args); err != nil {
-		return flagErr{err: err}
+		return watchFlags{}, flagErr{err: err}
 	}
 	if *configPath == "" {
-		return fmt.Errorf("watch %s: --config is required", action)
+		return watchFlags{}, fmt.Errorf("watch %s: --config is required", action)
+	}
+	if err := validateBaseURL(action, "github-base", *githubBase); err != nil {
+		return watchFlags{}, err
+	}
+	if err := validateBaseURL(action, "huggingface-base", *hfBase); err != nil {
+		return watchFlags{}, err
+	}
+	if err := validateBaseURL(action, "ntfy-base", *ntfyBase); err != nil {
+		return watchFlags{}, err
+	}
+	return watchFlags{
+		configPath: *configPath,
+		once:       *once,
+		interval:   *interval,
+		githubBase: *githubBase,
+		hfBase:     *hfBase,
+		ntfyBase:   *ntfyBase,
+	}, nil
+}
+
+func runWatchAction(action string, args []string) error {
+	flags, err := parseWatchFlags(action, args)
+	if err != nil {
+		return err
 	}
 
 	loadCtx, cancelLoad := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelLoad()
-	cfg, err := config.Load(loadCtx, *configPath)
+	cfg, err := config.Load(loadCtx, flags.configPath)
 	if err != nil {
 		return err
 	}
-	svc, err := newWatchService(cfg, releasewatch.ClientOptions{})
+	opts := releasewatch.ClientOptions{
+		GitHubBase:      flags.githubBase,
+		HuggingFaceBase: flags.hfBase,
+		NtfyBase:        flags.ntfyBase,
+	}
+	svc, err := newWatchService(cfg, opts)
 	if err != nil {
 		return err
 	}
@@ -77,7 +130,7 @@ func runWatchAction(action string, args []string) error {
 	case "run":
 		runCtx, cancelRun := context.WithTimeout(ctx, maxWatchRuntime)
 		defer cancelRun()
-		return svc.Run(runCtx, *once, *interval)
+		return svc.Run(runCtx, flags.once, flags.interval)
 	case "seed":
 		seedCtx, cancelSeed := context.WithTimeout(ctx, 10*time.Minute)
 		defer cancelSeed()

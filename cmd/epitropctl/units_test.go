@@ -490,30 +490,23 @@ func TestRunUnitsPreemptAndResume(t *testing.T) {
 	}
 }
 
+type eventLogSignerCase struct {
+	name         string
+	keyPath      *string
+	wantErr      bool
+	wantNotExist bool
+}
+
 func TestEventLogSigner(t *testing.T) {
 	missing := filepath.Join(jobsTempDir(t), "missing-key.hex")
-	cases := []struct {
-		name         string
-		keyPath      *string
-		wantErr      bool
-		wantNotExist bool
-	}{
+	cases := []eventLogSignerCase{
 		{name: "configured key opens"},
 		{name: "missing key file fails with its path", keyPath: &missing, wantErr: true, wantNotExist: true},
 		{name: "empty key path fails", keyPath: new(string), wantErr: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfgPath, _ := writeUnitsConfig(t)
-			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-			defer cancel()
-			cfg, err := config.Load(ctx, cfgPath)
-			if err != nil {
-				t.Fatalf("config.Load: %v", err)
-			}
-			if tc.keyPath != nil {
-				cfg.EventLog.SigningKeyPath = *tc.keyPath
-			}
+			cfg := signerTestConfig(t, tc.keyPath)
 			signer, clk, err := eventLogSigner(cfg)
 			if !tc.wantErr {
 				if err != nil || signer == nil || clk == nil {
@@ -521,12 +514,34 @@ func TestEventLogSigner(t *testing.T) {
 				}
 				return
 			}
-			if err == nil || signer != nil || clk != nil {
-				t.Fatalf("eventLogSigner() = %v, %v, %v; want nil, nil and an error", signer, clk, err)
-			}
-			if tc.wantNotExist && (!errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), missing)) {
-				t.Fatalf("eventLogSigner() error = %v, want os.ErrNotExist naming %s", err, missing)
-			}
+			checkSignerFailure(t, tc, signer != nil || clk != nil, err, cfg.EventLog.SigningKeyPath)
 		})
+	}
+}
+
+// signerTestConfig loads the units test configuration, with the signing key path replaced
+// when keyPath is set.
+func signerTestConfig(t *testing.T, keyPath *string) config.Config {
+	t.Helper()
+	cfgPath, _ := writeUnitsConfig(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	cfg, err := config.Load(ctx, cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if keyPath != nil {
+		cfg.EventLog.SigningKeyPath = *keyPath
+	}
+	return cfg
+}
+
+func checkSignerFailure(t *testing.T, tc eventLogSignerCase, gotValue bool, err error, keyPath string) {
+	t.Helper()
+	if err == nil || gotValue {
+		t.Fatalf("eventLogSigner() error = %v, value returned = %v; want an error and no value", err, gotValue)
+	}
+	if tc.wantNotExist && (!errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), keyPath)) {
+		t.Fatalf("eventLogSigner() error = %v, want os.ErrNotExist naming %s", err, keyPath)
 	}
 }

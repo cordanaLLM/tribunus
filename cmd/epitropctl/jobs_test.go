@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -256,11 +257,21 @@ func writeJobsConfig(t *testing.T, keyMode string) string {
 	if err := os.MkdirAll(filepath.Join(stateDir, ".git"), 0o700); err != nil {
 		t.Fatalf("MkdirAll(state/.git) = %v, want nil", err)
 	}
-	body := `{"event_log":{"dir":"` + stateDir + `","signing_key_path":"` + keyPath + `"},"jobs":[{"name":"idle","command":["/bin/true"],"log_path":"` + filepath.Join(base, "idle.log") + `","sandbox":{"mode":"off","reason":"jobs cli unit test"}}]}`
+	body := `{"event_log":{"dir":` + jsonQuote(stateDir) + `,"signing_key_path":` + jsonQuote(keyPath) + `},"jobs":[{"name":"idle","command":["/bin/true"],"log_path":` + jsonQuote(filepath.Join(base, "idle.log")) + `,"sandbox":{"mode":"off","reason":"jobs cli unit test"}}]}`
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("WriteFile(config) = %v, want nil", err)
 	}
 	return path
+}
+
+// jsonQuote returns the JSON-encoded string representation of s, ensuring
+// backslashes in Windows paths are properly escaped.
+func jsonQuote(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
 }
 
 func jobsTempDir(t *testing.T) string {

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -70,6 +71,9 @@ func runRootCases(t *testing.T, w sandboxPathWorld, cases []rootCase) {
 // The workspace and every input lie in a declared root or the job is refused: lying outside
 // HOME is no pass, and with no root nothing runs sandboxed.
 func TestLoadSandboxPathsLieInADeclaredRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the sandbox does not run on Windows")
+	}
 	w := newSandboxPathWorld(t)
 	ws := filepath.Join(w.root, "ws")
 	outside := filepath.Join(w.root, "outside")
@@ -79,13 +83,13 @@ func TestLoadSandboxPathsLieInADeclaredRoot(t *testing.T) {
 			t.Fatalf("MkdirAll(%s) = %v, want nil", dir, err)
 		}
 	}
-	runtime := w.runtimeDir(t)
+	runtimeDir := w.runtimeDir(t)
 	runRootCases(t, w, []rootCase{
 		{"workspace in its root", []string{ws}, ws, []string{}, ""},
 		{"input in the workspace's root", []string{ws}, ws, []string{filepath.Join(ws, "in")}, ""},
 		{"no roots", []string{}, ws, []string{}, "workspace: " + ws + " lies in no sandbox_input_roots entry"},
 		{"input outside HOME and every root", []string{ws}, ws, []string{outside}, "inputs/0: " + outside + " lies in no sandbox_input_roots entry"},
-		{"input in the user's runtime directory", []string{ws}, ws, []string{runtime}, "inputs/0:"},
+		{"input in the user's runtime directory", []string{ws}, ws, []string{runtimeDir}, "inputs/0:"},
 		{"input that shares only a name prefix with a root", []string{ws}, ws, []string{sibling}, "lies in no sandbox_input_roots entry"},
 		{"input that climbs out of its root", []string{ws}, ws, []string{filepath.Join(ws, "in", "..", "..", "outside")}, "lies in no sandbox_input_roots entry"},
 		{"root /", []string{"/"}, ws, []string{}, "sandbox_input_roots/0: refuse /"},
@@ -99,6 +103,9 @@ func TestLoadSandboxPathsLieInADeclaredRoot(t *testing.T) {
 // Below HOME a login location stays shut behind a root that only contains it; a root that
 // names one location exactly opens that one and no other.
 func TestLoadSandboxInputsRefuseLoginLocations(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the sandbox does not run on Windows")
+	}
 	w := newSandboxPathWorld(t)
 	w.plantLogins(t)
 	ws := filepath.Join(w.root, "ws")
@@ -126,6 +133,9 @@ func TestLoadSandboxInputsRefuseLoginLocations(t *testing.T) {
 // A symlink is followed before any check: a link inside a root that leads to a login
 // location is that login location.
 func TestLoadSandboxInputsFollowSymlinksToLogins(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the sandbox does not run on Windows")
+	}
 	w := newSandboxPathWorld(t)
 	w.plantLogins(t)
 	ws := filepath.Join(w.root, "ws")

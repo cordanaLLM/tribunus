@@ -1,3 +1,6 @@
+# Captured upstream answers: the tests split them on blank lines (\n\n), so a checkout keeps LF.
+internal/sources/**/testdata/upstream/** text eol=lf
+
 # BEGIN praetor managed attributes (praetorctl adopt)
 # praetorctl audit hashes these files; keep their checkout bytes the same on every platform.
 .devcontainer/Dockerfile.praetor text eol=lf

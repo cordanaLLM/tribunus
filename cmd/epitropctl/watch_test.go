@@ -40,6 +40,21 @@ func TestRunWatchRequiresConfig(t *testing.T) {
 	}
 }
 
+func TestRunWatchRejectsInvalidBaseURLs(t *testing.T) {
+	for _, action := range []string{"run", "seed"} {
+		for _, flagName := range []string{"--github-base", "--huggingface-base", "--ntfy-base"} {
+			for _, badURL := range []string{"not-a-url", "ftp://example.com", "/relative/path"} {
+				t.Run(action+"/"+flagName+"/"+badURL, func(t *testing.T) {
+					err := runWatchAction(action, []string{"--config=dummy.yaml", flagName + "=" + badURL})
+					if err == nil || !strings.Contains(err.Error(), "must be an absolute http(s) URL") {
+						t.Fatalf("runWatchAction(%s, %s=%s) = %v, want invalid URL error", action, flagName, badURL, err)
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestRunWatchActionBadFlagsExit2(t *testing.T) {
 	for _, action := range []string{"run", "seed"} {
 		t.Run(action, func(t *testing.T) {

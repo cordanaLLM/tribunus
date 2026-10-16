@@ -106,7 +106,7 @@ func printUsage() {
 	fmt.Println("  epitropctl schema")
 	fmt.Println("  epitropctl version")
 	fmt.Println("  epitropctl jobs start|status|stop|supervise --config=file [name]")
-	fmt.Println("  epitropctl watch run|seed --config=file [--once] [--interval=duration]")
+	fmt.Println("  epitropctl watch run|seed --config=file [--once] [--interval=duration] [--github-base=url] [--huggingface-base=url] [--ntfy-base=url]")
 	fmt.Println("  epitropctl units set|resume|show|note|inbox|preempt|handover|frontier|assign|release --config=file ...")
 	fmt.Println("  epitropctl graph show|apply --config=file [--file=stage.json]")
 	fmt.Println("  epitropctl effects list|resolve --config=file [--outcome=done|retry --by=name <task id> <action type>]")

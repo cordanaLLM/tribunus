@@ -194,6 +194,7 @@
               "reason": "",
               "workspace": "",
               "inputs": [],
+              "read_only": [],
               "env_allow": [],
               "network": "none",
               "destinations": [],
@@ -230,6 +231,18 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 4096
+                }
+              },
+              "read_only": {
+                "type": "array",
+                "default": [],
+                "maxItems": 32,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "pattern": "^[^/]"
                 }
               },
               "env_allow": {

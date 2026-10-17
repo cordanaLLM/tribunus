@@ -30,6 +30,7 @@ const (
 	MaxStopGraceSeconds     = 300
 	MaxJobRuntimeSeconds    = 365 * 24 * 3600
 	MaxSandboxInputs        = 32
+	MaxSandboxReadOnly      = 32
 	MaxSandboxInputRoots    = 32
 	MaxSandboxEnvAllow      = 64
 	MaxReleaseWatchRoutes   = 32
@@ -193,7 +194,11 @@ type SandboxConfig struct {
 	Reason    string   `koanf:"reason" json:"reason"`
 	Workspace string   `koanf:"workspace" json:"workspace"`
 	Inputs    []string `koanf:"inputs" json:"inputs"`
-	EnvAllow  []string `koanf:"env_allow" json:"env_allow"`
+	// ReadOnly are paths inside the workspace, relative to it, that the job may read and not
+	// write: a working copy's hooks, for one. Each has to exist and stay inside the workspace
+	// when its symlinks are resolved, at load and again at every start.
+	ReadOnly []string `koanf:"read_only" json:"read_only"`
+	EnvAllow []string `koanf:"env_allow" json:"env_allow"`
 	// Network is what the job reaches: "none" nothing, "egress" the internet without the
 	// host's loopback, "proxy" the Destinations and nothing else.
 	Network string `koanf:"network" json:"network"`
@@ -431,6 +436,9 @@ func ValidateSandbox(sandbox SandboxConfig) error {
 	if err := validateSandboxEnv(sandbox.EnvAllow); err != nil {
 		return err
 	}
+	if err := validateSandboxReadOnly(sandbox); err != nil {
+		return err
+	}
 	return validateSandboxHome(sandbox)
 }
 
@@ -548,6 +556,9 @@ func validateJobSandbox(job *JobConfig, guard protectedPaths) error {
 		return err
 	}
 	job.Sandbox.Workspace, job.Sandbox.Inputs = workspace, inputs
+	if _, err = ResolveSandboxReadOnly(job.Sandbox); err != nil {
+		return err
+	}
 	return resolveSandboxHome(&job.Sandbox, guard)
 }
 
@@ -560,6 +571,9 @@ func validateSandboxSettings(job JobConfig) error {
 		return err
 	}
 	if err := validateSandboxEnv(job.Sandbox.EnvAllow); err != nil {
+		return err
+	}
+	if err := validateSandboxReadOnly(job.Sandbox); err != nil {
 		return err
 	}
 	if err := validateSandboxHome(job.Sandbox); err != nil {

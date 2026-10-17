@@ -191,8 +191,13 @@ func TestRunLoadedJobsActionDispatchesStartStopSuperviseAndDefault(t *testing.T)
 	}
 	ctx, cancel := context.WithCancel(testContext(t))
 	cancel()
-	if err := runLoadedJobsAction(ctx, sup, "supervise", ""); err == nil || !strings.Contains(err.Error(), "context") {
-		t.Fatalf("runLoadedJobsAction(supervise canceled) = %v, want context error", err)
+	if err := runLoadedJobsAction(ctx, sup, "supervise", ""); err != nil {
+		t.Fatalf("runLoadedJobsAction(supervise stopped) = %v, want nil: a stop signal is the normal end", err)
+	}
+	expired, cancelExpired := context.WithDeadline(testContext(t), time.Now().Add(-time.Second))
+	defer cancelExpired()
+	if err := runLoadedJobsAction(expired, sup, "supervise", ""); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("runLoadedJobsAction(supervise past its bound) = %v, want context.DeadlineExceeded", err)
 	}
 	if err := runLoadedJobsAction(testContext(t), sup, "bogus", ""); err == nil {
 		t.Fatal("runLoadedJobsAction(bogus) = nil, want unknown command")

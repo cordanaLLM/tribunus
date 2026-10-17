@@ -45,7 +45,6 @@ const (
 	DefaultPerSourceCap     = 3
 	DefaultNtfyPriority     = 3
 	maxConfigKeyDepth       = 8
-	disabledEnvPrefix       = "\x00EPITROP_CONFIG_ENV_DISABLED_"
 	schemaResourceID        = "config.schema.json"
 	defaultGraphDepth       = 12
 	defaultTokens           = 200000
@@ -314,11 +313,10 @@ func Load(ctx context.Context, path string) (Config, error) {
 		Delimiter: ".",
 		Files:     []string{path},
 		Watch:     false,
-		// core/config has no switch for its environment layer, and environment
-		// values arrive as strings the schema would refuse or the weak decoder
-		// would coerce. A prefix that starts with NUL matches no variable name,
-		// so only the file is read (TestLoadDisablesEnvironmentOverrides).
-		EnvPrefix: disabledEnvPrefix,
+		// Environment values arrive as strings the schema would refuse or the
+		// weak decoder would coerce, so only the file is read
+		// (TestLoadDisablesEnvironmentOverrides).
+		DisableEnv: true,
 	})
 	if err != nil {
 		return Config{}, fmt.Errorf("config: load %s: %w", path, err)
@@ -374,7 +372,7 @@ func ReadDocument(ctx context.Context, path string) (map[string]any, error) {
 	if _, err := os.Stat(path); err != nil {
 		return nil, fmt.Errorf("config: stat %s: %w", path, err)
 	}
-	loaded, err := coreconfig.New(coreconfig.Options{Delimiter: ".", Files: []string{path}, Watch: false, EnvPrefix: disabledEnvPrefix})
+	loaded, err := coreconfig.New(coreconfig.Options{Delimiter: ".", Files: []string{path}, Watch: false, DisableEnv: true})
 	if err != nil {
 		return nil, fmt.Errorf("config: load %s: %w", path, err)
 	}

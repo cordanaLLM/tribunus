@@ -358,6 +358,11 @@
                           "type": "string",
                           "default": "",
                           "maxLength": 520
+                        },
+                        "expires_ms": {
+                          "type": "string",
+                          "default": "",
+                          "maxLength": 520
                         }
                       }
                     }

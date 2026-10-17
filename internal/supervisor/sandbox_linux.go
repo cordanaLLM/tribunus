@@ -373,7 +373,7 @@ func bwrapArgs(commandPath string, command []string, sandbox config.SandboxConfi
 	args = appendInputBinds(args, sandbox.Inputs)
 	args = appendHomeArgs(args, sandbox)
 	args = append(args, "--ro-bind", commandPath, commandPath, "--chdir", sandbox.Workspace)
-	args = append(args, "--setenv", "PATH", "/usr/bin:/bin", "--setenv", "HOME", sandbox.Workspace, "--setenv", "TMPDIR", "/tmp")
+	args = append(args, "--setenv", "PATH", "/usr/bin:/bin", "--setenv", "HOME", jobHome(sandbox), "--setenv", "TMPDIR", "/tmp")
 	for i := 0; i < len(busEnvNames); i++ {
 		args = append(args, "--unsetenv", busEnvNames[i])
 	}

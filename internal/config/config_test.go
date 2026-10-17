@@ -107,6 +107,14 @@ func TestLoadNegativeValidation(t *testing.T) {
 		{"git enabled without email", `{"event_log": {"git": {"enabled": true, "author_name": "epitrop"}}}`, []string{"event_log/git", "author_name and author_email are required"}},
 		{"git compact not a boolean", `{"event_log": {"git": {"compact": "yes"}}}`, []string{"/event_log/git/compact", "boolean"}},
 		{"git compact without enabled", `{"event_log": {"git": {"compact": true}}}`, []string{"event_log/git", "compact needs enabled"}},
+		{"unknown server transport", `{"server": {"transport": "sse"}}`, []string{"/server/transport", "valid"}},
+		{"unknown server key", `{"server": {"allow_mutations": true}}`, []string{"/server", "additional properties"}},
+		{"server listen on every interface", `{"server": {"listen": "0.0.0.0:8899"}}`, []string{"server/listen", "not loopback"}},
+		{"server listen without host", `{"server": {"listen": ":8899"}}`, []string{"server/listen", "not loopback"}},
+		{"server listen on a name", `{"server": {"listen": "example.com:8899"}}`, []string{"server/listen", "not loopback"}},
+		{"server listen without port", `{"server": {"listen": "127.0.0.1"}}`, []string{"server/listen", "missing port"}},
+		{"server listen port above range", `{"server": {"listen": "127.0.0.1:65536"}}`, []string{"server/listen", "not 0..65535"}},
+		{"server listen port negative", `{"server": {"listen": "127.0.0.1:-1"}}`, []string{"server/listen", "not 0..65535"}},
 		{"bad job restart policy", `{"jobs": [
   {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "schedule": "always", "restart": {"policy": "sometimes"}}
 ]}`, []string{"/jobs/0/restart/policy", "valid"}},
@@ -155,6 +163,18 @@ func TestLoadEventLogGit(t *testing.T) {
 		want := EventLogGitConfig{Enabled: true, Ref: "refs/epitrop/log-2.x", AuthorName: "epitrop", AuthorEmail: "epitrop@example.invalid", TimeoutSeconds: seconds, Compact: compact}
 		if cfg.EventLog.Git != want {
 			t.Fatalf("Load() event_log.git = %+v, want %+v", cfg.EventLog.Git, want)
+		}
+	}
+}
+
+func TestLoadServerListensOnLoopback(t *testing.T) {
+	for _, addr := range []string{"127.0.0.1:0", "127.0.0.1:65535", "127.255.0.1:8899", "[::1]:8899", "localhost:8899"} {
+		cfg, err := Load(testContext(t), writeConfig(t, fmt.Sprintf(`{"server": {"transport": "http", "listen": %q}}`, addr)))
+		if err != nil {
+			t.Fatalf("Load(listen %s) = %v, want nil", addr, err)
+		}
+		if want := (ServerConfig{Transport: TransportHTTP, Listen: addr}); cfg.Server != want {
+			t.Fatalf("Load() server = %+v, want %+v", cfg.Server, want)
 		}
 	}
 }
@@ -289,6 +309,8 @@ func TestConfigSchemaDefaultsAgreeWithGoTypes(t *testing.T) {
 	assertSchemaDefault(t, doc, def.EventLog.Git.AuthorEmail, "event_log", "git", "author_email")
 	assertSchemaDefault(t, doc, def.EventLog.Git.TimeoutSeconds, "event_log", "git", "timeout_seconds")
 	assertSchemaDefault(t, doc, def.EventLog.Git.Compact, "event_log", "git", "compact")
+	assertSchemaDefault(t, doc, def.Server.Transport, "server", "transport")
+	assertSchemaDefault(t, doc, def.Server.Listen, "server", "listen")
 	assertSchemaDefault(t, doc, def.Router.Aliases, "router", "aliases")
 	assertSchemaDefault(t, doc, def.Jobs, "jobs")
 	assertSchemaDefault(t, doc, def.Watches, "watches")

@@ -680,6 +680,30 @@
         }
       }
     },
+    "server": {
+      "type": "object",
+      "default": {
+        "transport": "stdio",
+        "listen": "127.0.0.1:8899"
+      },
+      "additionalProperties": false,
+      "properties": {
+        "transport": {
+          "type": "string",
+          "default": "stdio",
+          "enum": [
+            "stdio",
+            "http"
+          ]
+        },
+        "listen": {
+          "type": "string",
+          "default": "127.0.0.1:8899",
+          "minLength": 1,
+          "maxLength": 255
+        }
+      }
+    },
     "sandbox_input_roots": {
       "type": "array",
       "default": [],

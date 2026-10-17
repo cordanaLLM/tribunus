@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/hex"
@@ -8,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -44,14 +47,20 @@ func jsonQuote(s string) string {
 // the config path.
 func writeConfig(t *testing.T) string {
 	t.Helper()
+	return writeConfigServing(t, `{"transport":"stdio"}`)
+}
+
+// writeConfigServing is writeConfig with server set to the JSON object server.
+func writeConfigServing(t *testing.T, server string) string {
+	t.Helper()
 	base := t.TempDir()
 	keyPath := filepath.Join(base, "seed.hex")
 	if err := os.WriteFile(keyPath, []byte(hex.EncodeToString(bytes.Repeat([]byte{9}, 32))), 0o600); err != nil {
 		t.Fatalf("WriteFile(key) = %v", err)
 	}
 	cfgPath := filepath.Join(base, "config.json")
-	body := fmt.Sprintf(`{"event_log":{"dir":%s,"signing_key_path":%s},"jobs":[{"name":"idle","command":["sleep","30"],"log_path":%s,"schedule":"always","sandbox":{"mode":"off","reason":"server test"}}]}`,
-		jsonQuote(filepath.Join(base, "state")), jsonQuote(keyPath), jsonQuote(filepath.Join(base, "idle.log")))
+	body := fmt.Sprintf(`{"server":%s,"event_log":{"dir":%s,"signing_key_path":%s},"jobs":[{"name":"idle","command":["sleep","30"],"log_path":%s,"schedule":"always","sandbox":{"mode":"off","reason":"server test"}}]}`,
+		server, jsonQuote(filepath.Join(base, "state")), jsonQuote(keyPath), jsonQuote(filepath.Join(base, "idle.log")))
 	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
 		t.Fatalf("WriteFile(config) = %v", err)
 	}
@@ -175,9 +184,9 @@ func TestServeRefusesBadArguments(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := newServer(tc.args)
+			_, _, err := load(tc.args)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("newServer(%q) = %v, want an error containing %q", tc.args, err, tc.want)
+				t.Fatalf("load(%q) = %v, want an error containing %q", tc.args, err, tc.want)
 			}
 		})
 	}
@@ -234,3 +243,135 @@ func TestJobListerFallsBackOnlyWhenNotSupported(t *testing.T) {
 		})
 	}
 }
+
+// serveHTTPConfig runs serve with transport http on a free loopback port and returns the
+// base address it prints, the cancel that ends it, and serve's result.
+func serveHTTPConfig(t *testing.T, cfgPath string) (string, context.CancelFunc, <-chan error) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(testContext(t))
+	t.Cleanup(cancel)
+	outR, outW := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		err := serve(ctx, []string{"--config=" + cfgPath}, io.NopCloser(strings.NewReader("")), outW)
+		outW.CloseWithError(fmt.Errorf("serve returned %w", err))
+		done <- err
+	}()
+	lines := make(chan string, 1)
+	go func() {
+		line, err := bufio.NewReader(outR).ReadString('\n')
+		if err != nil {
+			line = err.Error()
+		}
+		lines <- line
+	}()
+	var line string
+	select {
+	case line = <-lines:
+	case <-time.After(30 * time.Second):
+		t.Fatal("serve printed no address")
+	}
+	endpoint := strings.TrimSpace(strings.TrimPrefix(line, "epitrop-server: serving "))
+	if !strings.HasPrefix(endpoint, "http://127.0.0.1:") || !strings.HasSuffix(endpoint, mcp.PathMCP) {
+		t.Fatalf("served address line %q, want http://127.0.0.1:<port>%s", line, mcp.PathMCP)
+	}
+	return strings.TrimSuffix(endpoint, mcp.PathMCP), cancel, done
+}
+
+func waitReady(t *testing.T, base string) {
+	t.Helper()
+	for i := 0; i < 300; i++ {
+		req, err := http.NewRequestWithContext(testContext(t), http.MethodGet, base+"/readyz", nil)
+		if err != nil {
+			t.Fatalf("NewRequest = %v", err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("GET /readyz = %v", err)
+		}
+		if err := resp.Body.Close(); err != nil {
+			t.Fatalf("Close = %v", err)
+		}
+		if resp.StatusCode == http.StatusOK {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("/readyz never passed")
+}
+
+func TestServeHTTPReadsBackAndStops(t *testing.T) {
+	cfgPath := writeConfigServing(t, `{"transport":"http","listen":"127.0.0.1:0"}`)
+	recordUnit(t, cfgPath)
+	base, cancel, done := serveHTTPConfig(t, cfgPath)
+	waitReady(t, base)
+
+	readBackOverHTTP(t, base)
+
+	// An open event stream must not hold the shutdown.
+	streamReq, err := http.NewRequestWithContext(testContext(t), http.MethodGet, base+mcp.PathEvents, nil)
+	if err != nil {
+		t.Fatalf("NewRequest = %v", err)
+	}
+	stream, err := http.DefaultClient.Do(streamReq)
+	if err != nil {
+		t.Fatalf("GET %s = %v", mcp.PathEvents, err)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("serve after cancel = %v, want nil", err)
+		}
+	case <-time.After(shutdownTimeout / 2):
+		t.Fatal("serve did not stop with an event stream open")
+	}
+	if err := stream.Body.Close(); err != nil {
+		t.Fatalf("Close(stream) = %v", err)
+	}
+}
+
+func readBackOverHTTP(t *testing.T, base string) {
+	t.Helper()
+	ctx := testContext(t)
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test-client", Version: "test"}, nil)
+	cs, err := client.Connect(ctx, &sdkmcp.StreamableClientTransport{Endpoint: base + mcp.PathMCP}, nil)
+	if err != nil {
+		t.Fatalf("Connect() = %v", err)
+	}
+	res, err := cs.CallTool(ctx, &sdkmcp.CallToolParams{Name: mcp.ToolUnitStatus, Arguments: map[string]any{"id": unitID}})
+	if err != nil {
+		t.Fatalf("CallTool(unit_status) = %v", err)
+	}
+	var unit mcp.UnitStatusOut
+	structured(t, res, &unit)
+	if unit.ID != unitID || unit.Status != "implementing" {
+		t.Fatalf("unit_status over HTTP = %+v, want the recorded unit", unit)
+	}
+	if err := cs.Close(); err != nil {
+		t.Fatalf("client Close = %v", err)
+	}
+
+}
+
+func TestServeHTTPRefusesABusyAddress(t *testing.T) {
+	var lc net.ListenConfig
+	ln, err := lc.Listen(testContext(t), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := ln.Close(); err != nil {
+			t.Errorf("Close = %v", err)
+		}
+	})
+	cfgPath := writeConfigServing(t, fmt.Sprintf(`{"transport":"http","listen":%s}`, jsonQuote(ln.Addr().String())))
+	err = serve(testContext(t), []string{"--config=" + cfgPath}, io.NopCloser(strings.NewReader("")), nopWriteCloser{io.Discard})
+	if err == nil || !strings.Contains(err.Error(), "address already in use") {
+		t.Fatalf("serve on a busy address = %v, want address already in use", err)
+	}
+}
+
+type nopWriteCloser struct{ io.Writer }
+
+func (nopWriteCloser) Close() error { return nil }

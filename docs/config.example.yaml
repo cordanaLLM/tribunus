@@ -134,3 +134,11 @@ release_watch:
         - ntfy:
             topic: example-topic
             priority: 3
+
+# epitrop-server serves its read-only MCP tools on stdin and stdout by default. With
+# transport http it serves them on listen instead, at /mcp, beside /livez, /readyz,
+# /startupz and the event stream /events. The server has no authentication, so listen
+# must name a loopback host; port 0 picks a free port and the server prints the address.
+server:
+  transport: http
+  listen: 127.0.0.1:8899

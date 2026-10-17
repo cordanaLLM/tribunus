@@ -367,8 +367,10 @@ func TestServeHTTPRefusesABusyAddress(t *testing.T) {
 	})
 	cfgPath := writeConfigServing(t, fmt.Sprintf(`{"transport":"http","listen":%s}`, jsonQuote(ln.Addr().String())))
 	err = serve(testContext(t), []string{"--config=" + cfgPath}, io.NopCloser(strings.NewReader("")), nopWriteCloser{io.Discard})
-	if err == nil || !strings.Contains(err.Error(), "address already in use") {
-		t.Fatalf("serve on a busy address = %v, want address already in use", err)
+	// The bind error's text differs between platforms; its operation does not.
+	var opErr *net.OpError
+	if !errors.As(err, &opErr) || opErr.Op != "listen" {
+		t.Fatalf("serve on a busy address = %v, want the listen error", err)
 	}
 }
 

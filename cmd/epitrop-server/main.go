@@ -96,7 +96,8 @@ func serve(ctx context.Context, args []string, in io.ReadCloser, out io.WriteClo
 }
 
 // serveHTTP serves the tools, probes and event stream on addr until ctx ends, then stops
-// within shutdownTimeout. Request contexts end with ctx, so open streams close.
+// within shutdownTimeout. Request contexts end with ctx, so open streams close, and
+// connections that have sent no request are closed, so neither holds the stop.
 func serveHTTP(ctx context.Context, addr string, src mcp.Sources, out io.Writer) error {
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", addr)
@@ -104,10 +105,12 @@ func serveHTTP(ctx context.Context, addr string, src mcp.Sources, out io.Writer)
 		return fmt.Errorf("epitrop-server: %w", err)
 	}
 	h := mcp.NewHTTP(appVersion(), src, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	idle := newNewConns()
 	srv := &http.Server{
 		Handler:           h.Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 		BaseContext:       func(net.Listener) context.Context { return ctx },
+		ConnState:         idle.track,
 	}
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(ln) }()
@@ -120,12 +123,16 @@ func serveHTTP(ctx context.Context, addr string, src mcp.Sources, out io.Writer)
 		return fmt.Errorf("epitrop-server: %w", err)
 	case <-ctx.Done():
 	}
+	// Closing the silent connections first lets Shutdown return once the requests in
+	// flight are done; connections accepted until Shutdown closes the listener are
+	// closed as they arrive.
 	stopCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
+	idle.closeAll()
 	if err := srv.Shutdown(stopCtx); err != nil {
-		return errors.Join(fmt.Errorf("epitrop-server: shutdown: %w", err), srv.Close())
+		return errors.Join(fmt.Errorf("epitrop-server: shutdown: %w", err), srv.Close(), idle.closeErr())
 	}
-	return nil
+	return idle.closeErr()
 }
 
 // load parses args, loads the config and opens what the tools read.

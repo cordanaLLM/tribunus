@@ -188,6 +188,7 @@ func TestLoadBoundaryArrays(t *testing.T) {
 
 func TestLoadDisablesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("APP_GRAPH_MAX_DEPTH", "64")
+	t.Setenv("GRAPH", "64")
 	cfg, err := Load(testContext(t), writeConfig(t, "{}\n"))
 	if err != nil {
 		t.Fatalf("Load() = %v, want nil", err)

@@ -139,6 +139,10 @@ release_watch:
 # transport http it serves them on listen instead, at /mcp, beside /livez, /readyz,
 # /startupz and the event stream /events. The server has no authentication, so listen
 # must name a loopback host; port 0 picks a free port and the server prints the address.
+# allow_mutations adds the tools that start and stop jobs and record a unit's status;
+# each call names an idempotency key, and a repeat with the same key and arguments is
+# recorded as skipped instead of run again.
 server:
   transport: http
   listen: 127.0.0.1:8899
+  allow_mutations: false

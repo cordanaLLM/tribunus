@@ -1,6 +1,8 @@
-// Package mcp serves the run record over the Model Context Protocol. The tools it registers
-// only read: the jobs' state as the supervisor reports it and the work units as the event
-// log replays them. No tool appends to the event log or signals a process.
+// Package mcp serves the run record over the Model Context Protocol. The read-only tools
+// report the jobs' state as the supervisor reports it and the work units as the event log
+// replays them. The mutating tools start and stop jobs and record a unit's status; a
+// server has them only when its Sources carry Mutators, and each call runs at most once
+// per key through the effect ledger.
 package mcp
 
 import (
@@ -40,16 +42,22 @@ type UnitReader interface {
 	Show(ctx context.Context, id string) (eventlog.Unit, error)
 }
 
-// Sources are what the tools read.
+// Sources are what the tools read, and with Mutate set, what they change.
 type Sources struct {
 	Jobs  JobLister
 	Units UnitReader
+	// Mutate, when not nil, adds the mutating tools.
+	Mutate *Mutators
 }
 
-// NewServer returns a server with every read-only tool registered over src.
+// NewServer returns a server with every read-only tool registered over src, and the
+// mutating tools when src.Mutate is set.
 func NewServer(version string, src Sources) *sdkmcp.Server {
 	s := sdkmcp.NewServer(&sdkmcp.Implementation{Name: ServerName, Version: version}, nil)
 	Register(s, src)
+	if src.Mutate != nil {
+		RegisterMutating(s, *src.Mutate)
+	}
 	return s
 }
 

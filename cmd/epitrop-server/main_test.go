@@ -20,6 +20,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tekmora/epitrop/internal/config"
+	"github.com/tekmora/epitrop/internal/egressproxy"
 	"github.com/tekmora/epitrop/internal/logsetup"
 	"github.com/tekmora/epitrop/internal/mcp"
 	"github.com/tekmora/epitrop/internal/supervisor"
@@ -213,7 +214,7 @@ func TestServeEndsWithContext(t *testing.T) {
 	}
 }
 
-func TestJobListerFallsBackOnlyWhenNotSupported(t *testing.T) {
+func TestOpenJobsFallsBackOnlyWhenNotSupported(t *testing.T) {
 	cases := []struct {
 		name      string
 		err       error
@@ -227,20 +228,29 @@ func TestJobListerFallsBackOnlyWhenNotSupported(t *testing.T) {
 			orig := newSupervisor
 			t.Cleanup(func() { newSupervisor = orig })
 			newSupervisor = func(config.Config, supervisor.Options) (*supervisor.Supervisor, error) { return nil, tc.err }
-			jobs, err := jobLister(config.Default())
+			jobs, err := openJobs(config.Default())
 			if !tc.wantStart {
 				if err == nil || !errors.Is(err, tc.err) {
-					t.Fatalf("jobLister() = %v, %v; want the error %v", jobs, err, tc.err)
+					t.Fatalf("openJobs() = %v, %v; want the error %v", jobs, err, tc.err)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("jobLister() = %v, want nil", err)
+				t.Fatalf("openJobs() = %v, want nil", err)
 			}
-			if _, statusErr := jobs.Status(testContext(t), ""); !errors.Is(statusErr, supervisor.ErrNotSupported) {
-				t.Fatalf("Status() = %v, want ErrNotSupported", statusErr)
-			}
+			assertNotSupported(t, jobs)
 		})
+	}
+}
+
+// assertNotSupported checks that every job call answers with ErrNotSupported.
+func assertNotSupported(t *testing.T, jobs jobService) {
+	t.Helper()
+	if _, statusErr := jobs.Status(testContext(t), ""); !errors.Is(statusErr, supervisor.ErrNotSupported) {
+		t.Fatalf("Status() = %v, want ErrNotSupported", statusErr)
+	}
+	if startErr, stopErr := jobs.Start(testContext(t), "idle"), jobs.Stop(testContext(t), "idle"); !errors.Is(startErr, supervisor.ErrNotSupported) || !errors.Is(stopErr, supervisor.ErrNotSupported) {
+		t.Fatalf("Start(), Stop() = %v, %v; want ErrNotSupported", startErr, stopErr)
 	}
 }
 
@@ -375,3 +385,71 @@ func TestServeHTTPRefusesABusyAddress(t *testing.T) {
 type nopWriteCloser struct{ io.Writer }
 
 func (nopWriteCloser) Close() error { return nil }
+
+func TestHelperRunsTheShimAndTheRelay(t *testing.T) {
+	for _, args := range [][]string{{jobShimCommand}, {egressproxy.RelayCommand}} {
+		code, ok := helper(args)
+		if !ok || code == 0 {
+			t.Fatalf("helper(%v) = %d, %v; want the helper run and refuse its missing flags", args, code, ok)
+		}
+	}
+	for _, args := range [][]string{nil, {"--config=x"}, {"__job-shim-extra"}} {
+		if _, ok := helper(args); ok {
+			t.Fatalf("helper(%v) ran a helper, want serve", args)
+		}
+	}
+}
+
+// toolsOf lists the tool names a session serves.
+func toolsOf(t *testing.T, cs *sdkmcp.ClientSession) map[string]bool {
+	t.Helper()
+	res, err := cs.ListTools(testContext(t), nil)
+	if err != nil {
+		t.Fatalf("ListTools() = %v", err)
+	}
+	out := make(map[string]bool, len(res.Tools))
+	for i := 0; i < len(res.Tools); i++ {
+		out[res.Tools[i].Name] = true
+	}
+	return out
+}
+
+func TestServeMutatesOnlyWhenAllowed(t *testing.T) {
+	for _, allow := range []bool{false, true} {
+		cs, stop := stdioClient(t, []string{"--config=" + writeConfigServing(t, fmt.Sprintf(`{"allow_mutations":%v}`, allow))})
+		if got := toolsOf(t, cs)[mcp.ToolUnitSet]; got != allow {
+			t.Fatalf("allow_mutations %v: unit_set listed = %v", allow, got)
+		}
+		if err := stop(); err != nil {
+			t.Fatalf("serve after client close = %v, want nil", err)
+		}
+	}
+}
+
+func TestServeUnitSetRunsOncePerKey(t *testing.T) {
+	cs, stop := stdioClient(t, []string{"--config=" + writeConfigServing(t, `{"allow_mutations":true}`)})
+	args := map[string]any{"key": "req-1", "id": unitID, "status": "implementing"}
+	for _, want := range []mcp.MutationOut{{Executed: true}, {Skipped: true}} {
+		res, err := cs.CallTool(testContext(t), &sdkmcp.CallToolParams{Name: mcp.ToolUnitSet, Arguments: args})
+		if err != nil {
+			t.Fatalf("CallTool(unit_set) = %v", err)
+		}
+		var got mcp.MutationOut
+		structured(t, res, &got)
+		if got != want {
+			t.Fatalf("unit_set = %+v, want %+v", got, want)
+		}
+	}
+	res, err := cs.CallTool(testContext(t), &sdkmcp.CallToolParams{Name: mcp.ToolUnitStatus, Arguments: map[string]any{"id": unitID}})
+	if err != nil {
+		t.Fatalf("CallTool(unit_status) = %v", err)
+	}
+	var unit mcp.UnitStatusOut
+	structured(t, res, &unit)
+	if unit.Status != "implementing" {
+		t.Fatalf("unit_status = %+v, want implementing", unit)
+	}
+	if err := stop(); err != nil {
+		t.Fatalf("serve after client close = %v, want nil", err)
+	}
+}

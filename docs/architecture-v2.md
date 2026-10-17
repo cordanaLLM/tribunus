@@ -260,6 +260,7 @@ Every model call goes through a router alias. No concrete model name appears in 
 | `internal/edges` | `Check` | [#114](https://github.com/tekmora/epitrop/issues/114) (0.5) |
 | `internal/effects` | side-effect ledger `Do`, `Open` | [#38](https://github.com/tekmora/epitrop/issues/38) (0.4) |
 | `internal/eventlog` | `TaskReducer` | [#39](https://github.com/tekmora/epitrop/issues/39) (0.4) |
+| `internal/ledger` | `Read` (Praetor efficiency ledger reader for the budget layers) | [#6](https://github.com/tekmora/epitrop/issues/6) (0.2) |
 | `internal/graph` | `StatusFromClaim` | [#38](https://github.com/tekmora/epitrop/issues/38) (0.4) |
 | `internal/telemetry` | `EffectRun`, `AdmissionDecision` | [#38](https://github.com/tekmora/epitrop/issues/38), [#16](https://github.com/tekmora/epitrop/issues/16) |
 | `internal/slot` | `ReadResult`, `ResultSchema` (reader and schema of a slot's result) | no issue yet |

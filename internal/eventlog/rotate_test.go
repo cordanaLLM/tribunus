@@ -28,7 +28,7 @@ func appendTasks(t *testing.T, dir string, w *Writer, n int) {
 	}
 }
 
-func rotate(t *testing.T, w *Writer) int {
+func rotate(t *testing.T, w *Writer) uint64 {
 	t.Helper()
 	moved, err := w.Rotate(testContext(t))
 	if err != nil {

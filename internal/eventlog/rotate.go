@@ -25,7 +25,7 @@ const maxRotateSegments = 4
 // leaves records in both places; replay accepts them when they are identical and fails
 // with the seq when they differ, and the next Rotate removes the identical files first.
 // It returns the number of records moved.
-func (w *Writer) Rotate(ctx context.Context) (moved int, err error) {
+func (w *Writer) Rotate(ctx context.Context) (moved uint64, err error) {
 	if err = readyContext(ctx, "rotate"); err != nil {
 		return 0, err
 	}
@@ -44,7 +44,7 @@ func (w *Writer) Rotate(ctx context.Context) (moved int, err error) {
 	return w.rotateLocked()
 }
 
-func (w *Writer) rotateLocked() (int, error) {
+func (w *Writer) rotateLocked() (uint64, error) {
 	current, err := w.currentHead()
 	if err != nil {
 		return 0, err
@@ -60,7 +60,7 @@ func (w *Writer) rotateLocked() (int, error) {
 	if len(segs) > 0 {
 		next = segs[len(segs)-1].last + 1
 	}
-	moved := 0
+	moved := uint64(0)
 	for i := 0; i < maxRotateSegments; i++ {
 		last := next + segmentRecords - 1
 		if last >= current.Seq {
@@ -69,7 +69,7 @@ func (w *Writer) rotateLocked() (int, error) {
 		if err = w.writeSegment(next, last); err != nil {
 			return moved, err
 		}
-		moved += int(segmentRecords)
+		moved += segmentRecords
 		next = last + 1
 	}
 	return moved, nil

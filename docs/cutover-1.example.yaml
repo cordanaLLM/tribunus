@@ -123,3 +123,19 @@ jobs:
     sandbox:
       mode: "off"
       reason: reads pull requests with the operator's forge login as the live script does
+  # The monitor ends itself after 720 passes of 30 seconds, so its shadow restarts always, as
+  # the live job does.
+  - name: fleet-monitor-shadow
+    command: [/usr/bin/env, DRYRUN=1, /opt/fleet/monitor.sh]
+    log_path: /var/log/epitrop/cutover-1/fleet-monitor-shadow.log
+    schedule: always
+    router_alias: cordana/auto
+    restart:
+      policy: always
+      max_restarts: 32
+      backoff_seconds: 30
+    heartbeat:
+      max_age_seconds: 300
+    sandbox:
+      mode: "off"
+      reason: reads host state, the container list and the forge with the operator's login

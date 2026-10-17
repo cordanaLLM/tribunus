@@ -11,23 +11,23 @@ This page is the plan. [`cutover-1.example.yaml`](cutover-1.example.yaml) declar
 | `landing-daemon` | host service unit | `schedule: always`, `restart: on-failure` | as `landing-daemon-shadow`, in its dry mode |
 | `auto-rebase` | host service unit | `schedule: always`, `restart: on-failure` | as `auto-rebase-shadow`, in its dry mode |
 | `update-intake` | host service unit | `schedule: always`, `restart: on-failure` | as `update-intake-shadow`, in its dry mode |
-| `fleet-monitor` | a loop a session starts, ends with the session | `schedule: always`, `restart: always` | not yet: its dry mode still refreshes a shared quota cache (see below) |
+| `fleet-monitor` | a loop a session starts, ends with the session | `schedule: always`, `restart: always` | as `fleet-monitor-shadow`, in its dry mode |
 | `scratch-cleanup` | started by the monitor when space runs low | `schedule: "*/15 * * * *"`, `max_runtime_seconds: 600` | no: it deletes |
 
 The queue restore loop, which waits for one pull request to merge and then relands the units queued behind it, is not declared. It takes the pull request and the queue as arguments for each wait, and a declared job's arguments are fixed ([ADR-0007](adr/0007-job-arguments-unchanged.md)). It moves with the landing queue in cutover 2.
 
-Each script now prints one beat line on every pass, idle or not, so a heartbeat bound (`heartbeat.max_age_seconds`, #21) can tell a hung script from an idle one. The shadow jobs declare a bound of a few pass intervals: 300 seconds for the landing daemon, 600 for auto-rebase, and 2700 for the update intake, whose pass waits ten minutes and may take thirty. The live jobs declare none until the shadow run has measured how long their passes take.
+Each script now prints one beat line on every pass, idle or not, so a heartbeat bound (`heartbeat.max_age_seconds`, #21) can tell a hung script from an idle one. The shadow jobs declare a bound of a few pass intervals: 300 seconds for the landing daemon and the monitor, 600 for auto-rebase, and 2700 for the update intake, whose pass waits ten minutes and may take thirty. The live jobs declare none until the shadow run has measured how long their passes take.
 
 ## Why the parallel run uses dry modes
 
 Each job acts on shared state: the landing queue, the forge, the scratch directories, the monitor's record of reported issues. A second copy of a live script beside the running one acts twice, or takes work from the running copy. The parallel run therefore runs each script's dry mode under Epitrop, a mode that prints what the script would do and changes nothing, and compares that output with what the live script did.
 
-The landing daemon, auto-rebase and the update intake have a dry mode (`DRYRUN=1`) that writes nothing, and the shadow jobs run it. The monitor's dry mode still refreshes the quota cache it shares with the live monitor, so it has no shadow job yet. That fix, like the dry modes themselves, is work in the scripts' own repository; Epitrop needs no change for it.
+Each script has a dry mode (`DRYRUN=1`) that writes nothing, and the shadow jobs run it. The dry modes are work in the scripts' own repository; Epitrop needs no change for them.
 
 ## Phases
 
 1. **Declared (this change).** The jobs exist as configuration. `epitropctl jobs status --config <file>` loads the operator's copy and lists every job as `dead`, never started. No supervisor runs it.
-2. **Parallel run.** A supervisor runs the shadow jobs only, outside any session, with the live scripts unchanged under their host units. Starting that supervisor is an operator decision, because it is a long-running process on the host. The monitor joins when its dry mode writes nothing.
+2. **Parallel run.** A supervisor runs the shadow jobs only, outside any session, with the live scripts unchanged under their host units. Starting that supervisor is an operator decision, because it is a long-running process on the host.
 3. **Switch-over.** One script at a time: its host unit stops, and its job moves from the shadow configuration to the live one. Each switch-over is an operator decision that cites a week of matching evidence. Undoing it means starting the host unit again and removing the job.
 
 ## Matching evidence

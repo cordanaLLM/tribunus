@@ -25,7 +25,7 @@ func TestCutoverOneExampleIsASupervisorConfig(t *testing.T) {
 	for _, job := range cfg.Jobs {
 		names = append(names, job.Name)
 	}
-	want := []string{"landing-daemon", "auto-rebase", "update-intake", "fleet-monitor", "scratch-cleanup", "landing-daemon-shadow", "auto-rebase-shadow", "update-intake-shadow"}
+	want := []string{"landing-daemon", "auto-rebase", "update-intake", "fleet-monitor", "scratch-cleanup", "landing-daemon-shadow", "auto-rebase-shadow", "update-intake-shadow", "fleet-monitor-shadow"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("cutover 1 jobs = %v, want %v", names, want)
 	}

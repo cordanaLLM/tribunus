@@ -80,7 +80,12 @@ epitrop-server --config=file
 - `units_list` lists the work units of the run record, sorted by id, optionally narrowed to one status.
 - `unit_status` shows one unit as `epitropctl units show` does, with the count of unread notes in place of the notes. Reading does not mark a note read.
 
-The tool names are provisional until the first release that ships the server.
+With `server.transport: http` in the config, the server serves the same tools over streamable HTTP on `server.listen` (default `127.0.0.1:8899`) and prints the address it serves. The server has no authentication, so the config refuses a listen address whose host is not loopback, and the server refuses a request whose `Host` header names another host. Beside the tools at `/mcp` it serves:
+
+- `/livez`, `/readyz` and `/startupz`. `/readyz` answers 503 until the event log has replayed, and again whenever a replay fails; the server replays every two seconds.
+- `/events`, a server-sent event stream with one `unit` event per unit and one `job` event per job whose summary changed since the last replay. The stream starts with the state at the first replay and sends no snapshot; a client that falls behind loses events and reads the state back with the tools.
+
+The tool names and config keys are fixed; the HTTP paths stay provisional until the first release that ships the server.
 
 ## Documents
 

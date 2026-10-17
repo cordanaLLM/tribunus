@@ -36,12 +36,12 @@ func TestRepositoryExceptionsAreDatedAndCurrent(t *testing.T) {
 }
 
 func TestThisCheckIsItselfCurrent(t *testing.T) {
-	expired, err := Expired(SelfExpiry, time.Now().UTC())
+	expired, err := Expired(selfExpiry, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if expired {
-		t.Fatalf("tools/lintexceptions expired on %s: the engine should read these exceptions by now; retire or renew it", SelfExpiry)
+		t.Fatalf("tools/lintexceptions expired on %s: the engine should read these exceptions by now; retire or renew it", selfExpiry)
 	}
 }
 

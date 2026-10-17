@@ -85,7 +85,7 @@ With `server.transport: http` in the config, the server serves the same tools ov
 - `/livez`, `/readyz` and `/startupz`. `/readyz` answers 503 until the event log has replayed, and again whenever a replay fails; the server replays every two seconds.
 - `/events`, a server-sent event stream with one `unit` event per unit and one `job` event per job whose summary changed since the last replay. The stream starts with the state at the first replay and sends no snapshot; a client that falls behind loses events and reads the state back with the tools.
 
-The tool names, paths and config keys are provisional until the first release that ships the server.
+The tool names and config keys are fixed; the HTTP paths stay provisional until the first release that ships the server.
 
 ## Documents
 

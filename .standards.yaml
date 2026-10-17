@@ -53,6 +53,16 @@ docs_surfaces:
       - "README.md"
       - "docs/agent-onboarding.md"
       - "docs/data-sync.md"
+  - name: "epitrop-server MCP tools"
+    paths:
+      - "cmd/epitrop-server/*.go"
+      - "internal/mcp/*.go"
+    exclude:
+      - "cmd/epitrop-server/*_test.go"
+      - "internal/mcp/*_test.go"
+    docs:
+      - "README.md"
+      - "docs/agent-onboarding.md"
   - name: "model catalog and sources"
     paths:
       - "catalog/*.go"

@@ -67,6 +67,20 @@ Releases, their signed artefacts and how to verify them are described in [Releas
 `OTEL_EXPORTER_OTLP_ENDPOINT` or a signal-specific endpoint is set. With no endpoint set, nothing is exported.
 [Telemetry](docs/telemetry.md) lists the spans and metrics.
 
+## MCP server
+
+```bash
+epitrop-server --config=file
+```
+
+`epitrop-server` serves the run record over the Model Context Protocol on stdin and stdout, for a client that starts it as a subprocess. Its tools only read, and no tool appends to the event log or signals a job:
+
+- `jobs_status` lists the configured jobs as `epitropctl jobs status` does. On a platform without the supervisor (anything but Linux) the tool returns the reason as a tool error.
+- `units_list` lists the work units of the run record, sorted by id, optionally narrowed to one status.
+- `unit_status` shows one unit as `epitropctl units show` does, with the count of unread notes in place of the notes. Reading does not mark a note read.
+
+The tool names are provisional until the first release that ships the server.
+
 ## Documents
 
 - [Agent onboarding](docs/agent-onboarding.md)

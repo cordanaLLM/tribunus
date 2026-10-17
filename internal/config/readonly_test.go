@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -15,6 +16,9 @@ import (
 // one out of it. It returns the workspace and the directory outside.
 func readOnlyWorkspace(t *testing.T) (string, string) {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the sandbox does not run on Windows")
+	}
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatalf("EvalSymlinks(temporary directory) = %v, want nil", err)
@@ -32,6 +36,21 @@ func readOnlyWorkspace(t *testing.T) (string, string) {
 		}
 	}
 	return ws, outside
+}
+
+// The shape check reads the configuration's slash-separated form on every platform.
+func TestValidateSandboxReadOnlyShape(t *testing.T) {
+	for _, ok := range [][]string{nil, {"meta/hk"}, {"a/b/c", ".slot"}} {
+		if err := validateSandboxReadOnly(SandboxConfig{Mode: "enforce", ReadOnly: ok}); err != nil {
+			t.Errorf("validateSandboxReadOnly(%q) = %v, want nil", ok, err)
+		}
+	}
+	for _, bad := range []string{"", ".", "..", "../x", "/x", "a/", "a//b", "a/./b", "a/../b"} {
+		err := validateSandboxReadOnly(SandboxConfig{Mode: "enforce", ReadOnly: []string{bad}})
+		if err == nil || !strings.Contains(err.Error(), "no clean relative path") {
+			t.Errorf("validateSandboxReadOnly(%q) = %v, want it refused", bad, err)
+		}
+	}
 }
 
 func TestResolveSandboxReadOnlyAcceptsPathsBelowTheWorkspace(t *testing.T) {
@@ -105,6 +124,9 @@ func TestResolveSandboxReadOnlyCountBoundary(t *testing.T) {
 // The loader resolves the read-only paths against the resolved workspace: a missing one
 // stops the load, and the configuration keeps the relative values.
 func TestLoadChecksTheReadOnlyPaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the sandbox does not run on Windows")
+	}
 	w := newSandboxPathWorld(t)
 	ws := filepath.Join(w.root, "ws")
 	if err := os.MkdirAll(filepath.Join(ws, "meta", "hk"), 0o700); err != nil {

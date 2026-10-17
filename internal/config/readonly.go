@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"path"
 	"path/filepath"
 )
 
@@ -19,7 +20,9 @@ func validateSandboxReadOnly(sandbox SandboxConfig) error {
 		return fmt.Errorf("read_only: exceeds %d", MaxSandboxReadOnly)
 	}
 	for i := 0; i < len(paths); i++ {
-		if !filepath.IsLocal(paths[i]) || filepath.Clean(paths[i]) != paths[i] || paths[i] == "." {
+		// The configuration separates with a slash on every platform: filepath.Clean would
+		// rewrite it on Windows and refuse every nested path.
+		if !filepath.IsLocal(paths[i]) || path.Clean(paths[i]) != paths[i] || paths[i] == "." {
 			return fmt.Errorf("read_only/%d: %q is no clean relative path below the workspace", i, paths[i])
 		}
 	}

@@ -82,17 +82,28 @@ func (b *Broker) Subscribe(topic string) (*Subscription, func()) {
 // queues is full it returns ErrFull. A topic without subscribers takes the message and
 // delivers it nowhere.
 func (b *Broker) Publish(ctx context.Context, msg pubsub.Message) error {
+	return b.publishAfter(ctx, msg.Topic, func(context.Context) (any, error) { return msg.Data, nil })
+}
+
+// publishAfter calls first once every subscriber of topic has room, and delivers what it
+// returns to all of them. first runs under mu, so the room it was given is still there; an
+// error from first delivers nothing.
+func (b *Broker) publishAfter(ctx context.Context, topic string, first func(context.Context) (any, error)) error {
 	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("broker: publish to %s: %w", msg.Topic, err)
+		return fmt.Errorf("broker: publish to %s: %w", topic, err)
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	for sub := range b.subs[msg.Topic] {
+	for sub := range b.subs[topic] {
 		if len(sub.queue) == cap(sub.queue) {
-			return fmt.Errorf("%w: topic %s, capacity %d", ErrFull, msg.Topic, b.capacity)
+			return fmt.Errorf("%w: topic %s, capacity %d", ErrFull, topic, b.capacity)
 		}
 	}
-	b.bus.Publish(ctx, msg)
+	data, err := first(ctx)
+	if err != nil {
+		return err
+	}
+	b.bus.Publish(ctx, pubsub.Message{Topic: topic, Data: data})
 	return nil
 }
 

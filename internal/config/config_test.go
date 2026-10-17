@@ -351,9 +351,10 @@ func TestExampleConfigValidates(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the example uses Unix paths")
 	}
-	path := filepath.Join("..", "..", "docs", "config.example.yaml")
-	if _, err := Load(testContext(t), path); err != nil {
-		t.Fatalf("Load(docs/config.example.yaml) = %v, want nil", err)
+	for _, name := range []string{"config.example.yaml", "cutover-1.example.yaml"} {
+		if _, err := Load(testContext(t), filepath.Join("..", "..", "docs", name)); err != nil {
+			t.Fatalf("Load(docs/%s) = %v, want nil", name, err)
+		}
 	}
 }
 

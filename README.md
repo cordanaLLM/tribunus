@@ -62,6 +62,7 @@ epitropctl jobs supervise --config=file [--poll-interval-seconds=1]
 The contract is described by `catalog/snapshot.schema.json`, and
 `epitropctl schema` prints the embedded copy for downstream pin checks.
 `epitropctl version` prints the release version, or `dev` for a source build.
+`epitropctl jobs supervise` runs until SIGTERM or an interrupt, which end it with exit 0, so a host service unit can hold it.
 Releases, their signed artefacts and how to verify them are described in [Releasing](docs/releasing.md).
 
 `epitropctl` exports OpenTelemetry traces and metrics over OTLP once

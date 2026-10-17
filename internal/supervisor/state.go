@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -33,7 +34,34 @@ func (s *Supervisor) replayStateWithReducer(ctx context.Context, reducer eventlo
 	} else if err != nil {
 		return eventlog.State{}, fmt.Errorf("supervisor: stat %s: %w", events, err)
 	}
-	return eventlog.ReplayStable(ctx, s.cfg.EventLog.Dir, s.signer.PublicKey(), s.eventLogLimits(), reducer)
+	return eventlog.ReplayFoldStable(ctx, s.cfg.EventLog.Dir, s.signer.PublicKey(), s.eventLogLimits(), FoldName, reducer)
+}
+
+// FoldName names the jobs state in the base of a compacted log.
+const FoldName = "jobs"
+
+// Fold is the jobs state as a compacted log's base holds it. Reconcile reads, beside the
+// state, the records an event job's trigger matches after its cursor (see
+// reconcileEventJob), so the base stays at or below the lowest cursor of the armed event
+// jobs of jobs.
+func Fold(jobs []config.JobConfig) eventlog.Fold {
+	return eventlog.Fold{Name: FoldName, Reduce: JobReducer, Floor: func(st eventlog.State) uint64 {
+		return eventJobsFloor(jobs, st)
+	}}
+}
+
+// eventJobsFloor is the lowest seq past which an armed event job of jobs still reads the
+// records its trigger matches.
+func eventJobsFloor(jobs []config.JobConfig, st eventlog.State) uint64 {
+	floor := uint64(math.MaxUint64)
+	for i := 0; i < len(jobs); i++ {
+		job, ok := st.Jobs[jobs[i].Name]
+		if jobs[i].Schedule != "event" || !ok || job.ArmedTrigger == "" {
+			continue
+		}
+		floor = min(floor, max(job.ArmedSeq, job.LastTriggerSeq))
+	}
+	return floor
 }
 
 // eventLogLimits are the limits under which the supervisor reads and writes the event log.

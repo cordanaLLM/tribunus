@@ -49,7 +49,11 @@ func copyLog(t *testing.T, dir string) string {
 
 func segmentNames(t *testing.T, dir string) []string {
 	t.Helper()
-	segs, err := listSegments(eventsDir(dir), 1000)
+	base, err := newestBase(baseDir(eventsDir(dir)))
+	if err != nil {
+		t.Fatalf("newestBase() = %v, want nil", err)
+	}
+	segs, err := listSegments(eventsDir(dir), 1000, base)
 	if err != nil {
 		t.Fatalf("listSegments() = %v, want nil", err)
 	}

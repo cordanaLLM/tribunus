@@ -49,7 +49,7 @@ func frontierWorld(t *testing.T) (*Service, string) {
 
 func unitsOf(t *testing.T, svc *Service) eventlog.State {
 	t.Helper()
-	st, err := svc.replayWith(testCtx(t), units.UnitReducer)
+	st, err := svc.replayWith(testCtx(t), units.FoldName, units.UnitReducer)
 	if err != nil {
 		t.Fatalf("replay units = %v, want nil", err)
 	}

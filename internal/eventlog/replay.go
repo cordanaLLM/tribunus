@@ -90,8 +90,15 @@ func ReplayCheckpointedStable(ctx context.Context, dir string, pubKeyHex string,
 	return res.state, res.use, err
 }
 
+// ReplayFoldStable is ReplayFold with the same retry helper as ReplayStable.
+func ReplayFoldStable(ctx context.Context, dir string, pubKeyHex string, limits Limits, fold string, reducer Reducer) (State, error) {
+	return retryStable(ctx, stableBudget(limits), func() (State, error) {
+		return ReplayFold(ctx, dir, pubKeyHex, limits, fold, reducer)
+	})
+}
+
 func transientReplayError(err error) bool {
-	if fileBusy(err) || errors.Is(err, errRecordMoved) {
+	if fileBusy(err) || errors.Is(err, errRecordMoved) || errors.Is(err, errLogCompacted) {
 		return true
 	}
 	text := err.Error()
@@ -117,7 +124,31 @@ func Replay(ctx context.Context, dir string, pubKeyHex string, limits Limits, re
 	return st, err
 }
 
-// ReplayCheckpointed replays the event log from the newest valid checkpoint of name, or full replay if none.
+// ReplayFold is Replay for the reducer a base holds under fold. On a compacted log it starts
+// from the fold's state in the base; a base without that state fails with the base's seq.
+// Replay without a fold fails on a compacted log, since it has no state to start from.
+func ReplayFold(ctx context.Context, dir string, pubKeyHex string, limits Limits, fold string, reducer Reducer) (State, error) {
+	if err := readyContext(ctx, "replay"); err != nil {
+		return State{}, err
+	}
+	if !validCheckpointName(fold) {
+		return State{}, fmt.Errorf("eventlog: invalid fold name %q", fold)
+	}
+	normalized, err := normalizeLimits(limits)
+	if err != nil {
+		return State{}, err
+	}
+	if err = checkReplayInputs(dir, pubKeyHex, reducer); err != nil {
+		return State{}, err
+	}
+	r := replayRun{eventsDir: eventsDir(dir), pubKeyHex: strings.ToLower(pubKeyHex), limits: normalized, reducer: reducer, fold: fold}
+	st, _, err := r.run()
+	return st, err
+}
+
+// ReplayCheckpointed replays the event log from the newest valid checkpoint of name, or full
+// replay if none. name also names the reducer's fold: on a compacted log a replay without a
+// checkpoint past the base starts from the fold's state in the base.
 func ReplayCheckpointed(ctx context.Context, dir string, pubKeyHex string, limits Limits, name string, reducer Reducer) (State, CheckpointUse, error) {
 	if err := readyContext(ctx, "replay"); err != nil {
 		return State{}, CheckpointUse{}, err
@@ -139,6 +170,7 @@ func ReplayCheckpointed(ctx context.Context, dir string, pubKeyHex string, limit
 		limits:         normalized,
 		reducer:        reducer,
 		name:           name,
+		fold:           name,
 	}
 	return r.run()
 }
@@ -150,7 +182,12 @@ type replayRun struct {
 	limits         Limits
 	reducer        Reducer
 	name           string
-	segs           []segment
+	// fold names the reducer's state in the base of a compacted log; "" has none.
+	fold string
+	// until, when set, ends the replay after that seq, which a segment must end at; the
+	// record files and HEAD are not read. Compact replays the folds to the new base so.
+	until uint64
+	segs  []segment
 }
 
 // cursor is where a replay stands: the state so far, the last seq it applied or that its
@@ -171,41 +208,103 @@ type checkpointResult struct {
 
 const maxCheckpointsScan = 16
 
+// run reads the base first: a compaction writes the new base before it removes the segments
+// the base covers. A replay that failed while the base moved under it says so, and a stable
+// replay tries again.
 func (r replayRun) run() (State, CheckpointUse, error) {
+	b, hasBase, err := readBase(r.eventsDir, r.pubKeyHex, r.limits)
+	if err != nil {
+		return State{}, CheckpointUse{}, err
+	}
+	st, use, err := r.runFrom(b, hasBase)
+	if err != nil && r.baseMoved(b.Seq) {
+		return State{}, CheckpointUse{}, fmt.Errorf("%w: %w", errLogCompacted, err)
+	}
+	return st, use, err
+}
+
+func (r replayRun) baseMoved(seq uint64) bool {
+	b, _, err := readBase(r.eventsDir, r.pubKeyHex, r.limits)
+	return err == nil && b.Seq != seq
+}
+
+func (r replayRun) runFrom(b Base, hasBase bool) (State, CheckpointUse, error) {
 	entries, err := os.ReadDir(r.eventsDir)
 	if err != nil {
 		return State{}, CheckpointUse{}, fmt.Errorf("eventlog: read %s: %w", r.eventsDir, err)
 	}
 	// The segments are listed after the record files: a rotation writes its segment before
 	// it removes the files, so a file this listing missed lies in a segment listed here.
-	if r.segs, err = listSegments(r.eventsDir, r.limits.MaxReplayRecords); err != nil {
+	if r.segs, err = listSegments(r.eventsDir, r.limits.MaxReplayRecords, b.Seq); err != nil {
 		return State{}, CheckpointUse{}, err
 	}
 	st := State{Tasks: map[string]Task{}}
-	cp := r.findCheckpoint()
+	c := cursor{state: &st}
+	if hasBase {
+		if err = r.startAtBase(b, &c); err != nil {
+			return State{}, CheckpointUse{}, err
+		}
+	}
+	cp := r.findCheckpoint(c.last)
 	if cp.seq > 0 {
+		st = State{Tasks: map[string]Task{}}
 		if err = json.Unmarshal(cp.state, &st); err != nil {
 			return State{}, CheckpointUse{}, fmt.Errorf("eventlog: unmarshal checkpoint state: %w", err)
 		}
+		c.last, c.prev = cp.seq, cp.hash
 	}
-	c := cursor{state: &st, last: cp.seq, prev: cp.hash}
 	if err = r.applySegments(looseRecords(entries), &c); err != nil {
 		return State{}, CheckpointUse{}, err
 	}
-	if err = r.applyRecords(entries, &c); err != nil {
-		return State{}, CheckpointUse{}, err
+	if r.until > 0 {
+		return st, cp.use, r.checkUntil(c)
 	}
-	headRecord, hasHead, err := r.readHead()
-	if err != nil {
-		return State{}, CheckpointUse{}, err
-	}
-	if err = checkHeadMatchesTail(headRecord, hasHead, c.last, c.prev); err != nil {
+	if err = r.applyToHead(entries, &c); err != nil {
 		return State{}, CheckpointUse{}, err
 	}
 	return st, cp.use, nil
 }
 
-func (r replayRun) findCheckpoint() checkpointResult {
+// applyToHead applies the record files in entries to c and checks that the last of them is
+// the record HEAD.json names.
+func (r replayRun) applyToHead(entries []os.DirEntry, c *cursor) error {
+	if err := r.applyRecords(entries, c); err != nil {
+		return err
+	}
+	headRecord, hasHead, err := r.readHead()
+	if err != nil {
+		return err
+	}
+	return checkHeadMatchesTail(headRecord, hasHead, c.last, c.prev)
+}
+
+// startAtBase starts c from the fold's state in b.
+func (r replayRun) startAtBase(b Base, c *cursor) error {
+	if r.fold == "" {
+		return fmt.Errorf("eventlog: log compacted through seq %d: replay needs a fold name", b.Seq)
+	}
+	raw, ok := b.States[r.fold]
+	if !ok {
+		return fmt.Errorf("eventlog: base at seq %d holds no state for fold %q", b.Seq, r.fold)
+	}
+	if err := json.Unmarshal(raw, c.state); err != nil {
+		return fmt.Errorf("eventlog: base at seq %d: fold %q: %w", b.Seq, r.fold, err)
+	}
+	c.last, c.prev = b.Seq, b.Hash
+	return nil
+}
+
+func (r replayRun) checkUntil(c cursor) error {
+	if c.last != r.until {
+		return fmt.Errorf("eventlog: replay to seq %d ended at seq %d", r.until, c.last)
+	}
+	return nil
+}
+
+// findCheckpoint returns the newest checkpoint of r.name that matches the log. A checkpoint
+// at or below floor, the seq of the log's base, names a record the log no longer holds and is
+// passed over.
+func (r replayRun) findCheckpoint(floor uint64) checkpointResult {
 	if r.name == "" || r.checkpointsDir == "" {
 		return checkpointResult{}
 	}
@@ -224,14 +323,12 @@ func (r replayRun) findCheckpoint() checkpointResult {
 	for i := 0; i < len(seqs) && i < maxCheckpointsScan; i++ {
 		seq := seqs[i]
 		cpPath := filepath.Join(cpDir, checkpointFileName(seq))
-		cp, ok := r.checkCheckpointCandidate(cpPath, &use)
-		if !ok {
+		if seq <= floor {
+			use.Skipped = append(use.Skipped, fmt.Sprintf("%s: at or below the base at seq %d", filepath.Base(cpPath), floor))
 			continue
 		}
-		if div, diverged := r.checkCheckpointAgainstLog(cp, cpPath); diverged {
-			if use.Diverged == nil {
-				use.Diverged = div
-			}
+		cp, ok := r.usableCheckpoint(cpPath, &use)
+		if !ok {
 			continue
 		}
 		use.Seq = cp.Seq
@@ -252,6 +349,22 @@ func filterCheckpointSeqs(entries []os.DirEntry) []uint64 {
 	}
 	sort.Slice(seqs, func(i, j int) bool { return seqs[i] > seqs[j] })
 	return seqs
+}
+
+// usableCheckpoint reads the checkpoint at cpPath and reports whether it is valid and matches
+// the log; use records why it is not, keeping the first divergence.
+func (r replayRun) usableCheckpoint(cpPath string, use *CheckpointUse) (Checkpoint, bool) {
+	cp, ok := r.checkCheckpointCandidate(cpPath, use)
+	if !ok {
+		return Checkpoint{}, false
+	}
+	if div, diverged := r.checkCheckpointAgainstLog(cp, cpPath); diverged {
+		if use.Diverged == nil {
+			use.Diverged = div
+		}
+		return Checkpoint{}, false
+	}
+	return cp, true
 }
 
 func (r replayRun) checkCheckpointCandidate(cpPath string, use *CheckpointUse) (Checkpoint, bool) {
@@ -311,6 +424,9 @@ func (r replayRun) applySegments(loose map[uint64]string, c *cursor) error {
 	for _, seg := range r.segs {
 		if seg.last <= c.last {
 			continue
+		}
+		if r.until > 0 && seg.first > r.until {
+			break
 		}
 		err := readSegment(r.eventsDir, seg, r.limits.MaxRecordBytes, func(seq uint64, data []byte) error {
 			if err := sameAsLoose(r.eventsDir, loose, seq, data, seg, r.limits.MaxRecordBytes); err != nil {

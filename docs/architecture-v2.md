@@ -257,12 +257,13 @@ Every model call goes through a router alias. No concrete model name appears in 
 | Package | What waits | Issue |
 | :--- | :--- | :--- |
 | `internal/admission` | gate, gateway prober | [#16](https://github.com/tekmora/epitrop/issues/16), [#14](https://github.com/tekmora/epitrop/issues/14) (0.5) |
+| `internal/budget` | `Check` (platform budget refusal on the ledger's measured use) | [#16](https://github.com/tekmora/epitrop/issues/16) (0.5) |
 | `internal/edges` | `Check` | [#114](https://github.com/tekmora/epitrop/issues/114) (0.5) |
 | `internal/effects` | side-effect ledger `Do`, `Open` | [#38](https://github.com/tekmora/epitrop/issues/38) (0.4) |
 | `internal/eventlog` | `TaskReducer` | [#39](https://github.com/tekmora/epitrop/issues/39) (0.4) |
 | `internal/ledger` | `Read` (Praetor efficiency ledger reader for the budget layers) | [#6](https://github.com/tekmora/epitrop/issues/6) (0.2) |
 | `internal/graph` | `StatusFromClaim` | [#38](https://github.com/tekmora/epitrop/issues/38) (0.4) |
-| `internal/telemetry` | `EffectRun`, `AdmissionDecision` | [#38](https://github.com/tekmora/epitrop/issues/38), [#16](https://github.com/tekmora/epitrop/issues/16) |
+| `internal/telemetry` | `EffectRun`, `AdmissionDecision`, `BudgetUsed` | [#38](https://github.com/tekmora/epitrop/issues/38), [#16](https://github.com/tekmora/epitrop/issues/16) |
 | `internal/slot` | `ReadResult`, `ResultSchema` (reader and schema of a slot's result) | no issue yet |
 | `internal/config` | `SchemaJSON` (embedded config schema, compared with `docs/config.schema.json` by tests) | no issue yet |
 | `internal/releasewatch` | `Service.State`, `State.Count` (read-back for tests) | no issue yet |

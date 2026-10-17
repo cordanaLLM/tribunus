@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,10 +24,10 @@ var newJobsSupervisor = supervisor.New
 
 func runJobs(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("jobs command required: start, status, stop or supervise")
+		return fmt.Errorf("jobs command required: start, status, stop, supervise or history")
 	}
 	switch args[0] {
-	case "start", "status", "stop", "supervise":
+	case "start", "status", "stop", "supervise", "history":
 		return runJobsAction(args[0], args[1:])
 	}
 	return fmt.Errorf("unknown jobs command: %s", args[0])
@@ -36,6 +37,7 @@ func runJobsAction(action string, args []string) error {
 	fs := flag.NewFlagSet("jobs "+action, flag.ContinueOnError)
 	configPath := fs.String("config", "", "configuration file")
 	pollSeconds := fs.Int("poll-interval-seconds", 1, "supervisor poll interval")
+	sinceText := fs.String("since", "", "history: count records written at or after this RFC 3339 time")
 	if err := fs.Parse(args); err != nil {
 		return flagErr{err: err}
 	}
@@ -43,6 +45,10 @@ func runJobsAction(action string, args []string) error {
 		return fmt.Errorf("jobs %s: --config is required", action)
 	}
 	name, err := jobsNameArg(action, fs.Args())
+	if err != nil {
+		return err
+	}
+	since, err := jobsSinceFlag(action, *sinceText)
 	if err != nil {
 		return err
 	}
@@ -58,7 +64,26 @@ func runJobsAction(action string, args []string) error {
 	}
 	ctx, cancel := jobsActionContext(action)
 	defer cancel()
+	if action == "history" {
+		return printJobsHistory(ctx, sup, name, since)
+	}
 	return runLoadedJobsAction(ctx, sup, action, name)
+}
+
+// jobsSinceFlag reads --since, which only jobs history takes; without it history counts
+// the whole log.
+func jobsSinceFlag(action string, text string) (time.Time, error) {
+	if text == "" {
+		return time.Time{}, nil
+	}
+	if action != "history" {
+		return time.Time{}, fmt.Errorf("jobs %s: --since is a jobs history flag", action)
+	}
+	since, err := time.Parse(time.RFC3339, text)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("jobs history: --since: %w", err)
+	}
+	return since, nil
 }
 
 // jobsCommandTimeout bounds loading the configuration and every jobs command but supervise.
@@ -138,4 +163,27 @@ func jobsStatusLine(st supervisor.JobStatus) string {
 		line += "\tstale since " + st.LastBeat
 	}
 	return line
+}
+
+func printJobsHistory(ctx context.Context, sup *supervisor.Supervisor, name string, since time.Time) error {
+	histories, err := sup.History(ctx, name, since)
+	if err != nil {
+		return err
+	}
+	for i := 0; i < len(histories); i++ {
+		fmt.Println(jobsHistoryLine(histories[i]))
+	}
+	return nil
+}
+
+// jobsHistoryLine is one job's history row: name, then the started, exited, unclean,
+// restarted, stale, refused and stopped counts, then the first and last counted times.
+func jobsHistoryLine(h supervisor.JobHistory) string {
+	counts := []int{h.Started, h.Exited, h.Unclean, h.Restarted, h.Stale, h.Refused, h.Stopped}
+	fields := make([]string, 0, len(counts)+3)
+	fields = append(fields, h.Name)
+	for i := 0; i < len(counts); i++ {
+		fields = append(fields, strconv.Itoa(counts[i]))
+	}
+	return strings.Join(append(fields, h.First, h.Last), "\t")
 }

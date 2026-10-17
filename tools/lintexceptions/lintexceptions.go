@@ -6,8 +6,9 @@
 // linters.exclusions.rules carries the comment "category <A-D>, expires <YYYY-MM-DD>, #<issue>"
 // on the line above it, and none is past its date.
 //
-// This check is itself an exception (category C, expires 2026-10-25, #133): it stands in until
-// the engine's audit reads per-file linter exceptions with an expiry, and goes when it does.
+// This check is itself an exception (category C, renewed 2026-10-17 for the 10 days of that
+// category, expires 2026-10-27, #133): it stands in until the engine's audit reads per-file
+// linter exceptions with an expiry, and goes in the change that adopts that audit.
 package lintexceptions
 
 import (
@@ -18,7 +19,7 @@ import (
 )
 
 // SelfExpiry is the date this package's own exception runs out.
-const SelfExpiry = "2026-10-25"
+const SelfExpiry = "2026-10-27"
 
 // maxLines bounds the configuration lines one check reads.
 const maxLines = 100000

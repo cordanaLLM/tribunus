@@ -339,3 +339,14 @@ func logJobState(t *testing.T, sup *supervisor.Supervisor, base, name string) {
 	logBody, err := os.ReadFile(filepath.Join(base, name+".log"))
 	t.Logf("job log: %q, %v", logBody, err)
 }
+
+func TestJobsStatusLineNamesAStaleHeartbeat(t *testing.T) {
+	st := supervisor.JobStatus{Name: "hung", State: supervisor.StateRunning, PID: 42, Since: "2026-10-17T10:00:00Z", Sandbox: "enforce", LastBeat: "2026-10-17T10:00:05Z"}
+	if got, want := jobsStatusLine(st), "hung\trunning\t42\t2026-10-17T10:00:00Z\t0\tenforce"; got != want {
+		t.Fatalf("jobsStatusLine(fresh) = %q, want %q", got, want)
+	}
+	st.Stale = true
+	if got, want := jobsStatusLine(st), "hung\trunning\t42\t2026-10-17T10:00:00Z\t0\tenforce\tstale since 2026-10-17T10:00:05Z"; got != want {
+		t.Fatalf("jobsStatusLine(stale) = %q, want %q", got, want)
+	}
+}

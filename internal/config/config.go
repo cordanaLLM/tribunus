@@ -29,6 +29,7 @@ const (
 	MaxRestartBackoff       = 3600
 	MaxStopGraceSeconds     = 300
 	MaxJobRuntimeSeconds    = 365 * 24 * 3600
+	MaxHeartbeatSeconds     = 24 * 3600
 	MaxSandboxInputs        = 32
 	MaxSandboxReadOnly      = 32
 	MaxSandboxInputRoots    = 32
@@ -182,7 +183,16 @@ type JobConfig struct {
 	MaxRuntimeSeconds int              `koanf:"max_runtime_seconds" json:"max_runtime_seconds"`
 	Restart           JobRestartConfig `koanf:"restart" json:"restart"`
 	Stop              JobStopConfig    `koanf:"stop" json:"stop"`
+	Heartbeat         JobHeartbeat     `koanf:"heartbeat" json:"heartbeat"`
 	Sandbox           SandboxConfig    `koanf:"sandbox" json:"sandbox"`
+}
+
+// JobHeartbeat says how old a running job's last sign of life may be. A write to the job's
+// log is a beat, and so is its start. A job silent for longer than MaxAgeSeconds is hung:
+// the supervisor records job.stale and ends it the way `jobs stop` would, and the restart
+// policy decides what follows. 0 turns the check off.
+type JobHeartbeat struct {
+	MaxAgeSeconds int `koanf:"max_age_seconds" json:"max_age_seconds"`
 }
 
 type JobRestartConfig struct {

@@ -51,6 +51,7 @@ go test -race ./...
 ```bash
 epitropctl sync [--sources=a,b] [--out=file]
 epitropctl show [--in=file]
+epitropctl headroom --max-age=duration [--in=file]
 epitropctl schema
 epitropctl version
 epitropctl jobs start|status|stop --config=file [name]
@@ -75,7 +76,7 @@ epitrop-server --config=file
 
 `epitrop-server` serves the run record over the Model Context Protocol on stdin and stdout, for a client that starts it as a subprocess. By default its tools only read, and no tool appends to the event log or signals a job:
 
-- `jobs_status` lists the configured jobs as `epitropctl jobs status` does. On a platform without the supervisor (anything but Linux) the tool returns the reason as a tool error.
+- `jobs_status` lists the configured jobs as `epitropctl jobs status` does, including `stale` and `last_beat` for a job that declares `heartbeat.max_age_seconds`. On a platform without the supervisor (anything but Linux) the tool returns the reason as a tool error.
 - `units_list` lists the work units of the run record, sorted by id, optionally narrowed to one status.
 - `unit_status` shows one unit as `epitropctl units show` does, with the count of unread notes in place of the notes. Reading does not mark a note read.
 
@@ -91,12 +92,13 @@ With `server.allow_mutations: true` the server also serves three tools that chan
 
 Each call names a `key` for the request. The effect ledger runs a key with the same arguments at most once: a repeat answers `skipped` and changes nothing, and the same key with other arguments is a new request. A call that failed leaves its key open, and a repeat is refused until the claim is resolved with `epitropctl effects resolve`.
 
-The tool names, paths and config keys are provisional until the first release that ships the server.
+The tool names and config keys are fixed; the HTTP paths stay provisional until the first release that ships the server.
 
 ## Documents
 
 - [Agent onboarding](docs/agent-onboarding.md)
 - [Roadmap](docs/roadmap.md)
+- [Cutover 1](docs/cutover-1.md): the background jobs Epitrop takes over, and the parallel run before each switch-over
 - [Catalog data sync](docs/data-sync.md): installing `epitropctl`, the sources and their limits
 - [Releasing](docs/releasing.md)
 - [Architecture](docs/architecture-v2.md)

@@ -26,6 +26,9 @@
         "default": {
           "tokens": 200000,
           "wall_clock_seconds": 3600
+        },
+        "platform": {
+          "frontier_tokens": 0
         }
       },
       "additionalProperties": false,
@@ -49,6 +52,21 @@
               "default": 3600,
               "minimum": 0,
               "maximum": 86400
+            }
+          }
+        },
+        "platform": {
+          "type": "object",
+          "default": {
+            "frontier_tokens": 0
+          },
+          "additionalProperties": false,
+          "properties": {
+            "frontier_tokens": {
+              "type": "integer",
+              "default": 0,
+              "minimum": 0,
+              "maximum": 1000000000000
             }
           }
         }
@@ -187,6 +205,21 @@
               }
             }
           },
+          "heartbeat": {
+            "type": "object",
+            "default": {
+              "max_age_seconds": 0
+            },
+            "additionalProperties": false,
+            "properties": {
+              "max_age_seconds": {
+                "type": "integer",
+                "default": 0,
+                "minimum": 0,
+                "maximum": 86400
+              }
+            }
+          },
           "sandbox": {
             "type": "object",
             "default": {
@@ -194,6 +227,7 @@
               "reason": "",
               "workspace": "",
               "inputs": [],
+              "read_only": [],
               "env_allow": [],
               "network": "none",
               "destinations": [],
@@ -230,6 +264,18 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 4096
+                }
+              },
+              "read_only": {
+                "type": "array",
+                "default": [],
+                "maxItems": 32,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096,
+                  "pattern": "^[^/]"
                 }
               },
               "env_allow": {
@@ -342,6 +388,11 @@
                           "maxLength": 128
                         },
                         "jwt": {
+                          "type": "string",
+                          "default": "",
+                          "maxLength": 520
+                        },
+                        "expires_ms": {
                           "type": "string",
                           "default": "",
                           "maxLength": 520

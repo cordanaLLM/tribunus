@@ -63,7 +63,7 @@ func NewServer(version string, src Sources) *sdkmcp.Server {
 
 // Register adds the read-only tools over src to s.
 func Register(s *sdkmcp.Server, src Sources) {
-	sdkmcp.AddTool(s, readOnly(ToolJobsStatus, "List the configured jobs with their state, process id, start time, restarts and sandbox. An empty name lists every job."), jobsStatus(src.Jobs))
+	sdkmcp.AddTool(s, readOnly(ToolJobsStatus, "List the configured jobs with their state, process id, start time, restarts, sandbox and, for a job with a heartbeat, its last beat and whether it is stale. An empty name lists every job."), jobsStatus(src.Jobs))
 	sdkmcp.AddTool(s, readOnly(ToolUnitsList, "List the work units of the run record, sorted by id. A status narrows the list to units with that status."), unitsList(src.Units))
 	sdkmcp.AddTool(s, readOnly(ToolUnitStatus, "Show one work unit of the run record by id."), unitStatus(src.Units))
 }
@@ -91,6 +91,10 @@ type Job struct {
 	Since    string `json:"since,omitempty"`
 	Restarts int    `json:"restarts"`
 	Sandbox  string `json:"sandbox,omitempty"`
+	// Stale is set for a running job whose heartbeat is older than it allows; LastBeat is
+	// its last beat, empty for a job without a heartbeat.
+	Stale    bool   `json:"stale,omitempty"`
+	LastBeat string `json:"last_beat,omitempty"`
 }
 
 // JobsStatusOut lists the jobs.
@@ -115,7 +119,7 @@ func jobsStatus(jobs JobLister) sdkmcp.ToolHandlerFor[JobsStatusIn, JobsStatusOu
 }
 
 func jobOf(st supervisor.JobStatus) Job {
-	return Job{Name: st.Name, State: string(st.State), PID: st.PID, Since: st.Since, Restarts: st.Restarts, Sandbox: st.Sandbox}
+	return Job{Name: st.Name, State: string(st.State), PID: st.PID, Since: st.Since, Restarts: st.Restarts, Sandbox: st.Sandbox, Stale: st.Stale, LastBeat: st.LastBeat}
 }
 
 // jobsOf keys the jobs by name.

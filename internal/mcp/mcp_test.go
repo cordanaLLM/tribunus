@@ -161,14 +161,14 @@ func TestToolsListedReadOnly(t *testing.T) {
 
 func TestJobsStatusMapsEveryField(t *testing.T) {
 	jobs := &fakeJobs{statuses: []supervisor.JobStatus{
-		{Name: "sync", State: supervisor.StateRunning, PID: 41, ShimPID: 40, Since: "2026-10-17T03:00:00Z", Restarts: 2, Sandbox: "bwrap"},
+		{Name: "sync", State: supervisor.StateRunning, PID: 41, ShimPID: 40, Since: "2026-10-17T03:00:00Z", Restarts: 2, Sandbox: "bwrap", Stale: true, LastBeat: "2026-10-17T03:00:05Z"},
 		{Name: "watch", State: supervisor.StateStopped},
 	}}
 	cs := connect(t, Sources{Jobs: jobs, Units: testUnits(t)})
 	var out JobsStatusOut
 	call(t, cs, ToolJobsStatus, map[string]any{"name": "sync"}, &out)
 	want := JobsStatusOut{Jobs: []Job{
-		{Name: "sync", State: "running", PID: 41, Since: "2026-10-17T03:00:00Z", Restarts: 2, Sandbox: "bwrap"},
+		{Name: "sync", State: "running", PID: 41, Since: "2026-10-17T03:00:00Z", Restarts: 2, Sandbox: "bwrap", Stale: true, LastBeat: "2026-10-17T03:00:05Z"},
 		{Name: "watch", State: "stopped"},
 	}}
 	if !reflect.DeepEqual(out, want) {

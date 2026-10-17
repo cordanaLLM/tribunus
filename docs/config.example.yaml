@@ -4,6 +4,11 @@ budgets:
   default:
     tokens: 200000
     wall_clock_seconds: 3600
+  # Frontier tokens the whole platform may spend, read against the Praetor efficiency ledger.
+  # A task whose declared tokens exceed what the ledger leaves is refused before it starts, and
+  # so is every task while the ledger has not measured the spend. 0 turns the check off.
+  platform:
+    frontier_tokens: 0
 # Every sandboxed job's workspace and inputs must lie in one of these directories once
 # symlinks are resolved; with none, no job runs sandboxed. A directory containing HOME is
 # refused, and a login location below HOME (.ssh, .config/gh, a coding client's folder and
@@ -27,6 +32,11 @@ jobs:
     stop:
       signal: TERM
       grace_seconds: 10
+    # A running job silent longer than this (no log write since the last one or since its
+    # start) is hung: the supervisor records job.stale, ends it like `jobs stop`, and the
+    # restart policy decides. 0 (the default) turns the check off.
+    heartbeat:
+      max_age_seconds: 0
     sandbox:
       mode: enforce
       # Use a dedicated directory per job; it is the only path the job can write.
@@ -47,9 +57,12 @@ jobs:
       tasks_max: 512
       # A coding client's home, made fresh in <workspace>/.slot/home before each start
       # (ADR-0009). The source lies in a root and is none of the operator's login folders;
-      # copy files must hash as named, bind files are bound read-only one by one. A bind's
-      # jwt names the token whose expiry must lie 10 minutes past max_runtime_seconds and the
-      # stop grace; a home needs max_runtime_seconds.
+      # copy files must hash as named, bind files are bound read-only one by one. Each bind
+      # names its token's expiry, which must lie 10 minutes past max_runtime_seconds and the
+      # stop grace: jwt is the dotted path of a JSON Web Token in the file, expires_ms that of
+      # a number of Unix milliseconds. A home needs max_runtime_seconds. A bind file is one
+      # plain name or a measured login file (.credentials.json for Claude Code, with
+      # env: CLAUDE_CONFIG_DIR and expires_ms: claudeAiOauth.expiresAt); env may be HOME.
       #   home:
       #     source: /var/tmp/slot-home
       #     env: CODEX_HOME

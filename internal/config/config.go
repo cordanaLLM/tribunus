@@ -30,7 +30,9 @@ const (
 	MaxRestartBackoff       = 3600
 	MaxStopGraceSeconds     = 300
 	MaxJobRuntimeSeconds    = 365 * 24 * 3600
+	MaxHeartbeatSeconds     = 24 * 3600
 	MaxSandboxInputs        = 32
+	MaxSandboxReadOnly      = 32
 	MaxSandboxInputRoots    = 32
 	MaxSandboxEnvAllow      = 64
 	MaxReleaseWatchRoutes   = 32
@@ -156,7 +158,14 @@ type GraphConfig struct {
 }
 
 type BudgetsConfig struct {
-	Default TaskBudget `koanf:"default" json:"default"`
+	Default  TaskBudget     `koanf:"default" json:"default"`
+	Platform PlatformBudget `koanf:"platform" json:"platform"`
+}
+
+// PlatformBudget is the platform budget layer (#6): what the whole platform may
+// spend, read against the Praetor efficiency ledger. 0 turns the check off.
+type PlatformBudget struct {
+	FrontierTokens int `koanf:"frontier_tokens" json:"frontier_tokens"`
 }
 
 type TaskBudget struct {
@@ -177,7 +186,16 @@ type JobConfig struct {
 	MaxRuntimeSeconds int              `koanf:"max_runtime_seconds" json:"max_runtime_seconds"`
 	Restart           JobRestartConfig `koanf:"restart" json:"restart"`
 	Stop              JobStopConfig    `koanf:"stop" json:"stop"`
+	Heartbeat         JobHeartbeat     `koanf:"heartbeat" json:"heartbeat"`
 	Sandbox           SandboxConfig    `koanf:"sandbox" json:"sandbox"`
+}
+
+// JobHeartbeat says how old a running job's last sign of life may be. A write to the job's
+// log is a beat, and so is its start. A job silent for longer than MaxAgeSeconds is hung:
+// the supervisor records job.stale and ends it the way `jobs stop` would, and the restart
+// policy decides what follows. 0 turns the check off.
+type JobHeartbeat struct {
+	MaxAgeSeconds int `koanf:"max_age_seconds" json:"max_age_seconds"`
 }
 
 type JobRestartConfig struct {
@@ -196,7 +214,11 @@ type SandboxConfig struct {
 	Reason    string   `koanf:"reason" json:"reason"`
 	Workspace string   `koanf:"workspace" json:"workspace"`
 	Inputs    []string `koanf:"inputs" json:"inputs"`
-	EnvAllow  []string `koanf:"env_allow" json:"env_allow"`
+	// ReadOnly are paths inside the workspace, relative to it, that the job may read and not
+	// write: a working copy's hooks, for one. Each has to exist and stay inside the workspace
+	// when its symlinks are resolved, at load and again at every start.
+	ReadOnly []string `koanf:"read_only" json:"read_only"`
+	EnvAllow []string `koanf:"env_allow" json:"env_allow"`
 	// Network is what the job reaches: "none" nothing, "egress" the internet without the
 	// host's loopback, "proxy" the Destinations and nothing else.
 	Network string `koanf:"network" json:"network"`
@@ -453,6 +475,9 @@ func ValidateSandbox(sandbox SandboxConfig) error {
 	if err := validateSandboxEnv(sandbox.EnvAllow); err != nil {
 		return err
 	}
+	if err := validateSandboxReadOnly(sandbox); err != nil {
+		return err
+	}
 	return validateSandboxHome(sandbox)
 }
 
@@ -570,6 +595,9 @@ func validateJobSandbox(job *JobConfig, guard protectedPaths) error {
 		return err
 	}
 	job.Sandbox.Workspace, job.Sandbox.Inputs = workspace, inputs
+	if _, err = ResolveSandboxReadOnly(job.Sandbox); err != nil {
+		return err
+	}
 	return resolveSandboxHome(&job.Sandbox, guard)
 }
 
@@ -582,6 +610,9 @@ func validateSandboxSettings(job JobConfig) error {
 		return err
 	}
 	if err := validateSandboxEnv(job.Sandbox.EnvAllow); err != nil {
+		return err
+	}
+	if err := validateSandboxReadOnly(job.Sandbox); err != nil {
 		return err
 	}
 	if err := validateSandboxHome(job.Sandbox); err != nil {

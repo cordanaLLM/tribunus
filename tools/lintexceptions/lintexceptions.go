@@ -18,8 +18,8 @@ import (
 	"time"
 )
 
-// SelfExpiry is the date this package's own exception runs out.
-const SelfExpiry = "2026-10-27"
+// selfExpiry is the date this package's own exception runs out.
+const selfExpiry = "2026-10-27"
 
 // maxLines bounds the configuration lines one check reads.
 const maxLines = 100000

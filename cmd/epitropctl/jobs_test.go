@@ -109,6 +109,29 @@ func TestRunJobsActionPassesPollInterval(t *testing.T) {
 	}
 }
 
+// Supervise runs until stopped: its context outlives the 30 second bound of the other jobs
+// commands, which once ended every supervise after 30 seconds with a deadline error.
+func TestJobsActionContextLetsSuperviseOutliveTheCommandTimeout(t *testing.T) {
+	ctx, cancel := jobsActionContext("supervise")
+	defer cancel()
+	deadline, ok := ctx.Deadline()
+	if !ok || time.Until(deadline) < 364*24*time.Hour {
+		t.Fatalf("jobsActionContext(supervise) deadline = %v (set %v), want about %s", deadline, ok, maxSuperviseRuntime)
+	}
+	cancel()
+	if ctx.Err() == nil {
+		t.Fatal("jobsActionContext(supervise) after cancel: Err() = nil, want canceled")
+	}
+	for _, action := range []string{"start", "status", "stop"} {
+		actionCtx, actionCancel := jobsActionContext(action)
+		deadline, ok = actionCtx.Deadline()
+		actionCancel()
+		if !ok || time.Until(deadline) > jobsCommandTimeout {
+			t.Fatalf("jobsActionContext(%s) deadline = %v (set %v), want within %s", action, deadline, ok, jobsCommandTimeout)
+		}
+	}
+}
+
 func TestJobsNameArgBounds(t *testing.T) {
 	if name, err := jobsNameArg("supervise", nil); err != nil || name != "" {
 		t.Fatalf("jobsNameArg(supervise) = %q, %v, want empty nil", name, err)

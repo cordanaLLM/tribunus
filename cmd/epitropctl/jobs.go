@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/tekmora/epitrop/internal/config"
@@ -42,9 +46,9 @@ func runJobsAction(action string, args []string) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	cfg, err := config.Load(ctx, *configPath)
+	loadCtx, cancelLoad := context.WithTimeout(context.Background(), jobsCommandTimeout)
+	defer cancelLoad()
+	cfg, err := config.Load(loadCtx, *configPath)
 	if err != nil {
 		return err
 	}
@@ -52,7 +56,30 @@ func runJobsAction(action string, args []string) error {
 	if err != nil {
 		return err
 	}
+	ctx, cancel := jobsActionContext(action)
+	defer cancel()
 	return runLoadedJobsAction(ctx, sup, action, name)
+}
+
+// jobsCommandTimeout bounds loading the configuration and every jobs command but supervise.
+const jobsCommandTimeout = 30 * time.Second
+
+// maxSuperviseRuntime bounds one supervise process, matching the supervisor's job runtime bound.
+const maxSuperviseRuntime = 365 * 24 * time.Hour
+
+// jobsActionContext is the context a jobs command runs under. Supervise runs until a stop
+// signal (SIGTERM from its host unit, or an interrupt) or its runtime bound; the other
+// commands end within jobsCommandTimeout.
+func jobsActionContext(action string) (context.Context, context.CancelFunc) {
+	if action != "supervise" {
+		return context.WithTimeout(context.Background(), jobsCommandTimeout)
+	}
+	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	ctx, cancel := context.WithTimeout(sigCtx, maxSuperviseRuntime)
+	return ctx, func() {
+		cancel()
+		stop()
+	}
 }
 
 func jobsNameArg(action string, args []string) (string, error) {
@@ -77,9 +104,19 @@ func runLoadedJobsAction(ctx context.Context, sup *supervisor.Supervisor, action
 	case "status":
 		return printJobsStatus(ctx, sup, name)
 	case "supervise":
-		return sup.Supervise(ctx)
+		return superviseUntilStopped(ctx, sup)
 	}
 	return fmt.Errorf("unknown jobs command: %s", action)
+}
+
+// superviseUntilStopped supervises until ctx ends. A stop signal is the normal end and
+// returns nil; reaching the runtime bound stays an error.
+func superviseUntilStopped(ctx context.Context, sup *supervisor.Supervisor) error {
+	err := sup.Supervise(ctx)
+	if errors.Is(err, context.Canceled) {
+		return nil
+	}
+	return err
 }
 
 func printJobsStatus(ctx context.Context, sup *supervisor.Supervisor, name string) error {

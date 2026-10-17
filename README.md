@@ -51,6 +51,7 @@ go test -race ./...
 ```bash
 epitropctl sync [--sources=a,b] [--out=file]
 epitropctl show [--in=file]
+epitropctl headroom --max-age=duration [--in=file]
 epitropctl schema
 epitropctl version
 epitropctl jobs start|status|stop --config=file [name]

@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/tekmora/epitrop/internal/gitexec"
 	"github.com/tekmora/epitrop/internal/units"
 )
 
@@ -219,24 +219,6 @@ func removeWorkspace(dir string) error {
 	return nil
 }
 
-// gitEnv returns the environment git runs in: the caller's without any of git's own
-// variables, then the settings of this package.
-//
-// Git exports GIT_DIR, GIT_WORK_TREE and GIT_INDEX_FILE to every hook it runs. A runner
-// started from a hook would hand them on, and a command meant for the clone would then act
-// on the hook's repository. GIT_CONFIG_COUNT and GIT_CONFIG_PARAMETERS would carry settings
-// in the same way. None of git's variables is needed here, so all of them are dropped.
-func gitEnv(environ []string) []string {
-	env := make([]string, 0, len(environ)+4)
-	for i := 0; i < len(environ); i++ {
-		name, _, _ := strings.Cut(environ[i], "=")
-		if !strings.HasPrefix(strings.ToUpper(name), "GIT_") {
-			env = append(env, environ[i])
-		}
-	}
-	return append(env, "GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_SYSTEM="+os.DevNull, "LC_ALL=C")
-}
-
 // git is how this package runs git; a test replaces it to make one step fail.
 var git = runGit
 
@@ -244,16 +226,5 @@ var git = runGit
 // prompts and reads no configuration but the repository's own: the operator's global
 // settings, hooks path and credential helpers are not for a slot's clone.
 func runGit(ctx context.Context, dir string, args ...string) (string, error) {
-	// #nosec G204 -- git is called with a fixed subcommand; names from the request follow
-	// "--" or are checked not to start with "-".
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
-	cmd.Env = gitEnv(os.Environ())
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
-	}
-	return strings.TrimSpace(string(out)), nil
+	return gitexec.Run(ctx, dir, gitexec.Env(os.Environ()), nil, args...)
 }

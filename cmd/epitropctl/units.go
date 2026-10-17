@@ -26,7 +26,17 @@ var newUnitsService = func(cfg config.Config) (*units.Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return units.NewService(cfg.EventLog.Dir, signer, clk, eventLogLimits(cfg, clk))
+	svc, err := units.NewService(cfg.EventLog.Dir, signer, clk, eventLogLimits(cfg, clk))
+	if err != nil {
+		return nil, err
+	}
+	if g := cfg.EventLog.Git; g.Enabled {
+		svc.RecordInGit(eventlog.GitRecord{
+			Ref: g.Ref, AuthorName: g.AuthorName, AuthorEmail: g.AuthorEmail,
+			Timeout: time.Duration(g.TimeoutSeconds) * time.Second,
+		})
+	}
+	return svc, nil
 }
 
 // eventLogSigner opens the signing key for the event log with a bounded context and

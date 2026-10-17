@@ -57,6 +57,8 @@ const (
 	defaultEventLogDir      = ".epitrop"
 	defaultLockSeconds      = 5
 	defaultReplayMax        = 100000
+	defaultEventLogRef      = "refs/epitrop/events"
+	defaultGitSeconds       = 30
 	defaultJobSchedule      = "always"
 	defaultRestart          = "never"
 	defaultStopSignal       = "TERM"
@@ -237,6 +239,20 @@ type EventLogConfig struct {
 	PublicKey          string `koanf:"public_key" json:"public_key"`
 	LockTimeoutSeconds int    `koanf:"lock_timeout_seconds" json:"lock_timeout_seconds"`
 	MaxReplayRecords   int    `koanf:"max_replay_records" json:"max_replay_records"`
+	// Git commits the log at checkpoints; see EventLogGitConfig.
+	Git EventLogGitConfig `koanf:"git" json:"git"`
+}
+
+// EventLogGitConfig makes the control plane commit the log's events/ and checkpoints/ to the
+// git repository the log directory lies in, at every checkpoint, onto Ref and as its own
+// author. Nothing checks Ref out; the operator's index, working tree and branch stay as
+// they are.
+type EventLogGitConfig struct {
+	Enabled        bool   `koanf:"enabled" json:"enabled"`
+	Ref            string `koanf:"ref" json:"ref"`
+	AuthorName     string `koanf:"author_name" json:"author_name"`
+	AuthorEmail    string `koanf:"author_email" json:"author_email"`
+	TimeoutSeconds int    `koanf:"timeout_seconds" json:"timeout_seconds"`
 }
 
 // SchemaJSON returns the embedded JSON Schema document used by Load.
@@ -266,6 +282,7 @@ func Default() Config {
 			PublicKey:          "",
 			LockTimeoutSeconds: defaultLockSeconds,
 			MaxReplayRecords:   defaultReplayMax,
+			Git:                EventLogGitConfig{Ref: defaultEventLogRef, TimeoutSeconds: defaultGitSeconds},
 		},
 		ReleaseWatch: ReleaseWatchConfig{
 			StateDir:         "",
@@ -333,6 +350,9 @@ func validateLoaded(cfg *Config, path string) error {
 		return err
 	}
 	if err := validateReleaseWatch(cfg); err != nil {
+		return err
+	}
+	if err := validateEventLogGit(cfg.EventLog.Git); err != nil {
 		return err
 	}
 	return validateJobSandboxes(cfg, path)
@@ -999,6 +1019,14 @@ func applyReleaseWatchDefaults(rw *ReleaseWatchConfig) {
 			}
 		}
 	}
+}
+
+// validateEventLogGit checks what the schema cannot: an enabled commit needs its author.
+func validateEventLogGit(g EventLogGitConfig) error {
+	if g.Enabled && (strings.TrimSpace(g.AuthorName) == "" || strings.TrimSpace(g.AuthorEmail) == "") {
+		return errors.New("config: event_log/git: author_name and author_email are required when enabled")
+	}
+	return nil
 }
 
 func validateReleaseWatch(cfg *Config) error {

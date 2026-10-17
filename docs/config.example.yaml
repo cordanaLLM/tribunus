@@ -86,6 +86,14 @@ event_log:
   # waits for n-1 appends of four syncs each. Raise it on a slow disk.
   lock_timeout_seconds: 5
   max_replay_records: 100000
+  # Commit events/ and checkpoints/ at every checkpoint to the git repository the log lies
+  # in, onto a ref nothing checks out. The operator's index and branch stay untouched.
+  git:
+    enabled: false
+    ref: refs/epitrop/events
+    author_name: ""
+    author_email: ""
+    timeout_seconds: 30
 # The release watch runs as its own supervised, sandboxed job, for example:
 #   jobs:
 #     - name: release-watch

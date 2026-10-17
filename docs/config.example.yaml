@@ -47,9 +47,12 @@ jobs:
       tasks_max: 512
       # A coding client's home, made fresh in <workspace>/.slot/home before each start
       # (ADR-0009). The source lies in a root and is none of the operator's login folders;
-      # copy files must hash as named, bind files are bound read-only one by one. A bind's
-      # jwt names the token whose expiry must lie 10 minutes past max_runtime_seconds and the
-      # stop grace; a home needs max_runtime_seconds.
+      # copy files must hash as named, bind files are bound read-only one by one. Each bind
+      # names its token's expiry, which must lie 10 minutes past max_runtime_seconds and the
+      # stop grace: jwt is the dotted path of a JSON Web Token in the file, expires_ms that of
+      # a number of Unix milliseconds. A home needs max_runtime_seconds. A bind file is one
+      # plain name or a measured login file (.credentials.json for Claude Code, with
+      # env: CLAUDE_CONFIG_DIR and expires_ms: claudeAiOauth.expiresAt); env may be HOME.
       #   home:
       #     source: /var/tmp/slot-home
       #     env: CODEX_HOME

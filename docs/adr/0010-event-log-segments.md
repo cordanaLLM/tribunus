@@ -8,7 +8,7 @@
 
 The event log ([architecture, Event log](../architecture-v2.md)) keeps one file per record in `events/`: `<seq, 20 digits>.json`, JCS-canonical, signed, chained to the record before it by `prev`, with a signed `HEAD.json` naming the last record. One file per record is simple to write atomically and to check, but the folder grows by one file per append without end. Replay lists the whole folder, and a folder of tens of thousands of small files is slow to list, to copy and to commit to Git, which #58 plans next.
 
-#58 asks for three steps: segment rotation, compaction, and Git commits at checkpoints. This record covers the first. It must not change what a record is: every record keeps its bytes, its receipt and its `prev` link, so a log written by v0.1.0 (`testdata/v0.1.0/eventlog`) still replays to the same state.
+Issue #58 asks for three steps: segment rotation, compaction, and Git commits at checkpoints. This record covers the first. It must not change what a record is: every record keeps its bytes, its receipt and its `prev` link, so a log written by v0.1.0 (`testdata/v0.1.0/eventlog`) still replays to the same state.
 
 ## Decision
 

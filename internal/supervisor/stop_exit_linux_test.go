@@ -3,6 +3,10 @@
 package supervisor
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -94,25 +98,51 @@ func withShimExitOnProbe(t *testing.T, lockPath string, killAt int) {
 	t.Cleanup(func() { shimProcessProbe = old })
 }
 
+// stopExitWait bounds the waits for the shim's lock and the job to end. A shim killed with
+// SIGKILL ends within milliseconds on an idle host; a loaded host stretches that to seconds
+// (#248), so the bound is wall-clock time with headroom, and a timeout reports what the job
+// was doing.
+const stopExitWait = 15 * time.Second
+
+// stopExitPolls bounds the poll loops; at 5 ms per poll it exceeds stopExitWait.
+const stopExitPolls = 4000
+
 func waitLockFree(t *testing.T, path string) {
 	t.Helper()
-	for i := 0; i < 400; i++ {
+	start := time.Now()
+	for i := 0; i < stopExitPolls && time.Since(start) < stopExitWait; i++ {
 		held, err := lockHeld(path)
 		if err == nil && !held {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Errorf("lock %s still held 2s after the shim was killed", path)
+	t.Errorf("lock %s still held %s after the shim was killed", path, time.Since(start).Round(time.Millisecond))
 }
 
 func waitProcessGone(t *testing.T, pid int) {
 	t.Helper()
-	for i := 0; i < 400; i++ {
-		if gone, err := processGone(pid); err == nil && gone {
+	start := time.Now()
+	var lastErr error
+	for i := 0; i < stopExitPolls && time.Since(start) < stopExitWait; i++ {
+		gone, err := processGone(pid)
+		if err == nil && gone {
 			return
 		}
+		lastErr = err
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("job %d still running 2s after its shim was killed", pid)
+	t.Fatalf("job %d still running %s after its shim was killed: %s, last probe error %v",
+		pid, time.Since(start).Round(time.Millisecond), procState(pid), lastErr)
+}
+
+// procState names the State and PPid lines of /proc/<pid>/status, so a timeout tells a job
+// that survived its shim from a slow host.
+func procState(pid int) string {
+	body, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "status"))
+	if err != nil {
+		return fmt.Sprintf("status unreadable (%v)", err)
+	}
+	status := string(body)
+	return fmt.Sprintf("state %q, parent %s", procStatusField(status, "State:"), procStatusField(status, "PPid:"))
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -154,7 +155,7 @@ func TestRunLoadedJobsActionDispatchesStartStopSuperviseAndDefault(t *testing.T)
 	if runtime.GOOS != "linux" {
 		t.Skip("dispatch test needs Linux supervisor support")
 	}
-	sup := testJobsSupervisor(t)
+	sup, base := testJobsSupervisorIn(t)
 	if err := runLoadedJobsAction(testContext(t), sup, "start", "idle"); err != nil {
 		t.Fatalf("runLoadedJobsAction(start) = %v, want nil", err)
 	}
@@ -162,6 +163,7 @@ func TestRunLoadedJobsActionDispatchesStartStopSuperviseAndDefault(t *testing.T)
 		t.Fatalf("Status(after start) = %+v, %v, want running", st, err)
 	}
 	if err := runLoadedJobsAction(testContext(t), sup, "stop", "idle"); err != nil {
+		logJobState(t, sup, base, "idle")
 		t.Fatalf("runLoadedJobsAction(stop) = %v, want nil", err)
 	}
 	ctx, cancel := context.WithCancel(testContext(t))
@@ -212,6 +214,14 @@ func captureStdout(t *testing.T, fn func()) string {
 
 func testJobsSupervisor(t *testing.T) *supervisor.Supervisor {
 	t.Helper()
+	sup, _ := testJobsSupervisorIn(t)
+	return sup
+}
+
+// testJobsSupervisorIn is testJobsSupervisor that also returns the folder holding the job's
+// state and log.
+func testJobsSupervisorIn(t *testing.T) (*supervisor.Supervisor, string) {
+	t.Helper()
 	base := jobsTempDir(t)
 	keyPath := filepath.Join(base, "seed.hex")
 	seed := bytes.Repeat([]byte{4}, 32)
@@ -239,7 +249,7 @@ func testJobsSupervisor(t *testing.T) *supervisor.Supervisor {
 		t.Fatalf("New() = %v, want nil", err)
 	}
 	t.Setenv("EPITROP_TEST_SHIM", "1")
-	return sup
+	return sup, base
 }
 
 func writeJobsConfig(t *testing.T, keyMode string) string {
@@ -306,4 +316,26 @@ func testContext(t *testing.T) context.Context {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	t.Cleanup(cancel)
 	return ctx
+}
+
+// logJobState logs what a failed stop needs explained: the job's status, the record its shim
+// wrote, the process state of the shim and of the job, and the job's log.
+func logJobState(t *testing.T, sup *supervisor.Supervisor, base, name string) {
+	t.Helper()
+	st, err := sup.Status(testContext(t), name)
+	t.Logf("status: %+v, %v", st, err)
+	body, err := os.ReadFile(filepath.Join(base, "state", "jobs", name+".json"))
+	t.Logf("record: %q, %v", body, err)
+	var rec struct {
+		PID     int `json:"pid"`
+		ShimPID int `json:"shim_pid"`
+	}
+	if json.Unmarshal(body, &rec) == nil {
+		for _, pid := range []int{rec.ShimPID, rec.PID} {
+			stat, statErr := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+			t.Logf("pid %d: %q, %v", pid, stat, statErr)
+		}
+	}
+	logBody, err := os.ReadFile(filepath.Join(base, name+".log"))
+	t.Logf("job log: %q, %v", logBody, err)
 }

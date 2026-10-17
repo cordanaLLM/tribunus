@@ -314,15 +314,29 @@ func (s *Supervisor) stopOne(ctx context.Context, name string) error {
 		return err
 	}
 	if err = signalProcessGroup(target, job.Stop.Signal); err != nil {
-		return err
+		return s.stopRefusedOrEnded(ctx, job, err)
 	}
 	if !s.waitStopped(ctx, job) {
 		if err = killProcess(target); err != nil {
-			return err
+			return s.stopRefusedOrEnded(ctx, job, err)
 		}
 		if !s.waitUnlocked(ctx, job, maxStatusPolls) {
 			return fmt.Errorf("supervisor: stop %s: lock stayed held after SIGKILL", job.Name)
 		}
+	}
+	return s.appendJobEvent(ctx, "job.stopped", job.Name, map[string]any{"state": string(StateStopped)})
+}
+
+// stopRefusedOrEnded is the result of a stop whose signal was refused. A shim that exits
+// releases the job's lock before the kernel gives its job another parent, so a stop in that
+// moment finds the job and its shim alive and the lock free, and refuses. The job is then
+// no longer running as Status counts it, and the shim's exit kills it (Pdeathsig): the stop
+// is done, and nothing is signalled. While the lock is held, or cannot be read, the refusal
+// stands.
+func (s *Supervisor) stopRefusedOrEnded(ctx context.Context, job config.JobConfig, refusal error) error {
+	running, err := s.isRunning(job)
+	if err != nil || running {
+		return refusal
 	}
 	return s.appendJobEvent(ctx, "job.stopped", job.Name, map[string]any{"state": string(StateStopped)})
 }

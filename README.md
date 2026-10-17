@@ -91,6 +91,7 @@ The tool names and config keys are fixed; the HTTP paths stay provisional until 
 
 - [Agent onboarding](docs/agent-onboarding.md)
 - [Roadmap](docs/roadmap.md)
+- [Cutover 1](docs/cutover-1.md): the background jobs Epitrop takes over, and the parallel run before each switch-over
 - [Catalog data sync](docs/data-sync.md): installing `epitropctl`, the sources and their limits
 - [Releasing](docs/releasing.md)
 - [Architecture](docs/architecture-v2.md)

@@ -119,6 +119,10 @@ func validateHomeBind(i int, bind SandboxHomeBind) error {
 	if !homeFileName.MatchString(bind.File) && !slices.Contains(homeCredentialFiles, bind.File) {
 		return fmt.Errorf("home: file %q is not one plain path element nor a known login file", bind.File)
 	}
+	return validateHomeExpiry(i, bind)
+}
+
+func validateHomeExpiry(i int, bind SandboxHomeBind) error {
 	switch {
 	case bind.JWT == "" && bind.ExpiresMS == "":
 		return fmt.Errorf("home.bind/%d: names neither jwt nor expires_ms; a bound login's expiry is checked before each start", i)

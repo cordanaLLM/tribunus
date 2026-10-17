@@ -89,7 +89,13 @@ func TestPrepareHomeChecksAnExpiryInMilliseconds(t *testing.T) {
 	if err := prepareHome(sandbox, until); err != nil {
 		t.Fatalf("prepareHome(expiry a millisecond beyond) = %v, want nil", err)
 	}
-	dir := homeDir(sandbox)
+	checkHomeLoginContents(t, homeDir(sandbox))
+}
+
+// checkHomeLoginContents checks that both logins' placeholders and the folders of the nested
+// one are in the home.
+func checkHomeLoginContents(t *testing.T, dir string) {
+	t.Helper()
 	for _, name := range []string{".credentials.json", homeNestedLogin} {
 		info, err := os.Lstat(filepath.Join(dir, filepath.FromSlash(name)))
 		if err != nil || !info.Mode().IsRegular() || info.Size() != 0 || info.Mode().Perm() != 0o600 {

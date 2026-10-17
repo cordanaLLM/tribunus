@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -60,6 +61,7 @@ const (
 	defaultReplayMax        = 100000
 	defaultEventLogRef      = "refs/epitrop/events"
 	defaultGitSeconds       = 30
+	defaultServerListen     = "127.0.0.1:8899"
 	defaultJobSchedule      = "always"
 	defaultRestart          = "never"
 	defaultStopSignal       = "TERM"
@@ -111,6 +113,7 @@ type Config struct {
 	Admission    AdmissionConfig    `koanf:"admission" json:"admission"`
 	EventLog     EventLogConfig     `koanf:"event_log" json:"event_log"`
 	ReleaseWatch ReleaseWatchConfig `koanf:"release_watch" json:"release_watch"`
+	Server       ServerConfig       `koanf:"server" json:"server"`
 	// SandboxInputRoots are the directories a sandboxed job's workspace and inputs must lie
 	// in once symlinks are resolved. With none, no job runs sandboxed.
 	SandboxInputRoots []string `koanf:"sandbox_input_roots" json:"sandbox_input_roots"`
@@ -279,6 +282,19 @@ type EventLogGitConfig struct {
 	Compact bool `koanf:"compact" json:"compact"`
 }
 
+// Server transports.
+const (
+	TransportStdio = "stdio"
+	TransportHTTP  = "http"
+)
+
+// ServerConfig is how epitrop-server serves its tools: on stdin and stdout, or over HTTP
+// on Listen. Listen must name a loopback host; port 0 picks a free port.
+type ServerConfig struct {
+	Transport string `koanf:"transport" json:"transport"`
+	Listen    string `koanf:"listen" json:"listen"`
+}
+
 // SchemaJSON returns the embedded JSON Schema document used by Load.
 func SchemaJSON() []byte {
 	return append([]byte(nil), schemaJSON...)
@@ -315,6 +331,7 @@ func Default() Config {
 			PerSourceCap:     DefaultPerSourceCap,
 			Routes:           []ReleaseWatchRoute{},
 		},
+		Server:            ServerConfig{Transport: TransportStdio, Listen: defaultServerListen},
 		SandboxInputRoots: []string{},
 	}
 }
@@ -376,6 +393,9 @@ func validateLoaded(cfg *Config, path string) error {
 		return err
 	}
 	if err := validateEventLogGit(cfg.EventLog.Git); err != nil {
+		return err
+	}
+	if err := ValidateListen(cfg.Server.Listen); err != nil {
 		return err
 	}
 	return validateJobSandboxes(cfg, path)
@@ -1060,6 +1080,22 @@ func validateEventLogGit(g EventLogGitConfig) error {
 	}
 	if g.Compact && !g.Enabled {
 		return errors.New("config: event_log/git: compact needs enabled: a segment leaves events/ only once a commit holds it")
+	}
+	return nil
+}
+
+// ValidateListen refuses an address whose host is not loopback: the server has no
+// authentication, so it serves only this host.
+func ValidateListen(addr string) error {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("config: server/listen: %w", err)
+	}
+	if n, err := strconv.Atoi(port); err != nil || n < 0 || n > 65535 {
+		return fmt.Errorf("config: server/listen: port %q is not 0..65535", port)
+	}
+	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		return fmt.Errorf("config: server/listen: host %q is not loopback", host)
 	}
 	return nil
 }

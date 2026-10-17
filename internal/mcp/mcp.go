@@ -104,11 +104,23 @@ func jobsStatus(jobs JobLister) sdkmcp.ToolHandlerFor[JobsStatusIn, JobsStatusOu
 		}
 		out := JobsStatusOut{Jobs: make([]Job, 0, len(statuses))}
 		for i := 0; i < len(statuses); i++ {
-			st := statuses[i]
-			out.Jobs = append(out.Jobs, Job{Name: st.Name, State: string(st.State), PID: st.PID, Since: st.Since, Restarts: st.Restarts, Sandbox: st.Sandbox, Stale: st.Stale, LastBeat: st.LastBeat})
+			out.Jobs = append(out.Jobs, jobOf(statuses[i]))
 		}
 		return nil, out, nil
 	}
+}
+
+func jobOf(st supervisor.JobStatus) Job {
+	return Job{Name: st.Name, State: string(st.State), PID: st.PID, Since: st.Since, Restarts: st.Restarts, Sandbox: st.Sandbox, Stale: st.Stale, LastBeat: st.LastBeat}
+}
+
+// jobsOf keys the jobs by name.
+func jobsOf(statuses []supervisor.JobStatus) map[string]Job {
+	out := make(map[string]Job, len(statuses))
+	for i := 0; i < len(statuses); i++ {
+		out[statuses[i].Name] = jobOf(statuses[i])
+	}
+	return out
 }
 
 // UnitsListIn narrows the list.
@@ -145,11 +157,15 @@ func unitsList(reader UnitReader) sdkmcp.ToolHandlerFor[UnitsListIn, UnitsListOu
 			if in.Status != "" && u.Status != in.Status {
 				continue
 			}
-			out.Units = append(out.Units, UnitSummary{ID: u.ID, Status: u.Status, Branch: u.Branch, PR: u.PR, Lane: u.Lane, Node: u.Node, UpdatedAt: u.UpdatedAt})
+			out.Units = append(out.Units, summarize(u))
 		}
 		sort.Slice(out.Units, func(i, j int) bool { return out.Units[i].ID < out.Units[j].ID })
 		return nil, out, nil
 	}
+}
+
+func summarize(u eventlog.Unit) UnitSummary {
+	return UnitSummary{ID: u.ID, Status: u.Status, Branch: u.Branch, PR: u.PR, Lane: u.Lane, Node: u.Node, UpdatedAt: u.UpdatedAt}
 }
 
 // UnitStatusIn names the unit.

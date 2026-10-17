@@ -11,7 +11,7 @@ epitrop/
   Makefile                   [now]     verify-all target (Praetor)
   catalog/                   [now]     model catalog records and snapshots
   cmd/epitropctl/           [now]     operator CLI (show, sync)
-  cmd/epitrop-server/       [now]     MCP server on stdio, read-only tools; REST and SSE planned
+  cmd/epitrop-server/       [now]     MCP server on stdio or loopback HTTP, probes, SSE
   internal/sources/          [now]     catalog sources (gateway, local, public)
   internal/sot/              [planned] task graph and state
   internal/mcp/              [now]     MCP tools over the run record

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -164,46 +165,55 @@ func TestOnlyAFullQueueIsRetryable(t *testing.T) {
 	}
 }
 
+// publishAll publishes n messages and returns how many the broker accepted. A refusal other
+// than a full queue fails the test.
+func publishAll(ctx context.Context, t *testing.T, b *Broker, n int) int {
+	accepted := 0
+	for i := 0; i < n; i++ {
+		err := b.Publish(ctx, pubsub.Message{Topic: topicA, Data: i})
+		if err == nil {
+			accepted++
+		} else if !Retryable(err) {
+			t.Errorf("Publish: %v", err)
+			return accepted
+		}
+	}
+	return accepted
+}
+
+// drain reads sub until ctx ends, then counts what is left in its queue.
+func drain(ctx context.Context, t *testing.T, sub *Subscription, limit int) int {
+	received := 0
+	for ; received <= limit; received++ {
+		if _, err := sub.Next(ctx); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("Next: %v", err)
+			}
+			break
+		}
+	}
+	return received + sub.Len()
+}
+
 func TestConcurrentPublishersEitherDeliverOrAreRefused(t *testing.T) {
 	const publishers, perPublisher = 4, 200
 	b := newBroker(t, 8)
 	sub := subscribe(t, b, topicA)
 	ctx := testContext(t)
 	var wg sync.WaitGroup
-	var mu sync.Mutex
-	accepted := 0
+	var accepted atomic.Int64
 	for p := 0; p < publishers; p++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for i := 0; i < perPublisher; i++ {
-				err := b.Publish(ctx, pubsub.Message{Topic: topicA, Data: i})
-				if err != nil && !Retryable(err) {
-					t.Errorf("Publish: %v", err)
-					return
-				}
-				if err == nil {
-					mu.Lock()
-					accepted++
-					mu.Unlock()
-				}
-			}
+			accepted.Add(int64(publishAll(ctx, t, b, perPublisher)))
 		}()
 	}
 	readCtx, stopReading := context.WithCancel(ctx)
 	go func() { wg.Wait(); stopReading() }()
-	received := 0
-	for i := 0; i <= publishers*perPublisher; i++ {
-		if _, err := sub.Next(readCtx); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				t.Fatalf("Next: %v", err)
-			}
-			break
-		}
-		received++
-	}
-	received += sub.Len()
-	if received != accepted {
-		t.Fatalf("received %d messages, %d publishes were accepted", received, accepted)
+	received := drain(readCtx, t, sub, publishers*perPublisher)
+	wg.Wait()
+	if int64(received) != accepted.Load() {
+		t.Fatalf("received %d messages, %d publishes were accepted", received, accepted.Load())
 	}
 }

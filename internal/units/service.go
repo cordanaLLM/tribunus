@@ -206,6 +206,12 @@ func (s *Service) writeCheckpointSafe(ctx context.Context, span trace.Span, seq 
 		return
 	}
 	telemetry.Default().CheckpointWrite(ctx, "written")
+	// A status change is a quiet point: closed ranges of records move into segments here,
+	// off the append path. A failed rotation leaves the log as it was and is retried at the
+	// next checkpoint.
+	if _, err = writer.Rotate(ctx); err != nil {
+		span.RecordError(err)
+	}
 }
 
 // Preempt marks an active unit as preempted with a reason and actor.

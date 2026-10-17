@@ -91,7 +91,7 @@ func ReplayCheckpointedStable(ctx context.Context, dir string, pubKeyHex string,
 }
 
 func transientReplayError(err error) bool {
-	if fileBusy(err) {
+	if fileBusy(err) || errors.Is(err, errRecordMoved) {
 		return true
 	}
 	text := err.Error()
@@ -150,6 +150,16 @@ type replayRun struct {
 	limits         Limits
 	reducer        Reducer
 	name           string
+	segs           []segment
+}
+
+// cursor is where a replay stands: the state so far, the last seq it applied or that its
+// checkpoint covers, the hash of that record, and how many records it applied.
+type cursor struct {
+	state *State
+	last  uint64
+	prev  string
+	count int
 }
 
 type checkpointResult struct {
@@ -166,6 +176,11 @@ func (r replayRun) run() (State, CheckpointUse, error) {
 	if err != nil {
 		return State{}, CheckpointUse{}, fmt.Errorf("eventlog: read %s: %w", r.eventsDir, err)
 	}
+	// The segments are listed after the record files: a rotation writes its segment before
+	// it removes the files, so a file this listing missed lies in a segment listed here.
+	if r.segs, err = listSegments(r.eventsDir, r.limits.MaxReplayRecords); err != nil {
+		return State{}, CheckpointUse{}, err
+	}
 	st := State{Tasks: map[string]Task{}}
 	cp := r.findCheckpoint()
 	if cp.seq > 0 {
@@ -173,15 +188,18 @@ func (r replayRun) run() (State, CheckpointUse, error) {
 			return State{}, CheckpointUse{}, fmt.Errorf("eventlog: unmarshal checkpoint state: %w", err)
 		}
 	}
-	last, lastHash, err := r.applyRecords(entries, &st, cp.seq, cp.hash)
-	if err != nil {
+	c := cursor{state: &st, last: cp.seq, prev: cp.hash}
+	if err = r.applySegments(looseRecords(entries), &c); err != nil {
+		return State{}, CheckpointUse{}, err
+	}
+	if err = r.applyRecords(entries, &c); err != nil {
 		return State{}, CheckpointUse{}, err
 	}
 	headRecord, hasHead, err := r.readHead()
 	if err != nil {
 		return State{}, CheckpointUse{}, err
 	}
-	if err = checkHeadMatchesTail(headRecord, hasHead, last, lastHash); err != nil {
+	if err = checkHeadMatchesTail(headRecord, hasHead, c.last, c.prev); err != nil {
 		return State{}, CheckpointUse{}, err
 	}
 	return st, cp.use, nil
@@ -267,8 +285,7 @@ func (r replayRun) divergenceFor(cp Checkpoint, cpPath string, gotHash string) *
 }
 
 func (r replayRun) checkCheckpointAgainstLog(cp Checkpoint, cpPath string) (*Divergence, bool) {
-	recPath := eventPath(r.eventsDir, cp.Seq)
-	recData, err := readFileBounded(recPath, r.limits.MaxRecordBytes)
+	recData, err := r.recordAt(cp.Seq)
 	if err != nil {
 		return r.divergenceFor(cp, cpPath, ""), true
 	}
@@ -279,56 +296,91 @@ func (r replayRun) checkCheckpointAgainstLog(cp Checkpoint, cpPath string) (*Div
 	return nil, false
 }
 
-func (r replayRun) applyRecords(entries []os.DirEntry, st *State, startSeq uint64, startHash string) (uint64, string, error) {
-	prev := startHash
-	last := startSeq
-	count := 0
+// recordAt returns the bytes of record seq, from its file or from the segment holding it.
+func (r replayRun) recordAt(seq uint64) ([]byte, error) {
+	data, err := readFileBounded(eventPath(r.eventsDir, seq), r.limits.MaxRecordBytes)
+	if !errors.Is(err, os.ErrNotExist) {
+		return data, err
+	}
+	return segmentRecord(r.eventsDir, r.segs, seq, r.limits.MaxRecordBytes)
+}
+
+// applySegments applies the records of the segments that lie after c. Each record is
+// also compared with a file of the same seq that an interrupted rotation left behind.
+func (r replayRun) applySegments(loose map[uint64]string, c *cursor) error {
+	for _, seg := range r.segs {
+		if seg.last <= c.last {
+			continue
+		}
+		err := readSegment(r.eventsDir, seg, r.limits.MaxRecordBytes, func(seq uint64, data []byte) error {
+			if err := sameAsLoose(r.eventsDir, loose, seq, data, seg, r.limits.MaxRecordBytes); err != nil {
+				return err
+			}
+			if seq <= c.last {
+				return nil
+			}
+			return r.apply(c, seg.name, seq, data)
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyRecords applies the record files that lie after c.
+func (r replayRun) applyRecords(entries []os.DirEntry, c *cursor) error {
 	for _, entry := range entries {
 		if !isEventRecord(entry.Name()) {
 			continue
 		}
 		seq, err := seqFromName(entry.Name())
 		if err != nil {
-			return 0, "", err
+			return err
 		}
-		if seq <= startSeq {
+		if seq <= c.last {
 			continue
 		}
-		count++
-		if count > r.limits.MaxReplayRecords {
-			return 0, "", fmt.Errorf("eventlog: max replay records %d exceeded", r.limits.MaxReplayRecords)
+		if seq != c.last+1 {
+			return fmt.Errorf("eventlog: gap at seq %d file %s", c.last+1, entry.Name())
 		}
-		rec, hash, err := r.readRecord(entry.Name(), last+1, prev)
+		data, err := readFileBounded(filepath.Join(r.eventsDir, entry.Name()), r.limits.MaxRecordBytes)
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%w: seq %d file %s", errRecordMoved, seq, entry.Name())
+		}
 		if err != nil {
-			return 0, "", err
+			return err
 		}
-		next, err := r.reducer(*st, rec)
-		if err != nil {
-			return 0, "", fmt.Errorf("eventlog: seq %d file %s: %w", rec.Seq, entry.Name(), err)
+		if err = r.apply(c, entry.Name(), seq, data); err != nil {
+			return err
 		}
-		*st, last, prev = next, rec.Seq, hash
 	}
-	return last, prev, nil
+	return nil
 }
 
-func (r replayRun) readRecord(name string, expected uint64, prev string) (Record, string, error) {
-	seq, err := seqFromName(name)
+// apply verifies data as record seq after c and runs the reducer on it. name is the record
+// file or the segment it came from, for the error.
+func (r replayRun) apply(c *cursor, name string, seq uint64, data []byte) error {
+	c.count++
+	if c.count > r.limits.MaxReplayRecords {
+		return fmt.Errorf("eventlog: max replay records %d exceeded", r.limits.MaxReplayRecords)
+	}
+	if seq != c.last+1 {
+		return fmt.Errorf("eventlog: gap at seq %d file %s", c.last+1, name)
+	}
+	if len(data) > r.limits.MaxRecordBytes {
+		return fmt.Errorf("%w: seq %d file %s is %d bytes", ErrRecordTooLarge, seq, name, len(data))
+	}
+	rec, err := decodeRecord(filepath.Join(r.eventsDir, name), data, r.pubKeyHex, seq, c.prev)
 	if err != nil {
-		return Record{}, "", err
+		return fmt.Errorf("eventlog: seq %d file %s: %w", seq, name, err)
 	}
-	if seq != expected {
-		return Record{}, "", fmt.Errorf("eventlog: gap at seq %d file %s", expected, name)
-	}
-	path := filepath.Join(r.eventsDir, name)
-	data, err := readFileBounded(path, r.limits.MaxRecordBytes)
+	next, err := r.reducer(*c.state, rec)
 	if err != nil {
-		return Record{}, "", err
+		return fmt.Errorf("eventlog: seq %d file %s: %w", seq, name, err)
 	}
-	rec, err := decodeRecord(path, data, r.pubKeyHex, expected, prev)
-	if err != nil {
-		return Record{}, "", fmt.Errorf("eventlog: seq %d file %s: %w", expected, name, err)
-	}
-	return rec, hashHex(data), nil
+	*c.state, c.last, c.prev = next, seq, hashHex(data)
+	return nil
 }
 
 func decodeRecord(path string, data []byte, pub string, expected uint64, prev string) (Record, error) {

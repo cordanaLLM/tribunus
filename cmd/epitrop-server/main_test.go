@@ -341,6 +341,46 @@ func TestServeHTTPReadsBackAndStops(t *testing.T) {
 	}
 }
 
+// silentConnStopWait is below the five seconds net/http's Shutdown waits for a connection
+// that has sent no request (#247), so the test tells the fix from that grace.
+const silentConnStopWait = 4 * time.Second
+
+func TestServeHTTPStopsWithASilentConnection(t *testing.T) {
+	cfgPath := writeConfigServing(t, `{"transport":"http","listen":"127.0.0.1:0"}`)
+	recordUnit(t, cfgPath)
+	base, cancel, done := serveHTTPConfig(t, cfgPath)
+	waitReady(t, base)
+
+	// A connection that sends nothing must not hold the stop.
+	var d net.Dialer
+	conn, err := d.DialContext(testContext(t), "tcp", strings.TrimPrefix(base, "http://"))
+	if err != nil {
+		t.Fatalf("Dial = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := conn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			t.Errorf("Close(conn) = %v", err)
+		}
+	})
+	start := time.Now()
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("serve after cancel = %v, want nil", err)
+		}
+	case <-time.After(silentConnStopWait):
+		t.Fatalf("serve did not stop within %s with a connection that sent no request", silentConnStopWait)
+	}
+	t.Logf("serve stopped %s after cancel", time.Since(start).Round(time.Millisecond))
+	if err := conn.SetReadDeadline(time.Now().Add(silentConnStopWait)); err != nil {
+		t.Fatalf("SetReadDeadline = %v", err)
+	}
+	if _, err := conn.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
+		t.Fatalf("Read(silent conn) after stop = %v, want io.EOF: the server must close it", err)
+	}
+}
+
 func readBackOverHTTP(t *testing.T, base string) {
 	t.Helper()
 	ctx := testContext(t)

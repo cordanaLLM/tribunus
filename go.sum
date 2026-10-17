@@ -55,8 +55,8 @@ github.com/golang/protobuf v1.5.4 h1:i7eJL8qZTpSEXOPTxNKhASYpMn+8e5Q6AdndVa1dWek
 github.com/golang/protobuf v1.5.4/go.mod h1:lnTiLA8Wa4RWRcIUkrtSVa5nRhsEGBg48fD6rSs7xps=
 github.com/golusoris/golusoris v0.16.5 h1:1GOiB6oqNng5JBLScqCr9R6yoffp6H+fnxCAhmi5G0w=
 github.com/golusoris/golusoris v0.16.5/go.mod h1:+NRGOJn29GYZrQhjZc48Rxm/Ge9K/JH1UhHRwNoYoaU=
-github.com/golusoris/golusoris/core v0.10.2 h1:oAPB/rVwBxr0BNzFuSvd5rGvcxOqijwZuPeKyrAVVoM=
-github.com/golusoris/golusoris/core v0.10.2/go.mod h1:uhsMs9H6YP5LS2JRVCuKrKP+c29SGqaZdZKBhwge3nA=
+github.com/golusoris/golusoris/core v0.11.0 h1:RnydprrgoX748/xUDxXIRcYp0XNtxz5TmY4y9RRHyEA=
+github.com/golusoris/golusoris/core v0.11.0/go.mod h1:08MZBMOblU2q+zEUuiljwFqOjPt9fcgi1g5VuVoe7cc=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=

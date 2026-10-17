@@ -6,7 +6,7 @@ require (
 	github.com/adhocore/gronx v1.20.5
 	github.com/gofrs/flock v0.13.1
 	github.com/golusoris/golusoris v0.16.5
-	github.com/golusoris/golusoris/core v0.10.2
+	github.com/golusoris/golusoris/core v0.11.0
 	github.com/jonboulle/clockwork v0.5.0
 	github.com/prometheus/client_golang v1.25.0
 	go.opentelemetry.io/otel v1.47.0

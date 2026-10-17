@@ -205,6 +205,21 @@
               }
             }
           },
+          "heartbeat": {
+            "type": "object",
+            "default": {
+              "max_age_seconds": 0
+            },
+            "additionalProperties": false,
+            "properties": {
+              "max_age_seconds": {
+                "type": "integer",
+                "default": 0,
+                "minimum": 0,
+                "maximum": 86400
+              }
+            }
+          },
           "sandbox": {
             "type": "object",
             "default": {

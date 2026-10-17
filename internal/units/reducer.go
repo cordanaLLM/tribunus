@@ -9,6 +9,14 @@ import (
 	"github.com/tekmora/epitrop/internal/graph"
 )
 
+// FoldName names the units state in the base of a compacted log and the units checkpoints.
+const FoldName = "units"
+
+// Fold is the units state as a compacted log's base holds it.
+func Fold() eventlog.Fold {
+	return eventlog.Fold{Name: FoldName, Reduce: UnitReducer}
+}
+
 // UnitReducer rebuilds the run record from the shared log. It skips the other known
 // domains and fails on a record no writer of this version could have produced: an
 // unknown type, a bad id, a payload that does not parse, an unknown status.

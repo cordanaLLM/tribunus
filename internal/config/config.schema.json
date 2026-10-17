@@ -467,7 +467,8 @@
           "ref": "refs/epitrop/events",
           "author_name": "",
           "author_email": "",
-          "timeout_seconds": 30
+          "timeout_seconds": 30,
+          "compact": false
         }
       },
       "additionalProperties": false,
@@ -507,7 +508,8 @@
             "ref": "refs/epitrop/events",
             "author_name": "",
             "author_email": "",
-            "timeout_seconds": 30
+            "timeout_seconds": 30,
+            "compact": false
           },
           "additionalProperties": false,
           "properties": {
@@ -538,6 +540,10 @@
               "default": 30,
               "minimum": 1,
               "maximum": 300
+            },
+            "compact": {
+              "type": "boolean",
+              "default": false
             }
           }
         }

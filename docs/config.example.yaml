@@ -94,6 +94,9 @@ event_log:
     author_name: ""
     author_email: ""
     timeout_seconds: 30
+    # After each commit, replace the segments the commit holds with one signed base of every
+    # reader's state. Needs enabled.
+    compact: false
 # The release watch runs as its own supervised, sandboxed job, for example:
 #   jobs:
 #     - name: release-watch

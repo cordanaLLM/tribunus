@@ -49,14 +49,18 @@ func (w *Writer) rotateLocked() (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	segs, err := listSegments(w.eventsDir, w.limits.MaxReplayRecords)
+	base, err := w.baseSeq()
+	if err != nil {
+		return 0, err
+	}
+	segs, err := listSegments(w.eventsDir, w.limits.MaxReplayRecords, base)
 	if err != nil {
 		return 0, err
 	}
 	if err = w.dropRotated(segs); err != nil {
 		return 0, err
 	}
-	next := uint64(1)
+	next := base + 1
 	if len(segs) > 0 {
 		next = segs[len(segs)-1].last + 1
 	}

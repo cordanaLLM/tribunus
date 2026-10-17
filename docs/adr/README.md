@@ -16,3 +16,4 @@ record that supersedes it.
 | [0009](0009-slot-client-home.md) | 2026-10-15 | Give a slot's coding client a home of its own with its login bound read-only | Proposed |
 | [0010](0010-event-log-segments.md) | 2026-10-17 | Move closed ranges of the event log into segment files | Proposed |
 | [0011](0011-event-log-git-commits.md) | 2026-10-17 | Commit the event log to Git at checkpoints, onto a ref of its own | Proposed |
+| [0012](0012-event-log-compaction.md) | 2026-10-17 | Compact the event log onto a signed base once Git holds its segments | Proposed |

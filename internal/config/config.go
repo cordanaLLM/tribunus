@@ -252,6 +252,9 @@ type EventLogGitConfig struct {
 	AuthorName     string `koanf:"author_name" json:"author_name"`
 	AuthorEmail    string `koanf:"author_email" json:"author_email"`
 	TimeoutSeconds int    `koanf:"timeout_seconds" json:"timeout_seconds"`
+	// Compact moves the log's base forward after each commit and removes the segments the
+	// commit holds; see eventlog.Writer.Compact. It needs Enabled.
+	Compact bool `koanf:"compact" json:"compact"`
 }
 
 // SchemaJSON returns the embedded JSON Schema document used by Load.
@@ -1023,6 +1026,9 @@ func applyReleaseWatchDefaults(rw *ReleaseWatchConfig) {
 func validateEventLogGit(g EventLogGitConfig) error {
 	if g.Enabled && (strings.TrimSpace(g.AuthorName) == "" || strings.TrimSpace(g.AuthorEmail) == "") {
 		return errors.New("config: event_log/git: author_name and author_email are required when enabled")
+	}
+	if g.Compact && !g.Enabled {
+		return errors.New("config: event_log/git: compact needs enabled: a segment leaves events/ only once a commit holds it")
 	}
 	return nil
 }

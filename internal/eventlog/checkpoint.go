@@ -112,8 +112,10 @@ func (w *Writer) buildCheckpoint(name string, seq uint64, hash string, st State)
 	return full, nil
 }
 
+// validCheckpointName reports whether name may name a checkpoint or a fold: lowercase
+// letters, and never BaseName.
 func validCheckpointName(name string) bool {
-	return validCheckpointNameRegex.MatchString(name)
+	return name != BaseName && validCheckpointNameRegex.MatchString(name)
 }
 
 func checkpointFileName(seq uint64) string {

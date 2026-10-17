@@ -14,8 +14,11 @@ import (
 	corereceipt "github.com/golusoris/golusoris/core/crypto/receipt"
 	"github.com/jonboulle/clockwork"
 	"github.com/tekmora/epitrop/internal/config"
+	"github.com/tekmora/epitrop/internal/effects"
 	"github.com/tekmora/epitrop/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/graphlog"
 	"github.com/tekmora/epitrop/internal/slot"
+	"github.com/tekmora/epitrop/internal/supervisor"
 	"github.com/tekmora/epitrop/internal/units"
 )
 
@@ -35,8 +38,17 @@ var newUnitsService = func(cfg config.Config) (*units.Service, error) {
 			Ref: g.Ref, AuthorName: g.AuthorName, AuthorEmail: g.AuthorEmail,
 			Timeout: time.Duration(g.TimeoutSeconds) * time.Second,
 		})
+		if g.Compact {
+			svc.CompactWith(logFolds(cfg))
+		}
 	}
 	return svc, nil
+}
+
+// logFolds names every reader of the shared event log, so that a compacted log's base holds
+// the state each one replays from.
+func logFolds(cfg config.Config) []eventlog.Fold {
+	return []eventlog.Fold{effects.Fold(), graphlog.Fold(), supervisor.Fold(cfg.Jobs), units.Fold()}
 }
 
 // eventLogSigner opens the signing key for the event log with a bounded context and

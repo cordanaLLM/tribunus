@@ -105,6 +105,8 @@ func TestLoadNegativeValidation(t *testing.T) {
 		{"unknown git key", `{"event_log": {"git": {"sign": true}}}`, []string{"/event_log/git", "additional properties"}},
 		{"git enabled without author", `{"event_log": {"git": {"enabled": true, "author_email": "epitrop@example.invalid"}}}`, []string{"event_log/git", "author_name and author_email are required"}},
 		{"git enabled without email", `{"event_log": {"git": {"enabled": true, "author_name": "epitrop"}}}`, []string{"event_log/git", "author_name and author_email are required"}},
+		{"git compact not a boolean", `{"event_log": {"git": {"compact": "yes"}}}`, []string{"/event_log/git/compact", "boolean"}},
+		{"git compact without enabled", `{"event_log": {"git": {"compact": true}}}`, []string{"event_log/git", "compact needs enabled"}},
 		{"bad job restart policy", `{"jobs": [
   {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "schedule": "always", "restart": {"policy": "sometimes"}}
 ]}`, []string{"/jobs/0/restart/policy", "valid"}},
@@ -144,12 +146,13 @@ func TestLoadNegativeValidation(t *testing.T) {
 
 func TestLoadEventLogGit(t *testing.T) {
 	for _, seconds := range []int{1, 300} {
-		body := fmt.Sprintf(`{"event_log": {"git": {"enabled": true, "ref": "refs/epitrop/log-2.x", "author_name": "epitrop", "author_email": "epitrop@example.invalid", "timeout_seconds": %d}}}`, seconds)
+		compact := seconds == 300
+		body := fmt.Sprintf(`{"event_log": {"git": {"enabled": true, "ref": "refs/epitrop/log-2.x", "author_name": "epitrop", "author_email": "epitrop@example.invalid", "timeout_seconds": %d, "compact": %t}}}`, seconds, compact)
 		cfg, err := Load(testContext(t), writeConfig(t, body))
 		if err != nil {
 			t.Fatalf("Load(timeout %d) = %v, want nil", seconds, err)
 		}
-		want := EventLogGitConfig{Enabled: true, Ref: "refs/epitrop/log-2.x", AuthorName: "epitrop", AuthorEmail: "epitrop@example.invalid", TimeoutSeconds: seconds}
+		want := EventLogGitConfig{Enabled: true, Ref: "refs/epitrop/log-2.x", AuthorName: "epitrop", AuthorEmail: "epitrop@example.invalid", TimeoutSeconds: seconds, Compact: compact}
 		if cfg.EventLog.Git != want {
 			t.Fatalf("Load() event_log.git = %+v, want %+v", cfg.EventLog.Git, want)
 		}
@@ -285,6 +288,7 @@ func TestConfigSchemaDefaultsAgreeWithGoTypes(t *testing.T) {
 	assertSchemaDefault(t, doc, def.EventLog.Git.AuthorName, "event_log", "git", "author_name")
 	assertSchemaDefault(t, doc, def.EventLog.Git.AuthorEmail, "event_log", "git", "author_email")
 	assertSchemaDefault(t, doc, def.EventLog.Git.TimeoutSeconds, "event_log", "git", "timeout_seconds")
+	assertSchemaDefault(t, doc, def.EventLog.Git.Compact, "event_log", "git", "compact")
 	assertSchemaDefault(t, doc, def.Router.Aliases, "router", "aliases")
 	assertSchemaDefault(t, doc, def.Jobs, "jobs")
 	assertSchemaDefault(t, doc, def.Watches, "watches")

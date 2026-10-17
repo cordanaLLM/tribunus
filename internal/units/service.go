@@ -25,6 +25,7 @@ type Service struct {
 	signer *corereceipt.Signer
 	limits eventlog.Limits
 	git    *eventlog.GitRecord
+	folds  []eventlog.Fold
 }
 
 func NewService(dir string, signer *corereceipt.Signer, clk clock.Clock, limits eventlog.Limits) (*Service, error) {
@@ -47,6 +48,13 @@ func (s *Service) RecordInGit(g eventlog.GitRecord) {
 	s.git = &g
 }
 
+// CompactWith makes every commit RecordInGit enables compact the log to a base of folds
+// (event_log.git.compact). folds must name every reader of the log, since a replay of a fold
+// the base lacks fails. Call it before the service is used.
+func (s *Service) CompactWith(folds []eventlog.Fold) {
+	s.folds = folds
+}
+
 // Replay rebuilds the run record. A log directory that holds no events yet is an empty
 // record, not an error.
 func (s *Service) Replay(ctx context.Context) (eventlog.State, error) {
@@ -65,7 +73,7 @@ func (s *Service) ReplayCheckpointed(ctx context.Context) (eventlog.State, event
 	} else if err != nil {
 		return eventlog.State{}, eventlog.CheckpointUse{}, fmt.Errorf("units: stat %s: %w", events, err)
 	}
-	st, use, err := eventlog.ReplayCheckpointedStable(ctx, s.dir, s.signer.PublicKey(), s.limits, "units", UnitReducer)
+	st, use, err := eventlog.ReplayCheckpointedStable(ctx, s.dir, s.signer.PublicKey(), s.limits, FoldName, UnitReducer)
 	if err != nil {
 		return eventlog.State{}, eventlog.CheckpointUse{}, err
 	}
@@ -84,7 +92,7 @@ func (s *Service) replayRaw(ctx context.Context) (eventlog.State, error) {
 	} else if err != nil {
 		return eventlog.State{}, fmt.Errorf("units: stat %s: %w", events, err)
 	}
-	st, _, err := eventlog.ReplayCheckpointedStable(ctx, s.dir, s.signer.PublicKey(), s.limits, "units", UnitReducer)
+	st, _, err := eventlog.ReplayCheckpointedStable(ctx, s.dir, s.signer.PublicKey(), s.limits, FoldName, UnitReducer)
 	return st, err
 }
 
@@ -207,7 +215,7 @@ func (s *Service) writeCheckpointSafe(ctx context.Context, span trace.Span, seq 
 		telemetry.Default().CheckpointWrite(ctx, "failed")
 		return
 	}
-	if err = writer.WriteCheckpoint(ctx, "units", seq, hash, st); err != nil {
+	if err = writer.WriteCheckpoint(ctx, FoldName, seq, hash, st); err != nil {
 		span.RecordError(err)
 		telemetry.Default().CheckpointWrite(ctx, "failed")
 		return
@@ -225,6 +233,15 @@ func (s *Service) writeCheckpointSafe(ctx context.Context, span trace.Span, seq 
 		return
 	}
 	if _, err = writer.RecordInGit(ctx, *s.git); err != nil {
+		span.RecordError(err)
+		return
+	}
+	// Compaction removes only segments the commit just made holds; a failed one leaves the
+	// log replayable and is tried again at the next checkpoint.
+	if len(s.folds) == 0 {
+		return
+	}
+	if _, err = writer.Compact(ctx, s.folds, *s.git); err != nil {
 		span.RecordError(err)
 	}
 }

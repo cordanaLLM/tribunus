@@ -83,7 +83,7 @@ func (s *Service) appendAssignment(ctx context.Context, recordType string, paylo
 		if sErr != nil {
 			return eventlog.Event{}, sErr
 		}
-		st, rErr := s.replayWith(cctx, units.UnitReducer)
+		st, rErr := s.replayWith(cctx, units.FoldName, units.UnitReducer)
 		if rErr != nil {
 			return eventlog.Event{}, rErr
 		}

@@ -23,6 +23,10 @@ const (
 // read: a rotation moved it into a segment in between. A stable replay tries again.
 var errRecordMoved = errors.New("eventlog: record moved into a segment during replay")
 
+// errLogCompacted marks a replay that failed while a compaction moved the log's base: the
+// segments it listed were gone when it read them. A stable replay tries again.
+var errLogCompacted = errors.New("eventlog: log compacted during replay")
+
 // errStopSegment ends a segment read early once the wanted record is found.
 var errStopSegment = errors.New("eventlog: stop segment read")
 
@@ -64,10 +68,13 @@ func parseDigits(s string) (uint64, bool) {
 	return v, err == nil
 }
 
-// listSegments returns the segments of eventsDir in order. A name starting with a dot is a
-// temporary file of an interrupted write and is passed over; any other file that is not a
-// segment, and segments that do not follow each other from seq 1, fail with the file.
-func listSegments(eventsDir string, limit int) ([]segment, error) {
+// listSegments returns the segments of eventsDir that lie after seq after, in order; after is
+// the seq of the log's base, 0 without one. A name starting with a dot is a temporary file of
+// an interrupted write and is passed over. A segment at or below after is one an interrupted
+// compaction left behind and is passed over too. Any other file that is not a segment, a
+// segment that holds after and the seq past it, and segments that do not follow each other
+// from after+1 fail with the file.
+func listSegments(eventsDir string, limit int, after uint64) ([]segment, error) {
 	dir := segmentsDir(eventsDir)
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -88,13 +95,16 @@ func listSegments(eventsDir string, limit int) ([]segment, error) {
 		if !ok || entry.IsDir() {
 			return nil, fmt.Errorf("eventlog: %s: not a segment file", filepath.Join(dir, entry.Name()))
 		}
+		if seg.last <= after {
+			continue
+		}
 		segs = append(segs, seg)
 	}
-	return segs, checkSegmentsFollow(segs)
+	return segs, checkSegmentsFollow(segs, after)
 }
 
-func checkSegmentsFollow(segs []segment) error {
-	want := uint64(1)
+func checkSegmentsFollow(segs []segment, after uint64) error {
+	want := after + 1
 	for _, seg := range segs {
 		if seg.first != want {
 			return fmt.Errorf("eventlog: gap at seq %d file %s", want, seg.name)

@@ -138,7 +138,10 @@ func (w *Writer) firstHead() (unsignedHead, error) {
 			return unsignedHead{}, fmt.Errorf("eventlog: missing HEAD with existing record %s", entry.Name())
 		}
 	}
-	segs, err := listSegments(w.eventsDir, w.limits.MaxReplayRecords)
+	if base, baseErr := newestBase(baseDir(w.eventsDir)); baseErr != nil || base != 0 {
+		return unsignedHead{}, errors.Join(fmt.Errorf("eventlog: missing HEAD with existing base at seq %d", base), baseErr)
+	}
+	segs, err := listSegments(w.eventsDir, w.limits.MaxReplayRecords, 0)
 	if err != nil {
 		return unsignedHead{}, err
 	}

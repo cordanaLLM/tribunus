@@ -19,6 +19,7 @@ import (
 	"github.com/golusoris/golusoris/core/clock"
 	corereceipt "github.com/golusoris/golusoris/core/crypto/receipt"
 	"github.com/tekmora/epitrop/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/gitexec"
 )
 
 func newTestServiceInDir(t *testing.T, dir string) (*Service, clock.Clock, *corereceipt.Signer, eventlog.Limits) {
@@ -345,4 +346,46 @@ func assertRotatedTo256(t *testing.T, dir string) {
 	if _, err := os.Stat(filepath.Join(dir, "events", fmt.Sprintf("%020d.json", 1))); !os.IsNotExist(err) {
 		t.Fatalf("record 1 after rotation: stat = %v, want not exist", err)
 	}
+}
+
+func TestStatusChangeRecordsTheLogInGit(t *testing.T) {
+	repo := t.TempDir()
+	gitIn(t, repo, "init", "--quiet")
+	dir := filepath.Join(repo, ".epitrop")
+	ctx := testContext(t)
+	svc, _, _, _ := newTestServiceInDir(t, dir)
+	svc.RecordInGit(eventlog.GitRecord{Ref: "refs/epitrop/events", AuthorName: "epitrop", AuthorEmail: "epitrop@example.invalid", Timeout: 30 * time.Second})
+	if _, err := svc.Record(ctx, unitA, RecordPayload{Status: "ready"}); err != nil {
+		t.Fatalf("Record(ready) = %v", err)
+	}
+	first := gitIn(t, repo, "rev-parse", "refs/epitrop/events")
+	if _, err := svc.Note(ctx, unitA, "tester", "no status change"); err != nil {
+		t.Fatalf("Note() = %v", err)
+	}
+	if got := gitIn(t, repo, "rev-parse", "refs/epitrop/events"); got != first {
+		t.Fatalf("a note moved the ref to %s; only a checkpoint commits", got)
+	}
+	if _, err := svc.Record(ctx, unitA, RecordPayload{Status: "claimed"}); err != nil {
+		t.Fatalf("Record(claimed) = %v", err)
+	}
+	second := gitIn(t, repo, "rev-parse", "refs/epitrop/events")
+	if parent := gitIn(t, repo, "rev-parse", second+"^"); parent != first {
+		t.Fatalf("the status change's commit follows %s, want %s", parent, first)
+	}
+	files := gitIn(t, repo, "ls-tree", "-r", "--name-only", second)
+	want := "checkpoints/units/00000000000000000001.json\ncheckpoints/units/00000000000000000003.json\n" +
+		"events/00000000000000000001.json\nevents/00000000000000000002.json\nevents/00000000000000000003.json\nevents/HEAD.json"
+	if files != want {
+		t.Fatalf("the commit holds\n%s\nwant\n%s", files, want)
+	}
+}
+
+// gitIn runs git in dir without the machine's own settings.
+func gitIn(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := gitexec.Run(testContext(t), dir, gitexec.Env(os.Environ()), nil, args...)
+	if err != nil {
+		t.Fatalf("git %v = %v", args, err)
+	}
+	return out
 }

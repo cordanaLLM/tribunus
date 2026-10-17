@@ -16,6 +16,7 @@ import (
 	"github.com/golusoris/golusoris/core/clock"
 	corereceipt "github.com/golusoris/golusoris/core/crypto/receipt"
 	"github.com/tekmora/epitrop/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/gitexec"
 	"github.com/tekmora/epitrop/internal/units"
 )
 
@@ -233,7 +234,7 @@ func readReport(t *testing.T, out string) (Report, []byte) {
 func gitFed(t *testing.T, dir string, stdin string, args ...string) string {
 	t.Helper()
 	cmd := exec.CommandContext(slotCtx(t), "git", args...)
-	cmd.Dir, cmd.Env, cmd.Stdin = dir, gitEnv(os.Environ()), strings.NewReader(stdin)
+	cmd.Dir, cmd.Env, cmd.Stdin = dir, gitexec.Env(os.Environ()), strings.NewReader(stdin)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v = %v\n%s", args, err, out)

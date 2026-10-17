@@ -96,6 +96,15 @@ func TestLoadNegativeValidation(t *testing.T) {
 		{"bad alias", `{"router": {"aliases": ["public/alias"]}}`, []string{"/router/aliases/0", "pattern"}},
 		{"bad event public key", `{"event_log": {"public_key": "xyz"}}`, []string{"/event_log/public_key", "pattern"}},
 		{"bad replay max", `{"event_log": {"max_replay_records": 1000001}}`, []string{"/event_log/max_replay_records", "maximum"}},
+		{"git ref outside refs/", `{"event_log": {"git": {"ref": "heads/events"}}}`, []string{"/event_log/git/ref", "pattern"}},
+		{"git ref with a space", `{"event_log": {"git": {"ref": "refs/epitrop/my events"}}}`, []string{"/event_log/git/ref", "pattern"}},
+		{"git author with a bracket", `{"event_log": {"git": {"author_name": "a <b>"}}}`, []string{"/event_log/git/author_name", "pattern"}},
+		{"git email with a line break", `{"event_log": {"git": {"author_email": "a@b\nc"}}}`, []string{"/event_log/git/author_email", "pattern"}},
+		{"git timeout zero", `{"event_log": {"git": {"timeout_seconds": 0}}}`, []string{"/event_log/git/timeout_seconds", "minimum"}},
+		{"git timeout above 300", `{"event_log": {"git": {"timeout_seconds": 301}}}`, []string{"/event_log/git/timeout_seconds", "maximum"}},
+		{"unknown git key", `{"event_log": {"git": {"sign": true}}}`, []string{"/event_log/git", "additional properties"}},
+		{"git enabled without author", `{"event_log": {"git": {"enabled": true, "author_email": "epitrop@example.invalid"}}}`, []string{"event_log/git", "author_name and author_email are required"}},
+		{"git enabled without email", `{"event_log": {"git": {"enabled": true, "author_name": "epitrop"}}}`, []string{"event_log/git", "author_name and author_email are required"}},
 		{"bad job restart policy", `{"jobs": [
   {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "schedule": "always", "restart": {"policy": "sometimes"}}
 ]}`, []string{"/jobs/0/restart/policy", "valid"}},
@@ -130,6 +139,20 @@ func TestLoadNegativeValidation(t *testing.T) {
 			}
 			assertErrorContains(t, err, tt.wantErr)
 		})
+	}
+}
+
+func TestLoadEventLogGit(t *testing.T) {
+	for _, seconds := range []int{1, 300} {
+		body := fmt.Sprintf(`{"event_log": {"git": {"enabled": true, "ref": "refs/epitrop/log-2.x", "author_name": "epitrop", "author_email": "epitrop@example.invalid", "timeout_seconds": %d}}}`, seconds)
+		cfg, err := Load(testContext(t), writeConfig(t, body))
+		if err != nil {
+			t.Fatalf("Load(timeout %d) = %v, want nil", seconds, err)
+		}
+		want := EventLogGitConfig{Enabled: true, Ref: "refs/epitrop/log-2.x", AuthorName: "epitrop", AuthorEmail: "epitrop@example.invalid", TimeoutSeconds: seconds}
+		if cfg.EventLog.Git != want {
+			t.Fatalf("Load() event_log.git = %+v, want %+v", cfg.EventLog.Git, want)
+		}
 	}
 }
 
@@ -256,6 +279,11 @@ func TestConfigSchemaDefaultsAgreeWithGoTypes(t *testing.T) {
 	assertSchemaDefault(t, doc, def.EventLog.PublicKey, "event_log", "public_key")
 	assertSchemaDefault(t, doc, def.EventLog.LockTimeoutSeconds, "event_log", "lock_timeout_seconds")
 	assertSchemaDefault(t, doc, def.EventLog.MaxReplayRecords, "event_log", "max_replay_records")
+	assertSchemaDefault(t, doc, def.EventLog.Git.Enabled, "event_log", "git", "enabled")
+	assertSchemaDefault(t, doc, def.EventLog.Git.Ref, "event_log", "git", "ref")
+	assertSchemaDefault(t, doc, def.EventLog.Git.AuthorName, "event_log", "git", "author_name")
+	assertSchemaDefault(t, doc, def.EventLog.Git.AuthorEmail, "event_log", "git", "author_email")
+	assertSchemaDefault(t, doc, def.EventLog.Git.TimeoutSeconds, "event_log", "git", "timeout_seconds")
 	assertSchemaDefault(t, doc, def.Router.Aliases, "router", "aliases")
 	assertSchemaDefault(t, doc, def.Jobs, "jobs")
 	assertSchemaDefault(t, doc, def.Watches, "watches")

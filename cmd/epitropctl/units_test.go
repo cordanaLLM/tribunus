@@ -18,6 +18,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/tekmora/epitrop/internal/config"
 	"github.com/tekmora/epitrop/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/gitexec"
 	"github.com/tekmora/epitrop/internal/slot"
 )
 
@@ -543,5 +544,31 @@ func checkSignerFailure(t *testing.T, tc eventLogSignerCase, gotValue bool, err 
 	}
 	if tc.wantNotExist && (!errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), keyPath)) {
 		t.Fatalf("eventLogSigner() error = %v, want os.ErrNotExist naming %s", err, keyPath)
+	}
+}
+
+func TestRunUnitsSetRecordsTheLogInGitWhenEnabled(t *testing.T) {
+	base := t.TempDir()
+	keyPath := filepath.Join(base, "seed.hex")
+	if err := os.WriteFile(keyPath, []byte(hex.EncodeToString(bytes.Repeat([]byte{7}, 32))), 0o600); err != nil {
+		t.Fatalf("WriteFile(key) = %v", err)
+	}
+	repo := filepath.Join(base, "repo")
+	env := gitexec.Env(os.Environ())
+	if _, err := gitexec.Run(testContext(t), "", env, nil, "init", "--quiet", repo); err != nil {
+		t.Fatalf("git init = %v", err)
+	}
+	cfgPath := filepath.Join(base, "config.json")
+	body := fmt.Sprintf(`{"event_log":{"dir":%s,"signing_key_path":%s,"git":{"enabled":true,"author_name":"epitrop","author_email":"epitrop@example.invalid"}}}`,
+		jsonQuote(filepath.Join(repo, ".epitrop")), jsonQuote(keyPath))
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("WriteFile(config) = %v", err)
+	}
+	if err := runUnits([]string{"set", "--config=" + cfgPath, "tekmora/epitrop#58", "--status=ready"}); err != nil {
+		t.Fatalf("runUnits set: %v", err)
+	}
+	files, err := gitexec.Run(testContext(t), repo, env, nil, "ls-tree", "-r", "--name-only", "refs/epitrop/events")
+	if err != nil || !strings.Contains(files, "events/HEAD.json") || !strings.Contains(files, "checkpoints/units/") {
+		t.Fatalf("refs/epitrop/events holds %q (%v), want the log and its checkpoint", files, err)
 	}
 }

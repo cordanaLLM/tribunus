@@ -24,6 +24,7 @@ type Service struct {
 	dir    string
 	signer *corereceipt.Signer
 	limits eventlog.Limits
+	git    *eventlog.GitRecord
 }
 
 func NewService(dir string, signer *corereceipt.Signer, clk clock.Clock, limits eventlog.Limits) (*Service, error) {
@@ -38,6 +39,12 @@ func NewService(dir string, signer *corereceipt.Signer, clk clock.Clock, limits 
 	}
 	limits.Clock = clk
 	return &Service{dir: dir, signer: signer, limits: limits}, nil
+}
+
+// RecordInGit makes every checkpoint commit the log onto g.Ref (event_log.git). Call it
+// before the service is used.
+func (s *Service) RecordInGit(g eventlog.GitRecord) {
+	s.git = &g
 }
 
 // Replay rebuilds the run record. A log directory that holds no events yet is an empty
@@ -210,6 +217,14 @@ func (s *Service) writeCheckpointSafe(ctx context.Context, span trace.Span, seq 
 	// off the append path. A failed rotation leaves the log as it was and is retried at the
 	// next checkpoint.
 	if _, err = writer.Rotate(ctx); err != nil {
+		span.RecordError(err)
+	}
+	// The same quiet point commits the log to git when event_log.git is enabled. A failed
+	// commit leaves the log and the ref as they were and is tried again at the next checkpoint.
+	if s.git == nil {
+		return
+	}
+	if _, err = writer.RecordInGit(ctx, *s.git); err != nil {
 		span.RecordError(err)
 	}
 }

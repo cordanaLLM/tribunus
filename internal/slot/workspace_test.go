@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tekmora/epitrop/internal/gitexec"
 )
 
 func slotCtx(t *testing.T) context.Context {
@@ -25,7 +27,7 @@ func gitIn(t *testing.T, dir string, args ...string) string {
 	full := append([]string{"-c", "user.name=slot test", "-c", "user.email=slot@example.invalid", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main"}, args...)
 	cmd := exec.CommandContext(slotCtx(t), "git", full...)
 	cmd.Dir = dir
-	cmd.Env = gitEnv(os.Environ())
+	cmd.Env = gitexec.Env(os.Environ())
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v = %v\n%s", args, err, out)
@@ -222,21 +224,6 @@ func TestPrepareIgnoresTheCallersGitEnvironment(t *testing.T) {
 	}
 	if head, refs := gitIn(t, other, "rev-parse", "HEAD"), gitIn(t, other, "for-each-ref"); head != otherHead || refs != otherRefs {
 		t.Errorf("the hook's repository changed: head %s, refs %q; want %s and %q", head, refs, otherHead, otherRefs)
-	}
-}
-
-func TestGitEnvDropsGitsOwnVariablesOnly(t *testing.T) {
-	got := gitEnv([]string{
-		"PATH=/usr/bin", "GIT_DIR=/elsewhere/.git", "GIT_WORK_TREE=/elsewhere", "GIT_INDEX_FILE=/elsewhere/.git/index",
-		"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=core.hooksPath", "GIT_CONFIG_VALUE_0=/elsewhere/hooks",
-		"GIT_CONFIG_GLOBAL=/elsewhere/gitconfig", "git_dir=/lower-case", "GITHUB_TOKEN=kept", "GITEA=kept", "HOME=/home/someone",
-	})
-	want := []string{
-		"PATH=/usr/bin", "GITHUB_TOKEN=kept", "GITEA=kept", "HOME=/home/someone",
-		"GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_GLOBAL=" + os.DevNull, "GIT_CONFIG_SYSTEM=" + os.DevNull, "LC_ALL=C",
-	}
-	if !slices.Equal(got, want) {
-		t.Fatalf("gitEnv() = %q, want %q", got, want)
 	}
 }
 

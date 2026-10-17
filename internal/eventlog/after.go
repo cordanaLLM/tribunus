@@ -78,3 +78,8 @@ func (r replayRun) startAtCursor(b Base, hasBase bool, c *cursor) error {
 	c.last, c.prev = r.after, hashHex(data)
 	return nil
 }
+
+// ReplayAfter is ReplayAfter on the log w appends to, with w's key and limits.
+func (w *Writer) ReplayAfter(ctx context.Context, after uint64) ([]Record, error) {
+	return ReplayAfter(ctx, w.dir, w.signer.PublicKey(), w.limits, after)
+}

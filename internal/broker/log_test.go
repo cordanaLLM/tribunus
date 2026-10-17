@@ -56,7 +56,7 @@ func (f logFixture) records(t *testing.T) []eventlog.Record {
 }
 
 func event(n int) eventlog.Event {
-	return eventlog.Event{Type: "unit.recorded", TaskID: "u1", Payload: json.RawMessage(fmt.Sprintf(`{"n":%d}`, n))}
+	return eventlog.Event{Type: topicA, TaskID: "u1", Payload: json.RawMessage(fmt.Sprintf(`{"n":%d}`, n))}
 }
 
 func TestLogPublishDeliversTheRecordTheLogHolds(t *testing.T) {
@@ -64,7 +64,7 @@ func TestLogPublishDeliversTheRecordTheLogHolds(t *testing.T) {
 	sub := subscribe(t, f.log.broker, topicA)
 	var returned []eventlog.Record
 	for n := 1; n <= 2; n++ {
-		rec, err := f.log.Publish(testContext(t), topicA, event(n))
+		rec, err := f.log.Publish(testContext(t), event(n))
 		if err != nil {
 			t.Fatalf("Publish(%d): %v", n, err)
 		}
@@ -88,10 +88,10 @@ func TestLogPublishDeliversTheRecordTheLogHolds(t *testing.T) {
 func TestLogPublishOnAFullQueueAppendsNothing(t *testing.T) {
 	f := newLog(t, 1)
 	subscribe(t, f.log.broker, topicA)
-	if _, err := f.log.Publish(testContext(t), topicA, event(1)); err != nil {
+	if _, err := f.log.Publish(testContext(t), event(1)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
-	_, err := f.log.Publish(testContext(t), topicA, event(2))
+	_, err := f.log.Publish(testContext(t), event(2))
 	if !errors.Is(err, ErrFull) || !Retryable(err) {
 		t.Fatalf("Publish on a full queue = %v, want ErrFull", err)
 	}
@@ -103,15 +103,15 @@ func TestLogPublishOnAFullQueueAppendsNothing(t *testing.T) {
 func TestLogPublishWhoseAppendFailsDeliversNothing(t *testing.T) {
 	f := newLog(t, 4)
 	sub := subscribe(t, f.log.broker, topicA)
-	big := eventlog.Event{Type: "unit.result", TaskID: "u1", Payload: json.RawMessage(`"` + strings.Repeat("a", eventlog.MaxRecordBytes) + `"`)}
-	_, err := f.log.Publish(testContext(t), topicA, big)
+	big := eventlog.Event{Type: topicA, TaskID: "u1", Payload: json.RawMessage(`"` + strings.Repeat("a", eventlog.MaxRecordBytes) + `"`)}
+	_, err := f.log.Publish(testContext(t), big)
 	if !errors.Is(err, eventlog.ErrRecordTooLarge) || Retryable(err) {
 		t.Fatalf("Publish of an oversized event = %v, want ErrRecordTooLarge, not retryable", err)
 	}
 	if got := sub.Len(); got != 0 {
 		t.Fatalf("subscriber got %d messages from a failed append, want 0", got)
 	}
-	if _, err := f.log.Publish(testContext(t), topicA, event(1)); err != nil {
+	if _, err := f.log.Publish(testContext(t), event(1)); err != nil {
 		t.Fatalf("Publish after a failed append: %v", err)
 	}
 	if rec, ok := next(t, sub).Data.(eventlog.Record); !ok || rec.Seq != 1 {
@@ -123,7 +123,7 @@ func TestLogPublishWithoutSubscribersStillAppends(t *testing.T) {
 	f := newLog(t, 1)
 	other := subscribe(t, f.log.broker, topicB)
 	for n := 1; n <= 2; n++ {
-		if _, err := f.log.Publish(testContext(t), topicA, event(n)); err != nil {
+		if _, err := f.log.Publish(testContext(t), event(n)); err != nil {
 			t.Fatalf("Publish(%d): %v", n, err)
 		}
 	}
@@ -139,7 +139,7 @@ func TestLogSubscribeIsTheBrokers(t *testing.T) {
 	f := newLog(t, 1)
 	sub, cancel := f.log.Subscribe(topicA)
 	t.Cleanup(cancel)
-	if _, err := f.log.Publish(testContext(t), topicA, event(1)); err != nil {
+	if _, err := f.log.Publish(testContext(t), event(1)); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if got := sub.Len(); got != 1 {

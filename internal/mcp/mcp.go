@@ -1,8 +1,9 @@
 // Package mcp serves the run record over the Model Context Protocol. The read-only tools
-// report the jobs' state as the supervisor reports it and the work units as the event log
-// replays them. The mutating tools start and stop jobs and record a unit's status; a
-// server has them only when its Sources carry Mutators, and each call runs at most once
-// per key through the effect ledger.
+// report the jobs' state as the supervisor reports it, the work units and the slot runs as
+// the event log replays them, and the release watches as configured and seen. The mutating
+// tools start and stop jobs and record a unit's status; a server has them only when its
+// Sources carry Mutators, and each call runs at most once per key through the effect
+// ledger.
 package mcp
 
 import (
@@ -23,8 +24,7 @@ const ServerName = "epitrop"
 // CallTimeout bounds one tool call's reads; the event log refuses a read without one.
 const CallTimeout = 30 * time.Second
 
-// Tool names. They are provisional until the names are decided; a client sees them
-// prefixed with the server's name.
+// Tool names; a client sees them prefixed with the server's name.
 const (
 	ToolJobsStatus = "jobs_status"
 	ToolUnitsList  = "units_list"
@@ -46,6 +46,8 @@ type UnitReader interface {
 type Sources struct {
 	Jobs  JobLister
 	Units UnitReader
+	// Watches, when nil, makes the release watch tools answer that the server reads none.
+	Watches WatchReader
 	// Mutate, when not nil, adds the mutating tools.
 	Mutate *Mutators
 }
@@ -66,6 +68,8 @@ func Register(s *sdkmcp.Server, src Sources) {
 	sdkmcp.AddTool(s, readOnly(ToolJobsStatus, "List the configured jobs with their state, process id, start time, restarts, sandbox and, for a job with a heartbeat, its last beat and whether it is stale. An empty name lists every job."), jobsStatus(src.Jobs))
 	sdkmcp.AddTool(s, readOnly(ToolUnitsList, "List the work units of the run record, sorted by id. A status narrows the list to units with that status."), unitsList(src.Units))
 	sdkmcp.AddTool(s, readOnly(ToolUnitStatus, "Show one work unit of the run record by id."), unitStatus(src.Units))
+	registerWatches(s, src.Watches)
+	registerRuns(s, src.Units)
 }
 
 // readOnly describes a tool that changes nothing outside the server.

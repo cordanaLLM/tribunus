@@ -80,6 +80,10 @@ epitrop-server --config=file
 - `jobs_status` lists the configured jobs as `epitropctl jobs status` does, including `stale` and `last_beat` for a job that declares `heartbeat.max_age_seconds`. On a platform without the supervisor (anything but Linux) the tool returns the reason as a tool error.
 - `units_list` lists the work units of the run record, sorted by id, optionally narrowed to one status.
 - `unit_status` shows one unit as `epitropctl units show` does, with the count of unread notes in place of the notes. Reading does not mark a note read.
+- `runs_list` lists the slot runs, one per unit whose evidence pointer names a run's start file (`started`) or report (`ended`), sorted by unit id, optionally narrowed to one phase.
+- `run_status` shows one unit's slot run: the start record while it runs, the runner's report once it has ended. A report whose digest does not match the unit's evidence pointer is refused.
+- `watches_list` lists the release watch routes of `release_watch.routes` with their sources and sink kinds.
+- `watch_status` shows one route: per source, how many releases the seen-set holds and the one seen last, and its sinks. An ntfy sink shows only its kind, since its topic is all a reader needs to read the notifications.
 
 With `server.transport: http` in the config, the server serves the same tools over streamable HTTP on `server.listen` (default `127.0.0.1:8899`) and prints the address it serves. The server has no authentication, so the config refuses a listen address whose host is not loopback, and the server refuses a request whose `Host` header names another host. Beside the tools at `/mcp` it serves:
 

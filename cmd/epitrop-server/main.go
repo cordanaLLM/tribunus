@@ -24,6 +24,7 @@ import (
 	"github.com/tekmora/epitrop/internal/egressproxy"
 	"github.com/tekmora/epitrop/internal/logsetup"
 	"github.com/tekmora/epitrop/internal/mcp"
+	"github.com/tekmora/epitrop/internal/releasewatch"
 	"github.com/tekmora/epitrop/internal/supervisor"
 )
 
@@ -172,7 +173,7 @@ func sources(cfg config.Config) (mcp.Sources, error) {
 	if err != nil {
 		return mcp.Sources{}, err
 	}
-	src := mcp.Sources{Jobs: jobs, Units: unitsSvc}
+	src := mcp.Sources{Jobs: jobs, Units: unitsSvc, Watches: releasewatch.NewWatches(cfg.ReleaseWatch)}
 	if !cfg.Server.AllowMutations {
 		return src, nil
 	}

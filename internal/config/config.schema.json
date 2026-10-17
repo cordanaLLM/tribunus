@@ -26,6 +26,9 @@
         "default": {
           "tokens": 200000,
           "wall_clock_seconds": 3600
+        },
+        "platform": {
+          "frontier_tokens": 0
         }
       },
       "additionalProperties": false,
@@ -49,6 +52,21 @@
               "default": 3600,
               "minimum": 0,
               "maximum": 86400
+            }
+          }
+        },
+        "platform": {
+          "type": "object",
+          "default": {
+            "frontier_tokens": 0
+          },
+          "additionalProperties": false,
+          "properties": {
+            "frontier_tokens": {
+              "type": "integer",
+              "default": 0,
+              "minimum": 0,
+              "maximum": 1000000000000
             }
           }
         }

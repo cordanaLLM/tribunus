@@ -95,6 +95,9 @@ func TestLoadNegativeValidation(t *testing.T) {
 		{"out of range", `{"graph": {"max_depth": 65}}`, []string{"/graph/max_depth", "maximum"}},
 		{"bad alias", `{"router": {"aliases": ["public/alias"]}}`, []string{"/router/aliases/0", "pattern"}},
 		{"bad event public key", `{"event_log": {"public_key": "xyz"}}`, []string{"/event_log/public_key", "pattern"}},
+		{"negative platform budget", `{"budgets": {"platform": {"frontier_tokens": -1}}}`, []string{"/budgets/platform/frontier_tokens", "minimum"}},
+		{"platform budget above 10^12", `{"budgets": {"platform": {"frontier_tokens": 1000000000001}}}`, []string{"/budgets/platform/frontier_tokens", "maximum"}},
+		{"unknown platform budget key", `{"budgets": {"platform": {"tokens": 5}}}`, []string{"/budgets/platform", "additional properties"}},
 		{"bad replay max", `{"event_log": {"max_replay_records": 1000001}}`, []string{"/event_log/max_replay_records", "maximum"}},
 		{"git ref outside refs/", `{"event_log": {"git": {"ref": "heads/events"}}}`, []string{"/event_log/git/ref", "pattern"}},
 		{"git ref with a space", `{"event_log": {"git": {"ref": "refs/epitrop/my events"}}}`, []string{"/event_log/git/ref", "pattern"}},
@@ -275,6 +278,7 @@ func TestConfigSchemaDefaultsAgreeWithGoTypes(t *testing.T) {
 	assertSchemaDefault(t, doc, def.Graph.MaxDepth, "graph", "max_depth")
 	assertSchemaDefault(t, doc, def.Budgets.Default.Tokens, "budgets", "default", "tokens")
 	assertSchemaDefault(t, doc, def.Budgets.Default.WallClockSeconds, "budgets", "default", "wall_clock_seconds")
+	assertSchemaDefault(t, doc, def.Budgets.Platform.FrontierTokens, "budgets", "platform", "frontier_tokens")
 	assertSchemaDefault(t, doc, def.Admission.Probe.TimeoutSeconds, "admission", "probe", "timeout_seconds")
 	assertSchemaDefault(t, doc, def.Admission.Probe.IntervalSeconds, "admission", "probe", "interval_seconds")
 	assertSchemaDefault(t, doc, def.Admission.Probe.ReadyThreshold, "admission", "probe", "ready_threshold")
@@ -489,7 +493,7 @@ func normalizeSchemaValue(v any) any {
 // TestLoadPartialFileKeepsSiblingDefaults: a file that sets one key of a
 // section keeps the schema defaults of every key it leaves out.
 func TestLoadPartialFileKeepsSiblingDefaults(t *testing.T) {
-	cfg, err := Load(testContext(t), writeConfig(t, `{"graph":{"max_depth":5},"admission":{"probe":{"timeout_seconds":9}},"budgets":{"default":{"tokens":7}}}`+"\n"))
+	cfg, err := Load(testContext(t), writeConfig(t, `{"graph":{"max_depth":5},"admission":{"probe":{"timeout_seconds":9}},"budgets":{"default":{"tokens":7},"platform":{"frontier_tokens":1000000000000}}}`+"\n"))
 	if err != nil {
 		t.Fatalf("Load() = %v, want nil", err)
 	}
@@ -497,6 +501,7 @@ func TestLoadPartialFileKeepsSiblingDefaults(t *testing.T) {
 	want.Graph.MaxDepth = 5
 	want.Admission.Probe.TimeoutSeconds = 9
 	want.Budgets.Default.Tokens = 7
+	want.Budgets.Platform.FrontierTokens = 1000000000000
 	if !reflect.DeepEqual(cfg, want) {
 		t.Fatalf("Load() = %+v, want %+v", cfg, want)
 	}

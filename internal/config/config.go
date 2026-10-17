@@ -154,7 +154,14 @@ type GraphConfig struct {
 }
 
 type BudgetsConfig struct {
-	Default TaskBudget `koanf:"default" json:"default"`
+	Default  TaskBudget     `koanf:"default" json:"default"`
+	Platform PlatformBudget `koanf:"platform" json:"platform"`
+}
+
+// PlatformBudget is the platform budget layer (#6): what the whole platform may
+// spend, read against the Praetor efficiency ledger. 0 turns the check off.
+type PlatformBudget struct {
+	FrontierTokens int `koanf:"frontier_tokens" json:"frontier_tokens"`
 }
 
 type TaskBudget struct {

@@ -4,6 +4,11 @@ budgets:
   default:
     tokens: 200000
     wall_clock_seconds: 3600
+  # Frontier tokens the whole platform may spend, read against the Praetor efficiency ledger.
+  # A task whose declared tokens exceed what the ledger leaves is refused before it starts, and
+  # so is every task while the ledger has not measured the spend. 0 turns the check off.
+  platform:
+    frontier_tokens: 0
 # Every sandboxed job's workspace and inputs must lie in one of these directories once
 # symlinks are resolved; with none, no job runs sandboxed. A directory containing HOME is
 # refused, and a login location below HOME (.ssh, .config/gh, a coding client's folder and

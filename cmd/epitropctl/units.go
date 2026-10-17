@@ -11,22 +11,57 @@ import (
 	"strings"
 	"time"
 
+	corereceipt "github.com/golusoris/golusoris/core/crypto/receipt"
 	"github.com/jonboulle/clockwork"
 	"github.com/tekmora/epitrop/internal/config"
+	"github.com/tekmora/epitrop/internal/effects"
 	"github.com/tekmora/epitrop/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/graphlog"
 	"github.com/tekmora/epitrop/internal/slot"
+	"github.com/tekmora/epitrop/internal/supervisor"
 	"github.com/tekmora/epitrop/internal/units"
 )
 
+const eventLogOpenTimeout = 30 * time.Second
+
 var newUnitsService = func(cfg config.Config) (*units.Service, error) {
-	clk := clockwork.NewRealClock()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	signer, err := eventlog.NewSignerFromKeyFile(ctx, cfg.EventLog.SigningKeyPath, cfg.EventLog.Dir, clk)
+	signer, clk, err := eventLogSigner(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return units.NewService(cfg.EventLog.Dir, signer, clk, eventLogLimits(cfg, clk))
+	svc, err := units.NewService(cfg.EventLog.Dir, signer, clk, eventLogLimits(cfg, clk))
+	if err != nil {
+		return nil, err
+	}
+	if g := cfg.EventLog.Git; g.Enabled {
+		svc.RecordInGit(eventlog.GitRecord{
+			Ref: g.Ref, AuthorName: g.AuthorName, AuthorEmail: g.AuthorEmail,
+			Timeout: time.Duration(g.TimeoutSeconds) * time.Second,
+		})
+		if g.Compact {
+			svc.CompactWith(logFolds(cfg))
+		}
+	}
+	return svc, nil
+}
+
+// logFolds names every reader of the shared event log, so that a compacted log's base holds
+// the state each one replays from.
+func logFolds(cfg config.Config) []eventlog.Fold {
+	return []eventlog.Fold{effects.Fold(), graphlog.Fold(), supervisor.Fold(cfg.Jobs), units.Fold()}
+}
+
+// eventLogSigner opens the signing key for the event log with a bounded context and
+// returns the signer and the clock used to initialize it.
+func eventLogSigner(cfg config.Config) (*corereceipt.Signer, clockwork.Clock, error) {
+	clk := clockwork.NewRealClock()
+	ctx, cancel := context.WithTimeout(context.Background(), eventLogOpenTimeout)
+	defer cancel()
+	signer, err := eventlog.NewSignerFromKeyFile(ctx, cfg.EventLog.SigningKeyPath, cfg.EventLog.Dir, clk)
+	if err != nil {
+		return nil, nil, fmt.Errorf("epitropctl: event-log signer %s: %w", cfg.EventLog.SigningKeyPath, err)
+	}
+	return signer, clk, nil
 }
 
 // eventLogLimits are the limits a command reads and writes the event log under: the

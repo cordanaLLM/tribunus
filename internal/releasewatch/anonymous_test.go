@@ -25,16 +25,19 @@ func TestAnonymousSinkSearchFailsWithMissingToken(t *testing.T) {
 	}
 }
 
-func testAnonymousSinkSearchMissingTokenForStatus(t *testing.T, status int) {
+func testDeliverIssue(t *testing.T, handler http.HandlerFunc, token string) (*State, bool, error) {
 	t.Helper()
-	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(status)
-	}))
-	defer gh.Close()
+	gh := httptest.NewServer(handler)
+	t.Cleanup(gh.Close)
 
 	client, err := NewClient(ClientOptions{
 		GitHubBase: gh.URL,
-		LookupEnv:  func(string) (string, bool) { return "", false },
+		LookupEnv: func(k string) (string, bool) {
+			if token != "" && k == "GITHUB_TOKEN" {
+				return token, true
+			}
+			return "", false
+		},
 	})
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
@@ -46,7 +49,15 @@ func testAnonymousSinkSearchMissingTokenForStatus(t *testing.T, status int) {
 	sink := &config.GitHubIssueSink{Repo: "owner/consumer"}
 	item := ReleaseItem{ID: "github:owner/upstream@v1.0.0"}
 
-	_, err = DeliverGitHubIssue(context.Background(), client, state, sink, item)
+	filed, deliverErr := DeliverGitHubIssue(context.Background(), client, state, sink, item)
+	return state, filed, deliverErr
+}
+
+func testAnonymousSinkSearchMissingTokenForStatus(t *testing.T, status int) {
+	t.Helper()
+	_, _, err := testDeliverIssue(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+	}, "")
 	if err == nil {
 		t.Fatal("DeliverGitHubIssue = nil error, want ErrMissingToken")
 	}
@@ -62,31 +73,9 @@ func testAnonymousSinkSearchMissingTokenForStatus(t *testing.T, status int) {
 // TestTokenPresentSinkSearch404NotMissingToken (T2): token present, search 404
 // returns plain search error, NOT ErrMissingToken.
 func TestTokenPresentSinkSearch404NotMissingToken(t *testing.T) {
-	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	_, _, err := testDeliverIssue(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer gh.Close()
-
-	client, err := NewClient(ClientOptions{
-		GitHubBase: gh.URL,
-		LookupEnv: func(k string) (string, bool) {
-			if k == "GITHUB_TOKEN" {
-				return "test-token", true
-			}
-			return "", false
-		},
-	})
-	if err != nil {
-		t.Fatalf("NewClient: %v", err)
-	}
-	state, err := LoadState(t.TempDir())
-	if err != nil {
-		t.Fatalf("LoadState: %v", err)
-	}
-	sink := &config.GitHubIssueSink{Repo: "owner/consumer"}
-	item := ReleaseItem{ID: "github:owner/upstream@v1.0.0"}
-
-	_, err = DeliverGitHubIssue(context.Background(), client, state, sink, item)
+	}, "test-token")
 	if err == nil {
 		t.Fatal("DeliverGitHubIssue = nil error, want 404 error")
 	}
@@ -102,26 +91,9 @@ func TestTokenPresentSinkSearch404NotMissingToken(t *testing.T) {
 // TestAnonymousSinkSearch500NotMissingToken (T3 boundary 1): HTTP 500 without token
 // returns plain search error, NOT ErrMissingToken.
 func TestAnonymousSinkSearch500NotMissingToken(t *testing.T) {
-	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	_, _, err := testDeliverIssue(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer gh.Close()
-
-	client, err := NewClient(ClientOptions{
-		GitHubBase: gh.URL,
-		LookupEnv:  func(string) (string, bool) { return "", false },
-	})
-	if err != nil {
-		t.Fatalf("NewClient: %v", err)
-	}
-	state, err := LoadState(t.TempDir())
-	if err != nil {
-		t.Fatalf("LoadState: %v", err)
-	}
-	sink := &config.GitHubIssueSink{Repo: "owner/consumer"}
-	item := ReleaseItem{ID: "github:owner/upstream@v1.0.0"}
-
-	_, err = DeliverGitHubIssue(context.Background(), client, state, sink, item)
+	}, "")
 	if err == nil {
 		t.Fatal("DeliverGitHubIssue = nil error, want 500 error")
 	}
@@ -138,34 +110,17 @@ func TestAnonymousSinkSearch500NotMissingToken(t *testing.T) {
 // marks item seen without filing and returns nil error even without token.
 func TestAnonymousSinkSearchMarkerFoundMarksSeen(t *testing.T) {
 	marker := issueMarker("github:owner/upstream@v1.0.0")
-	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	state, filed, err := testDeliverIssue(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		testWrite(w, fmt.Sprintf(`[{"number":1,"body":%q}]`, "Existing issue\n\n"+marker))
-	}))
-	defer gh.Close()
-
-	client, err := NewClient(ClientOptions{
-		GitHubBase: gh.URL,
-		LookupEnv:  func(string) (string, bool) { return "", false },
-	})
-	if err != nil {
-		t.Fatalf("NewClient: %v", err)
-	}
-	state, err := LoadState(t.TempDir())
-	if err != nil {
-		t.Fatalf("LoadState: %v", err)
-	}
-	sink := &config.GitHubIssueSink{Repo: "owner/consumer"}
-	item := ReleaseItem{ID: "github:owner/upstream@v1.0.0"}
-
-	filed, err := DeliverGitHubIssue(context.Background(), client, state, sink, item)
+	}, "")
 	if err != nil {
 		t.Fatalf("DeliverGitHubIssue = %v, want nil", err)
 	}
 	if filed {
 		t.Fatal("filed = true, want false for already filed issue")
 	}
-	if !state.Has(item.ID) {
+	if !state.Has("github:owner/upstream@v1.0.0") {
 		t.Fatal("item was not marked seen")
 	}
 }

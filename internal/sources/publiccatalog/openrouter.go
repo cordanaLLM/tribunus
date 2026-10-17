@@ -89,12 +89,6 @@ type openRouterResult struct {
 	FirstReject string
 }
 
-// fetchOpenRouter fetches and parses the OpenRouter public models list.
-func fetchOpenRouter(ctx context.Context, url string) ([]catalog.Record, error) {
-	res, err := fetchOpenRouterWithReport(ctx, url)
-	return res.Records, err
-}
-
 func fetchOpenRouterWithReport(ctx context.Context, url string) (openRouterResult, error) {
 	body, err := httpfetch.Get(ctx, url, requestTimeout, maxResponseBytes)
 	if err != nil {

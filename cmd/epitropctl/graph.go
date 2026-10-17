@@ -8,9 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"time"
 
-	"github.com/jonboulle/clockwork"
 	"github.com/tekmora/epitrop/internal/config"
 	"github.com/tekmora/epitrop/internal/eventlog"
 	"github.com/tekmora/epitrop/internal/graph"
@@ -18,10 +16,7 @@ import (
 )
 
 var newGraphService = func(cfg config.Config) (*graphlog.Service, error) {
-	clk := clockwork.NewRealClock()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	signer, err := eventlog.NewSignerFromKeyFile(ctx, cfg.EventLog.SigningKeyPath, cfg.EventLog.Dir, clk)
+	signer, clk, err := eventLogSigner(cfg)
 	if err != nil {
 		return nil, err
 	}

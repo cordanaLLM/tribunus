@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -173,8 +175,12 @@ func slowSync(t *testing.T, d time.Duration) {
 }
 
 // appendConcurrently starts total writers at once, one record each, and returns their results.
+// The writers' context outlasts limits.LockTimeout: a cancelled context ends the lock wait
+// too, so a shorter one would cut every queue at its own deadline instead.
 func appendConcurrently(t testing.TB, dir string, signer *corereceipt.Signer, limits Limits, total int) []error {
 	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), limits.LockTimeout+10*time.Second)
+	defer cancel()
 	var wg sync.WaitGroup
 	errs := make(chan error, total)
 	for i := 0; i < total; i++ {
@@ -182,7 +188,7 @@ func appendConcurrently(t testing.TB, dir string, signer *corereceipt.Signer, li
 		go func(id int) {
 			defer wg.Done()
 			ev := Event{Type: "task.created", TaskID: "task-" + jsonInt(id), Payload: raw(`{"state":"open"}`)}
-			_, err := openWriter(t, dir, signer, limits).Append(testContext(t), ev)
+			_, err := openWriter(t, dir, signer, limits).Append(ctx, ev)
 			errs <- err
 		}(i)
 	}
@@ -289,6 +295,32 @@ func TestQueuedAppendersFailClosedWhenTheLockTimeoutIsShorterThanTheQueue(t *tes
 	requireContiguous(t, dir, total-timedOut)
 }
 
+// Sixteen queued writers on a real disk under load must all commit without timing out or
+// leaving gaps, and the test logs what an append cost (#83, #146). Under the workflow's
+// load sixteen appends have taken up to 15 s, past the default timeout, so the test waits as
+// the docs advise for a slow disk: with a timeout that only ends a failing run. The test
+// is gated by EPITROP_EVENTLOG_LOAD_TEST=1 because it needs real filesystem syncs under
+// write load; the eventlog-load.yml workflow runs it against a btrfs mount under stress-ng.
+func TestQueuedAppendersUnderLoad(t *testing.T) {
+	if os.Getenv("EPITROP_EVENTLOG_LOAD_TEST") != "1" {
+		t.Skip("real disk under load, run by workflow eventlog-load.yml")
+	}
+	const lockTimeout = 60 * time.Second
+	dir, signer, limits := testLog(t)
+	limits.LockTimeout = lockTimeout
+	const total = 16
+	start := time.Now()
+	errs := appendConcurrently(t, dir, signer, limits, total)
+	elapsed := time.Since(start)
+	t.Logf("%d queued appends took %s, %s an append", total, elapsed.Round(time.Millisecond), (elapsed / total).Round(time.Millisecond))
+	for i := 0; i < len(errs); i++ {
+		if errs[i] != nil {
+			t.Fatalf("queued Append() = %v, want nil", errs[i])
+		}
+	}
+	requireContiguous(t, dir, total)
+}
+
 // An append costs four syncs: the record's file and its directory, then HEAD's file and the
 // directory again. The cost of queued writers in the docs is counted from this number, and
 // the slow-disk tests slow down exactly these calls.
@@ -333,11 +365,30 @@ func TestKeyInRepoTreeRefused(t *testing.T) {
 }
 
 func TestKeyMode0644Refused(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Go reports 0666 for every writable file on Windows; the mode check does not run there")
+	}
 	base := t.TempDir()
 	keyPath := filepath.Join(base, "seed.hex")
 	writeKey(t, keyPath, 0o644)
-	_, err := NewSignerFromKeyFile(testContext(t), keyPath, filepath.Join("/var/tmp", "epitrop-eventlog-test"), testLimits().Clock)
+	_, err := NewSignerFromKeyFile(testContext(t), keyPath, filepath.Join(t.TempDir(), "epitrop-eventlog-test"), testLimits().Clock)
 	assertErrContains(t, err, "group or other")
+}
+
+func TestKeyModeWindowsAccepts0666(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-specific test: windows reports 0666 for all files")
+	}
+	base := t.TempDir()
+	keyPath := filepath.Join(base, "seed.hex")
+	writeKey(t, keyPath, 0o666)
+	signer, err := NewSignerFromKeyFile(testContext(t), keyPath, filepath.Join(base, "eventlog"), testLimits().Clock)
+	if err != nil {
+		t.Fatalf("NewSignerFromKeyFile() = %v, want nil on windows", err)
+	}
+	if signer == nil {
+		t.Fatal("signer is nil, want non-nil")
+	}
 }
 
 func TestMaxReplayRecordsExceeded(t *testing.T) {
@@ -611,12 +662,111 @@ func TestTransientReplayErrorRecognizesHeadFailures(t *testing.T) {
 	if transientReplayError(errors.New("eventlog: seq 2: signature does not verify")) {
 		t.Fatal("transientReplayError(bad signature) = true, want false: only a HEAD race is worth a retry")
 	}
+	// Errno 32 is ERROR_SHARING_VIOLATION on Windows, where an append's rename causes it;
+	// elsewhere it is another error and no reason to retry.
+	busy := fmt.Errorf("eventlog: read HEAD.json: %w", &os.PathError{Op: "open", Path: "HEAD.json", Err: syscall.Errno(32)})
+	if got, want := transientReplayError(busy), runtime.GOOS == "windows"; got != want {
+		t.Fatalf("transientReplayError(errno 32 on %s) = %t, want %t", runtime.GOOS, got, want)
+	}
+}
+
+var errStableTransient = errors.New("eventlog: missing HEAD with last seq 1")
+
+// transientTwice fails transiently twice, then returns 7, and counts its calls.
+func transientTwice(calls *int) func() (int, error) {
+	return func() (int, error) {
+		*calls++
+		if *calls < 3 {
+			return 0, errStableTransient
+		}
+		return 7, nil
+	}
+}
+
+func TestRetryStableTriesUntilTheErrorIsNotTransient(t *testing.T) {
+	calls := 0
+	if got, err := retryStable(testContext(t), time.Second, transientTwice(&calls)); got != 7 || err != nil || calls != 3 {
+		t.Fatalf("retryStable(transient twice) = %d, %v after %d calls, want 7, nil after 3", got, err, calls)
+	}
+	calls = 0
+	if _, err := retryStable(testContext(t), 0, transientTwice(&calls)); !errors.Is(err, errStableTransient) || calls != 1 {
+		t.Fatalf("retryStable(budget 0) = %v after %d calls, want the transient error after 1", err, calls)
+	}
+	ctx, cancel := context.WithCancel(testContext(t))
+	cancel()
+	calls = 0
+	if _, err := retryStable(ctx, time.Second, transientTwice(&calls)); !errors.Is(err, context.Canceled) || calls != 0 {
+		t.Fatalf("retryStable(ended context) = %v after %d calls, want context.Canceled after 0", err, calls)
+	}
+}
+
+// TestRetryStableReturnsTheOperationsOwnError: callers see op's error as op returned it,
+// never core/retry's wrapping of it.
+func TestRetryStableReturnsTheOperationsOwnError(t *testing.T) {
+	permanent := errors.New("eventlog: seq 2: signature does not verify")
+	calls := 0
+	_, err := retryStable(testContext(t), time.Second, func() (int, error) { calls++; return 0, permanent })
+	if err == nil || err.Error() != permanent.Error() || calls != 1 {
+		t.Fatalf("retryStable(permanent) = %v after %d calls, want %q after 1", err, calls, permanent)
+	}
+	_, err = retryStable(testContext(t), 30*time.Millisecond, func() (int, error) { return 0, errStableTransient })
+	if err == nil || err.Error() != errStableTransient.Error() {
+		t.Fatalf("retryStable(transient past the budget) = %v, want %q", err, errStableTransient)
+	}
+}
+
+func TestStableAttemptsCoverTheBudget(t *testing.T) {
+	tests := []struct {
+		budget time.Duration
+		want   int
+	}{
+		{-time.Second, 1},
+		{0, 1},
+		{lockRetryDelay - 1, 2},
+		{lockRetryDelay, 3},
+		{time.Second, 102},
+	}
+	for i := 0; i < len(tests); i++ {
+		if got := stableAttempts(tests[i].budget); got != tests[i].want {
+			t.Fatalf("stableAttempts(%v) = %d, want %d", tests[i].budget, got, tests[i].want)
+		}
+	}
+}
+
+func TestStableBudgetIsTheLockTimeout(t *testing.T) {
+	if got := stableBudget(Limits{}); got != defaultLockTimeout {
+		t.Fatalf("stableBudget(no lock timeout) = %v, want the default %v", got, defaultLockTimeout)
+	}
+	if got := stableBudget(Limits{LockTimeout: 2 * time.Second}); got != 2*time.Second {
+		t.Fatalf("stableBudget(lock timeout 2s) = %v, want 2s", got)
+	}
+}
+
+// TestReplayStableWaitsOutASlowAppend: an append under write load takes about 0.9 s
+// (docs/architecture-v2.md, lock timeout), so a replay waits for HEAD as long as a writer
+// waits for the lock, not a fixed second.
+func TestReplayStableWaitsOutASlowAppend(t *testing.T) {
+	st, err := replayStableWithHeadBackAfter(t, 1500*time.Millisecond, 3*time.Second)
+	if err != nil || len(st.Tasks) != 1 {
+		t.Fatalf("ReplayStable(HEAD restored after 1.5s, lock timeout 3s) = %d tasks, %v, want 1, nil", len(st.Tasks), err)
+	}
 }
 
 // TestReplayStableWaitsOutAnAppendInFlight: a replay that lands between an append's record
 // and its HEAD write succeeds once HEAD is there.
 func TestReplayStableWaitsOutAnAppendInFlight(t *testing.T) {
+	st, err := replayStableWithHeadBackAfter(t, 60*time.Millisecond, defaultLockTimeout)
+	if err != nil || len(st.Tasks) != 1 {
+		t.Fatalf("ReplayStable(HEAD restored after 60ms) = %d tasks, %v, want 1, nil", len(st.Tasks), err)
+	}
+}
+
+// replayStableWithHeadBackAfter removes HEAD after one append, restores it after delay the
+// way an append writes it, and returns what ReplayStable saw meanwhile with lockTimeout.
+func replayStableWithHeadBackAfter(t *testing.T, delay, lockTimeout time.Duration) (State, error) {
+	t.Helper()
 	dir, signer, limits := testLog(t)
+	limits.LockTimeout = lockTimeout
 	appendEvent(t, dir, signer, limits, Event{Type: "task.created", TaskID: "task-1", Payload: raw(`{"state":"open"}`)})
 	head := filepath.Join(dir, "events", "HEAD.json")
 	body, err := os.ReadFile(head)
@@ -631,7 +781,7 @@ func TestReplayStableWaitsOutAnAppendInFlight(t *testing.T) {
 	}
 	restored := make(chan error, 1)
 	go func() {
-		time.Sleep(60 * time.Millisecond)
+		time.Sleep(delay)
 		// An append replaces HEAD atomically; os.WriteFile would show the replay an empty file.
 		restored <- atomicReplace(filepath.Dir(head), filepath.Base(head), body, 0o600)
 	}()
@@ -639,9 +789,7 @@ func TestReplayStableWaitsOutAnAppendInFlight(t *testing.T) {
 	if writeErr := <-restored; writeErr != nil {
 		t.Fatalf("restore HEAD = %v, want nil", writeErr)
 	}
-	if err != nil || len(st.Tasks) != 1 {
-		t.Fatalf("ReplayStable(HEAD restored after 60ms) = %d tasks, %v, want 1, nil", len(st.Tasks), err)
-	}
+	return st, err
 }
 
 func TestReplayStableBoundsItsRetriesAndSkipsThemForOtherErrors(t *testing.T) {
@@ -754,53 +902,6 @@ func TestAtomicReplaceCleanupOnFailure(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("found %d entries in dir, want 0", len(entries))
-	}
-}
-
-func TestCloseWithCauseAndRemoveTemp(t *testing.T) {
-	t.Run("closeWithCause closes file and returns cause", testCloseWithCauseClosesFileAndReturnsCause)
-	t.Run("closeWithCause joins close error on already closed file", testCloseWithCauseJoinsCloseError)
-	t.Run("removeTemp ignores missing temp file", testRemoveTempIgnoresMissing)
-}
-
-func testCloseWithCauseClosesFileAndReturnsCause(t *testing.T) {
-	t.Helper()
-	f, err := os.CreateTemp(t.TempDir(), "tmp-*")
-	if err != nil {
-		t.Fatalf("CreateTemp: %v", err)
-	}
-	cause := errors.New("initial-cause")
-	gotErr := closeWithCause(f, cause)
-	if !errors.Is(gotErr, cause) {
-		t.Fatalf("closeWithCause() = %v, want cause %v", gotErr, cause)
-	}
-	if err = f.Close(); err == nil {
-		t.Fatal("second Close() = nil, want error on already closed file")
-	}
-}
-
-func testCloseWithCauseJoinsCloseError(t *testing.T) {
-	t.Helper()
-	f, err := os.CreateTemp(t.TempDir(), "tmp-*")
-	if err != nil {
-		t.Fatalf("CreateTemp: %v", err)
-	}
-	if err = f.Close(); err != nil {
-		t.Fatalf("first Close: %v", err)
-	}
-	cause := errors.New("cause-err")
-	gotErr := closeWithCause(f, cause)
-	if !errors.Is(gotErr, cause) || !strings.Contains(gotErr.Error(), "eventlog: close") {
-		t.Fatalf("closeWithCause() = %v, want joined close error", gotErr)
-	}
-}
-
-func testRemoveTempIgnoresMissing(t *testing.T) {
-	t.Helper()
-	cause := errors.New("my-cause")
-	gotErr := removeTemp(filepath.Join(t.TempDir(), "nonexistent"), cause)
-	if !errors.Is(gotErr, cause) || gotErr.Error() != cause.Error() {
-		t.Fatalf("removeTemp() = %v, want the cause alone: %v", gotErr, cause)
 	}
 }
 

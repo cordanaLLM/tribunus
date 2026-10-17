@@ -45,7 +45,6 @@ const (
 	DefaultPerSourceCap     = 3
 	DefaultNtfyPriority     = 3
 	maxConfigKeyDepth       = 8
-	disabledEnvPrefix       = "\x00EPITROP_CONFIG_ENV_DISABLED_"
 	schemaResourceID        = "config.schema.json"
 	defaultGraphDepth       = 12
 	defaultTokens           = 200000
@@ -57,6 +56,8 @@ const (
 	defaultEventLogDir      = ".epitrop"
 	defaultLockSeconds      = 5
 	defaultReplayMax        = 100000
+	defaultEventLogRef      = "refs/epitrop/events"
+	defaultGitSeconds       = 30
 	defaultJobSchedule      = "always"
 	defaultRestart          = "never"
 	defaultStopSignal       = "TERM"
@@ -237,6 +238,23 @@ type EventLogConfig struct {
 	PublicKey          string `koanf:"public_key" json:"public_key"`
 	LockTimeoutSeconds int    `koanf:"lock_timeout_seconds" json:"lock_timeout_seconds"`
 	MaxReplayRecords   int    `koanf:"max_replay_records" json:"max_replay_records"`
+	// Git commits the log at checkpoints; see EventLogGitConfig.
+	Git EventLogGitConfig `koanf:"git" json:"git"`
+}
+
+// EventLogGitConfig makes the control plane commit the log's events/ and checkpoints/ to the
+// git repository the log directory lies in, at every checkpoint, onto Ref and as its own
+// author. Nothing checks Ref out; the operator's index, working tree and branch stay as
+// they are.
+type EventLogGitConfig struct {
+	Enabled        bool   `koanf:"enabled" json:"enabled"`
+	Ref            string `koanf:"ref" json:"ref"`
+	AuthorName     string `koanf:"author_name" json:"author_name"`
+	AuthorEmail    string `koanf:"author_email" json:"author_email"`
+	TimeoutSeconds int    `koanf:"timeout_seconds" json:"timeout_seconds"`
+	// Compact moves the log's base forward after each commit and removes the segments the
+	// commit holds; see eventlog.Writer.Compact. It needs Enabled.
+	Compact bool `koanf:"compact" json:"compact"`
 }
 
 // SchemaJSON returns the embedded JSON Schema document used by Load.
@@ -266,6 +284,7 @@ func Default() Config {
 			PublicKey:          "",
 			LockTimeoutSeconds: defaultLockSeconds,
 			MaxReplayRecords:   defaultReplayMax,
+			Git:                EventLogGitConfig{Ref: defaultEventLogRef, TimeoutSeconds: defaultGitSeconds},
 		},
 		ReleaseWatch: ReleaseWatchConfig{
 			StateDir:         "",
@@ -294,11 +313,10 @@ func Load(ctx context.Context, path string) (Config, error) {
 		Delimiter: ".",
 		Files:     []string{path},
 		Watch:     false,
-		// core/config has no switch for its environment layer, and environment
-		// values arrive as strings the schema would refuse or the weak decoder
-		// would coerce. A prefix that starts with NUL matches no variable name,
-		// so only the file is read (TestLoadDisablesEnvironmentOverrides).
-		EnvPrefix: disabledEnvPrefix,
+		// Environment values arrive as strings the schema would refuse or the
+		// weak decoder would coerce, so only the file is read
+		// (TestLoadDisablesEnvironmentOverrides).
+		DisableEnv: true,
 	})
 	if err != nil {
 		return Config{}, fmt.Errorf("config: load %s: %w", path, err)
@@ -335,6 +353,9 @@ func validateLoaded(cfg *Config, path string) error {
 	if err := validateReleaseWatch(cfg); err != nil {
 		return err
 	}
+	if err := validateEventLogGit(cfg.EventLog.Git); err != nil {
+		return err
+	}
 	return validateJobSandboxes(cfg, path)
 }
 
@@ -351,7 +372,7 @@ func ReadDocument(ctx context.Context, path string) (map[string]any, error) {
 	if _, err := os.Stat(path); err != nil {
 		return nil, fmt.Errorf("config: stat %s: %w", path, err)
 	}
-	loaded, err := coreconfig.New(coreconfig.Options{Delimiter: ".", Files: []string{path}, Watch: false, EnvPrefix: disabledEnvPrefix})
+	loaded, err := coreconfig.New(coreconfig.Options{Delimiter: ".", Files: []string{path}, Watch: false, DisableEnv: true})
 	if err != nil {
 		return nil, fmt.Errorf("config: load %s: %w", path, err)
 	}
@@ -999,6 +1020,17 @@ func applyReleaseWatchDefaults(rw *ReleaseWatchConfig) {
 			}
 		}
 	}
+}
+
+// validateEventLogGit checks what the schema cannot: an enabled commit needs its author.
+func validateEventLogGit(g EventLogGitConfig) error {
+	if g.Enabled && (strings.TrimSpace(g.AuthorName) == "" || strings.TrimSpace(g.AuthorEmail) == "") {
+		return errors.New("config: event_log/git: author_name and author_email are required when enabled")
+	}
+	if g.Compact && !g.Enabled {
+		return errors.New("config: event_log/git: compact needs enabled: a segment leaves events/ only once a commit holds it")
+	}
+	return nil
 }
 
 func validateReleaseWatch(cfg *Config) error {

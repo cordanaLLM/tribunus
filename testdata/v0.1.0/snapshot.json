@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-16T13:15:11.267101412Z",
+  "records": [
+    {
+      "model_id": "fixture-model:7b",
+      "provider": "ollama",
+      "access_path": "local",
+      "capabilities": [
+        "params:7B",
+        "quant:q4_k_m",
+        "loaded"
+      ],
+      "provenance": {
+        "source": "ollama-local",
+        "fetched_at": "2026-10-16T13:15:11.267740164Z",
+        "kind": "measured"
+      },
+      "absent": {
+        "context_window": "local daemon did not report a positive context_length",
+        "limits": "local daemon reports no rpm/tpm/daily caps",
+        "price_in_per_m": "local inference, no metered price",
+        "price_out_per_m": "local inference, no metered price"
+      }
+    }
+  ],
+  "source_runs": [
+    {
+      "source": "ollama-local",
+      "status": "ok",
+      "count": 1
+    }
+  ]
+}

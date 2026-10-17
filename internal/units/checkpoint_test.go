@@ -19,6 +19,7 @@ import (
 	"github.com/golusoris/golusoris/core/clock"
 	corereceipt "github.com/golusoris/golusoris/core/crypto/receipt"
 	"github.com/tekmora/epitrop/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/gitexec"
 )
 
 func newTestServiceInDir(t *testing.T, dir string) (*Service, clock.Clock, *corereceipt.Signer, eventlog.Limits) {
@@ -288,4 +289,183 @@ func TestDivergenceLoggedOnceWhenTwoReplaysSeeIt(t *testing.T) {
 	if got := readHeadSeq(t, filepath.Join(fix.dirA, "events")); got != 2 {
 		t.Fatalf("head seq = %d, want 2: one log.diverged record", got)
 	}
+}
+
+func TestStatusChangeRotatesClosedRanges(t *testing.T) {
+	dir := t.TempDir()
+	ctx := testContext(t)
+	svc, _, signer, limits := newTestServiceInDir(t, dir)
+	fillTo259(t, svc)
+	before, err := eventlog.Replay(ctx, dir, signer.PublicKey(), limits, UnitReducer)
+	if err != nil {
+		t.Fatalf("Replay() before rotation = %v", err)
+	}
+	if _, err = svc.Record(ctx, unitA, RecordPayload{Status: "claimed"}); err != nil {
+		t.Fatalf("Record(claimed) = %v", err)
+	}
+	assertRotatedTo256(t, dir)
+	after, err := eventlog.Replay(ctx, dir, signer.PublicKey(), limits, UnitReducer)
+	if err != nil {
+		t.Fatalf("Replay() after rotation = %v", err)
+	}
+	if len(after.Units[unitA].Notes) != len(before.Units[unitA].Notes) || after.Units[unitA].Status != "claimed" {
+		t.Fatalf("after rotation unit = %d notes, status %q", len(after.Units[unitA].Notes), after.Units[unitA].Status)
+	}
+	_, use, err := svc.ReplayCheckpointed(ctx)
+	if err != nil || use.Seq != 260 {
+		t.Fatalf("ReplayCheckpointed() = seq %d, %v; want seq 260", use.Seq, err)
+	}
+}
+
+// fillTo259 records unitA as ready, then two rounds of 128 notes and the inbox read that
+// marks them: records 1 to 259, with no status change after the first.
+func fillTo259(t *testing.T, svc *Service) {
+	t.Helper()
+	ctx := testContext(t)
+	if _, err := svc.Record(ctx, unitA, RecordPayload{Status: "ready"}); err != nil {
+		t.Fatalf("Record(ready) = %v", err)
+	}
+	for round := 0; round < 2; round++ {
+		for i := 0; i < 128; i++ {
+			if _, err := svc.Note(ctx, unitA, "tester", fmt.Sprintf("note %d.%d", round, i)); err != nil {
+				t.Fatalf("Note(%d.%d) = %v", round, i, err)
+			}
+		}
+		if _, err := svc.Inbox(ctx, unitA); err != nil {
+			t.Fatalf("Inbox(round %d) = %v", round, err)
+		}
+	}
+}
+
+func assertRotatedTo256(t *testing.T, dir string) {
+	t.Helper()
+	segment := filepath.Join(dir, "events", "segments", fmt.Sprintf("%020d-%020d.jsonl", 1, 256))
+	if _, err := os.Stat(segment); err != nil {
+		t.Fatalf("segment after status change: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "events", fmt.Sprintf("%020d.json", 1))); !os.IsNotExist(err) {
+		t.Fatalf("record 1 after rotation: stat = %v, want not exist", err)
+	}
+}
+
+func TestStatusChangeRecordsTheLogInGit(t *testing.T) {
+	repo := t.TempDir()
+	gitIn(t, repo, "init", "--quiet")
+	dir := filepath.Join(repo, ".epitrop")
+	ctx := testContext(t)
+	svc, _, _, _ := newTestServiceInDir(t, dir)
+	svc.RecordInGit(eventlog.GitRecord{Ref: "refs/epitrop/events", AuthorName: "epitrop", AuthorEmail: "epitrop@example.invalid", Timeout: 30 * time.Second})
+	if _, err := svc.Record(ctx, unitA, RecordPayload{Status: "ready"}); err != nil {
+		t.Fatalf("Record(ready) = %v", err)
+	}
+	first := gitIn(t, repo, "rev-parse", "refs/epitrop/events")
+	if _, err := svc.Note(ctx, unitA, "tester", "no status change"); err != nil {
+		t.Fatalf("Note() = %v", err)
+	}
+	if got := gitIn(t, repo, "rev-parse", "refs/epitrop/events"); got != first {
+		t.Fatalf("a note moved the ref to %s; only a checkpoint commits", got)
+	}
+	if _, err := svc.Record(ctx, unitA, RecordPayload{Status: "claimed"}); err != nil {
+		t.Fatalf("Record(claimed) = %v", err)
+	}
+	second := gitIn(t, repo, "rev-parse", "refs/epitrop/events")
+	if parent := gitIn(t, repo, "rev-parse", second+"^"); parent != first {
+		t.Fatalf("the status change's commit follows %s, want %s", parent, first)
+	}
+	files := gitIn(t, repo, "ls-tree", "-r", "--name-only", second)
+	want := "checkpoints/units/00000000000000000001.json\ncheckpoints/units/00000000000000000003.json\n" +
+		"events/00000000000000000001.json\nevents/00000000000000000002.json\nevents/00000000000000000003.json\nevents/HEAD.json"
+	if files != want {
+		t.Fatalf("the commit holds\n%s\nwant\n%s", files, want)
+	}
+}
+
+func TestStatusChangeWithoutCompactKeepsTheSegments(t *testing.T) {
+	repo := t.TempDir()
+	gitIn(t, repo, "init", "--quiet")
+	dir := filepath.Join(repo, ".epitrop")
+	ctx := testContext(t)
+	svc, _, _, _ := newTestServiceInDir(t, dir)
+	svc.RecordInGit(eventlog.GitRecord{Ref: "refs/epitrop/events", AuthorName: "epitrop", AuthorEmail: "epitrop@example.invalid", Timeout: 30 * time.Second})
+	fillASegment(ctx, t, svc)
+	for _, status := range []string{"claimed", "implementing"} {
+		if _, err := svc.Record(ctx, unitA, RecordPayload{Status: status}); err != nil {
+			t.Fatalf("Record(%s) = %v", status, err)
+		}
+	}
+	if entries, err := os.ReadDir(filepath.Join(dir, "events", "segments")); err != nil || len(entries) == 0 {
+		t.Fatalf("segments without compaction = %d (%v), want kept", len(entries), err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "checkpoints", eventlog.BaseName)); !os.IsNotExist(err) {
+		t.Fatalf("base without compaction = %v, want none", err)
+	}
+}
+
+func TestStatusChangeCompactsTheLogWhenAsked(t *testing.T) {
+	repo := t.TempDir()
+	gitIn(t, repo, "init", "--quiet")
+	dir := filepath.Join(repo, ".epitrop")
+	ctx := testContext(t)
+	svc, _, signer, limits := newTestServiceInDir(t, dir)
+	svc.RecordInGit(eventlog.GitRecord{Ref: "refs/epitrop/events", AuthorName: "epitrop", AuthorEmail: "epitrop@example.invalid", Timeout: 30 * time.Second})
+	svc.CompactWith([]eventlog.Fold{Fold()})
+	fillASegment(ctx, t, svc)
+	// The status change rotates the notes into a segment, commits it, and only then compacts
+	// it away: a compaction before the commit would find no commit holding the segment.
+	for _, status := range []string{"claimed", "implementing"} {
+		if _, err := svc.Record(ctx, unitA, RecordPayload{Status: status}); err != nil {
+			t.Fatalf("Record(%s) = %v", status, err)
+		}
+		if bases := entryCount(t, filepath.Join(dir, "checkpoints", eventlog.BaseName)); bases != 1 {
+			t.Fatalf("bases after %s = %d, want one", status, bases)
+		}
+		if segs := entryCount(t, filepath.Join(dir, "events", "segments")); segs != 0 {
+			t.Fatalf("segments after %s = %d, want none", status, segs)
+		}
+	}
+	if _, err := eventlog.Replay(ctx, dir, signer.PublicKey(), limits, UnitReducer); err == nil {
+		t.Fatal("Replay() without a fold on a compacted log = nil, want error")
+	}
+	got, err := svc.Show(ctx, unitA)
+	if err != nil {
+		t.Fatalf("Show() on a compacted log = %v", err)
+	}
+	if got.Status != "implementing" {
+		t.Fatalf("status on a compacted log = %q, want implementing", got.Status)
+	}
+}
+
+// fillASegment records unitA ready and then one segment's worth of notes, which write no
+// checkpoint.
+func fillASegment(ctx context.Context, t *testing.T, svc *Service) {
+	t.Helper()
+	if _, err := svc.Record(ctx, unitA, RecordPayload{Status: "ready"}); err != nil {
+		t.Fatalf("Record(ready) = %v", err)
+	}
+	// One segment holds 256 records.
+	for i := 0; i < 256; i++ {
+		if _, err := svc.Note(ctx, unitA, "tester", fmt.Sprintf("note %d", i)); err != nil {
+			t.Fatalf("Note(%d) = %v", i, err)
+		}
+	}
+}
+
+// entryCount returns the number of entries in dir.
+func entryCount(t *testing.T, dir string) int {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s) = %v", dir, err)
+	}
+	return len(entries)
+}
+
+// gitIn runs git in dir without the machine's own settings.
+func gitIn(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := gitexec.Run(testContext(t), dir, gitexec.Env(os.Environ()), nil, args...)
+	if err != nil {
+		t.Fatalf("git %v = %v", args, err)
+	}
+	return out
 }

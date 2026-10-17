@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"github.com/golusoris/golusoris/core/clock"
 	corereceipt "github.com/golusoris/golusoris/core/crypto/receipt"
 	"github.com/tekmora/epitrop/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/gitexec"
 	"github.com/tekmora/epitrop/internal/units"
 )
 
@@ -231,7 +234,7 @@ func readReport(t *testing.T, out string) (Report, []byte) {
 func gitFed(t *testing.T, dir string, stdin string, args ...string) string {
 	t.Helper()
 	cmd := exec.CommandContext(slotCtx(t), "git", args...)
-	cmd.Dir, cmd.Env, cmd.Stdin = dir, gitEnv(os.Environ()), strings.NewReader(stdin)
+	cmd.Dir, cmd.Env, cmd.Stdin = dir, gitexec.Env(os.Environ()), strings.NewReader(stdin)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v = %v\n%s", args, err, out)
@@ -654,6 +657,9 @@ func assertAncestorBranchMovesForward(t *testing.T, branch string) {
 // After a run, the workspace's git directory is the run's own writing. Nothing in it is run
 // when the runner takes the branch: neither a setting that names a command nor a hook.
 func TestRunRunsNothingTheWorkspaceNames(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the slot sandbox does not run on Windows")
+	}
 	marks := t.TempDir()
 	plant := func(ws Workspace) {
 		plantWorkspaceSettingsAndHooks(t, ws, marks)
@@ -738,7 +744,11 @@ func TestRunTakesNothingWhenACopyCannotBeWritten(t *testing.T) {
 	taken := func(out string) { plant(t, filepath.Join(out, ResultCopy), "{}\n") }
 	blocked := func(out string) { plant(t, filepath.Join(out, EvidenceCopies), "a file where the copies go\n") }
 	checkNotTaken(t, "a result copy that is there already", runWork{outcome: OutcomeDone, commit: true, inOut: taken}, "file exists")
-	checkNotTaken(t, "no place for the evidence copies", runWork{outcome: OutcomeDone, commit: true, evidence: true, inOut: blocked}, "not a directory")
+	want := "not a directory"
+	if runtime.GOOS == "windows" {
+		want = "The system cannot find the path specified"
+	}
+	checkNotTaken(t, "no place for the evidence copies", runWork{outcome: OutcomeDone, commit: true, evidence: true, inOut: blocked}, want)
 }
 
 // A report that cannot be written is no record: the run ends with an error, and the unit
@@ -874,7 +884,8 @@ func TestCopyOutTakesNoEvidenceThatChangedSinceItWasChecked(t *testing.T) {
 		}
 		var report Report
 		err := copyOut(workspace, out, Result{Evidence: []Evidence{entry}}, []byte("{}\n"), &report)
-		if !errors.Is(err, ErrResult) || !strings.Contains(err.Error(), cases[i].want) {
+		matched := strings.Contains(err.Error(), cases[i].want) || (cases[i].want == "no such file" && errors.Is(err, fs.ErrNotExist))
+		if !errors.Is(err, ErrResult) || !matched {
 			t.Errorf("%s: copyOut() = %v, want a refused result holding %q", cases[i].name, err, cases[i].want)
 		}
 		if _, statErr := os.Lstat(filepath.Join(out, EvidenceCopies, "unit.log")); !os.IsNotExist(statErr) {

@@ -23,11 +23,6 @@ type Event struct {
 	Status Status    `json:"status,omitempty"`
 }
 
-// Apply returns a new graph with event applied. The receiver is unchanged.
-func (g *Graph) Apply(event Event) (*Graph, error) {
-	return g.ApplyStage([]Event{event})
-}
-
 // ApplyStage returns a new graph with all events applied as one staged change: either every
 // one of them holds on the result, or the stage is refused as a whole. The receiver is
 // unchanged.

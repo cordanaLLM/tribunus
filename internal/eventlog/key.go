@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/golusoris/golusoris/core/clock"
@@ -44,7 +45,10 @@ func readSeedFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("eventlog: stat signing key %s: %w", path, err)
 	}
-	if info.Mode().Perm()&0o077 != 0 {
+	// Go reports 0666 for every writable file on Windows: the mode carries no
+	// access rights there, so the check would refuse every key. Access to the
+	// key on Windows is the ACL of the folder that holds it (docs/architecture-v2.md).
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 		return nil, fmt.Errorf("eventlog: signing key %s mode %03o allows group or other access", path, info.Mode().Perm())
 	}
 	// #nosec G304 -- the signing key path comes from operator config and has

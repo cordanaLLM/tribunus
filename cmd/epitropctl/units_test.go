@@ -17,8 +17,13 @@ import (
 
 	"github.com/jonboulle/clockwork"
 	"github.com/tekmora/epitrop/internal/config"
+	"github.com/tekmora/epitrop/internal/effects"
 	"github.com/tekmora/epitrop/internal/eventlog"
+	"github.com/tekmora/epitrop/internal/gitexec"
+	"github.com/tekmora/epitrop/internal/graphlog"
 	"github.com/tekmora/epitrop/internal/slot"
+	"github.com/tekmora/epitrop/internal/supervisor"
+	"github.com/tekmora/epitrop/internal/units"
 )
 
 func writeUnitsConfig(t *testing.T) (string, string) {
@@ -34,7 +39,7 @@ func writeUnitsConfig(t *testing.T) (string, string) {
 		t.Fatalf("MkdirAll(state/.git) = %v", err)
 	}
 	cfgPath := filepath.Join(base, "config.json")
-	body := fmt.Sprintf(`{"event_log":{"dir":"%s","signing_key_path":"%s"}}`, stateDir, keyPath)
+	body := fmt.Sprintf(`{"event_log":{"dir":%s,"signing_key_path":%s}}`, jsonQuote(stateDir), jsonQuote(keyPath))
 	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
 		t.Fatalf("WriteFile(config) = %v", err)
 	}
@@ -487,5 +492,162 @@ func TestRunUnitsPreemptAndResume(t *testing.T) {
 	})
 	if !strings.Contains(resumeOut, id+"\tblocked\t") || !strings.Contains(resumeOut, "no: preempted: shift priority") {
 		t.Fatalf("resume output = %q, want blocked with preempted relaunch reason", resumeOut)
+	}
+}
+
+type eventLogSignerCase struct {
+	name         string
+	keyPath      *string
+	wantErr      bool
+	wantNotExist bool
+}
+
+func TestEventLogSigner(t *testing.T) {
+	missing := filepath.Join(jobsTempDir(t), "missing-key.hex")
+	cases := []eventLogSignerCase{
+		{name: "configured key opens"},
+		{name: "missing key file fails with its path", keyPath: &missing, wantErr: true, wantNotExist: true},
+		{name: "empty key path fails", keyPath: new(string), wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := signerTestConfig(t, tc.keyPath)
+			signer, clk, err := eventLogSigner(cfg)
+			if !tc.wantErr {
+				if err != nil || signer == nil || clk == nil {
+					t.Fatalf("eventLogSigner() = %v, %v, %v; want a signer, a clock and nil", signer, clk, err)
+				}
+				return
+			}
+			checkSignerFailure(t, tc, signer != nil || clk != nil, err, cfg.EventLog.SigningKeyPath)
+		})
+	}
+}
+
+// signerTestConfig loads the units test configuration, with the signing key path replaced
+// when keyPath is set.
+func signerTestConfig(t *testing.T, keyPath *string) config.Config {
+	t.Helper()
+	cfgPath, _ := writeUnitsConfig(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	cfg, err := config.Load(ctx, cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if keyPath != nil {
+		cfg.EventLog.SigningKeyPath = *keyPath
+	}
+	return cfg
+}
+
+func checkSignerFailure(t *testing.T, tc eventLogSignerCase, gotValue bool, err error, keyPath string) {
+	t.Helper()
+	if err == nil || gotValue {
+		t.Fatalf("eventLogSigner() error = %v, value returned = %v; want an error and no value", err, gotValue)
+	}
+	if tc.wantNotExist && (!errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), keyPath)) {
+		t.Fatalf("eventLogSigner() error = %v, want os.ErrNotExist naming %s", err, keyPath)
+	}
+}
+
+func TestRunUnitsSetRecordsTheLogInGitWhenEnabled(t *testing.T) {
+	repo, cfgPath := gitLogConfig(t, false)
+	env := gitexec.Env(os.Environ())
+	if err := runUnits([]string{"set", "--config=" + cfgPath, "tekmora/epitrop#58", "--status=ready"}); err != nil {
+		t.Fatalf("runUnits set: %v", err)
+	}
+	files, err := gitexec.Run(testContext(t), repo, env, nil, "ls-tree", "-r", "--name-only", "refs/epitrop/events")
+	if err != nil || !strings.Contains(files, "events/HEAD.json") || !strings.Contains(files, "checkpoints/units/") {
+		t.Fatalf("refs/epitrop/events holds %q (%v), want the log and its checkpoint", files, err)
+	}
+	fillASegment(t, cfgPath, "tekmora/epitrop#58")
+	if _, err = os.Stat(filepath.Join(repo, ".epitrop", "checkpoints", eventlog.BaseName)); !os.IsNotExist(err) {
+		t.Fatalf("base without event_log.git.compact = %v, want none", err)
+	}
+	if segs, err := os.ReadDir(filepath.Join(repo, ".epitrop", "events", "segments")); err != nil || len(segs) == 0 {
+		t.Fatalf("segments without event_log.git.compact = %d (%v), want kept", len(segs), err)
+	}
+}
+
+// gitLogConfig writes a configuration whose event log lies in a new Git repository, with
+// event_log.git enabled and event_log.git.compact set to compact, and returns the repository
+// and the configuration's path.
+func gitLogConfig(t *testing.T, compact bool) (string, string) {
+	t.Helper()
+	base := t.TempDir()
+	keyPath := filepath.Join(base, "seed.hex")
+	if err := os.WriteFile(keyPath, []byte(hex.EncodeToString(bytes.Repeat([]byte{7}, 32))), 0o600); err != nil {
+		t.Fatalf("WriteFile(key) = %v", err)
+	}
+	repo := filepath.Join(base, "repo")
+	if _, err := gitexec.Run(testContext(t), "", gitexec.Env(os.Environ()), nil, "init", "--quiet", repo); err != nil {
+		t.Fatalf("git init = %v", err)
+	}
+	cfgPath := filepath.Join(base, "config.json")
+	body := fmt.Sprintf(`{"event_log":{"dir":%s,"signing_key_path":%s,"git":{"enabled":true,"compact":%t,"author_name":"epitrop","author_email":"epitrop@example.invalid"}}}`,
+		jsonQuote(filepath.Join(repo, ".epitrop")), jsonQuote(keyPath), compact)
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("WriteFile(config) = %v", err)
+	}
+	return repo, cfgPath
+}
+
+// fillASegment writes enough records to unit through the configuration at cfgPath for a
+// segment, then two status changes that rotate it and record it in Git, and returns the
+// loaded configuration.
+func fillASegment(t *testing.T, cfgPath string, unit string) config.Config {
+	t.Helper()
+	cfg, err := config.Load(testContext(t), cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load() = %v", err)
+	}
+	svc, err := newUnitsService(cfg)
+	if err != nil {
+		t.Fatalf("newUnitsService() = %v", err)
+	}
+	// One segment holds 256 records; notes fill it without a checkpoint.
+	for i := 0; i < 256; i++ {
+		if _, err = svc.Note(testContext(t), unit, "tester", fmt.Sprintf("note %d", i)); err != nil {
+			t.Fatalf("Note(%d) = %v", i, err)
+		}
+	}
+	for _, status := range []string{"claimed", "implementing"} {
+		if err = runUnits([]string{"set", "--config=" + cfgPath, unit, "--status=" + status}); err != nil {
+			t.Fatalf("runUnits set %s: %v", status, err)
+		}
+	}
+	return cfg
+}
+
+func TestLogFoldsNameEveryReaderOfTheLog(t *testing.T) {
+	var names []string
+	for _, f := range logFolds(config.Default()) {
+		names = append(names, f.Name)
+	}
+	want := []string{effects.FoldName, graphlog.FoldName, supervisor.FoldName, units.FoldName}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Fatalf("logFolds() = %v, want %v", names, want)
+	}
+}
+
+func TestRunUnitsSetCompactsTheLogWhenAsked(t *testing.T) {
+	repo, cfgPath := gitLogConfig(t, true)
+	const unit = "tekmora/epitrop#58"
+	if err := runUnits([]string{"set", "--config=" + cfgPath, unit, "--status=ready"}); err != nil {
+		t.Fatalf("runUnits set: %v", err)
+	}
+	cfg := fillASegment(t, cfgPath, unit)
+	if _, err := os.Stat(filepath.Join(repo, ".epitrop", "checkpoints", eventlog.BaseName)); err != nil {
+		t.Fatalf("base = %v, want written", err)
+	}
+	signer, _, err := eventLogSigner(cfg)
+	if err != nil {
+		t.Fatalf("eventLogSigner() = %v", err)
+	}
+	for _, f := range logFolds(cfg) {
+		if _, err = eventlog.ReplayFold(testContext(t), cfg.EventLog.Dir, signer.PublicKey(), eventLogLimits(cfg, clockwork.NewRealClock()), f.Name, f.Reduce); err != nil {
+			t.Fatalf("ReplayFold(%s) on the compacted log = %v", f.Name, err)
+		}
 	}
 }

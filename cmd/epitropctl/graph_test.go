@@ -23,7 +23,7 @@ func graphConfig(t *testing.T, depth int) (string, string, string) {
 	t.Helper()
 	cfgPath, stateDir := writeUnitsConfig(t)
 	keyPath := filepath.Join(filepath.Dir(cfgPath), "seed.hex")
-	body := fmt.Sprintf(`{"event_log":{"dir":"%s","signing_key_path":"%s"},"graph":{"max_depth":%d}}`, stateDir, keyPath, depth)
+	body := fmt.Sprintf(`{"event_log":{"dir":%s,"signing_key_path":%s},"graph":{"max_depth":%d}}`, jsonQuote(stateDir), jsonQuote(keyPath), depth)
 	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
 		t.Fatalf("WriteFile(config) = %v", err)
 	}

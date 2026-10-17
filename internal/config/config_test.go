@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -17,9 +18,10 @@ import (
 )
 
 func TestLoadPositiveFullFile(t *testing.T) {
-	cfg, err := Load(testContext(t), writeConfig(t, `{
+	tmp := t.TempDir()
+	cfg, err := Load(testContext(t), writeConfig(t, fmt.Sprintf(`{
   "graph": {"max_depth": 24},
-  "sandbox_input_roots": ["/var/tmp"],
+  "sandbox_input_roots": [%s],
   "budgets": {"default": {"tokens": 300000, "wall_clock_seconds": 7200}},
   "jobs": [{
     "name": "daily-catalog-sync",
@@ -30,7 +32,7 @@ func TestLoadPositiveFullFile(t *testing.T) {
     "max_runtime_seconds": 1800,
     "restart": {"policy": "never", "max_restarts": 0, "backoff_seconds": 0},
     "stop": {"signal": "TERM", "grace_seconds": 5},
-    "sandbox": {"mode": "enforce", "workspace": "/var/tmp", "network": "none", "memory_max": "2G", "memory_high": "1536M", "cpu_weight": 100, "tasks_max": 512}
+    "sandbox": {"mode": "enforce", "workspace": %s, "network": "none", "memory_max": "2G", "memory_high": "1536M", "cpu_weight": 100, "tasks_max": 512}
   }],
   "watches": [{"name": "catalog-source-change", "trigger": "git:internal/sources", "router_alias": "cordana/coding"}],
   "router": {"aliases": ["cordana/auto", "cordana/coding"]},
@@ -42,7 +44,7 @@ func TestLoadPositiveFullFile(t *testing.T) {
     "lock_timeout_seconds": 7,
     "max_replay_records": 1234
   }
-}`))
+}`, jsonQuote(tmp), jsonQuote(tmp))))
 	if err != nil {
 		t.Fatalf("Load() = %v, want nil", err)
 	}
@@ -94,6 +96,17 @@ func TestLoadNegativeValidation(t *testing.T) {
 		{"bad alias", `{"router": {"aliases": ["public/alias"]}}`, []string{"/router/aliases/0", "pattern"}},
 		{"bad event public key", `{"event_log": {"public_key": "xyz"}}`, []string{"/event_log/public_key", "pattern"}},
 		{"bad replay max", `{"event_log": {"max_replay_records": 1000001}}`, []string{"/event_log/max_replay_records", "maximum"}},
+		{"git ref outside refs/", `{"event_log": {"git": {"ref": "heads/events"}}}`, []string{"/event_log/git/ref", "pattern"}},
+		{"git ref with a space", `{"event_log": {"git": {"ref": "refs/epitrop/my events"}}}`, []string{"/event_log/git/ref", "pattern"}},
+		{"git author with a bracket", `{"event_log": {"git": {"author_name": "a <b>"}}}`, []string{"/event_log/git/author_name", "pattern"}},
+		{"git email with a line break", `{"event_log": {"git": {"author_email": "a@b\nc"}}}`, []string{"/event_log/git/author_email", "pattern"}},
+		{"git timeout zero", `{"event_log": {"git": {"timeout_seconds": 0}}}`, []string{"/event_log/git/timeout_seconds", "minimum"}},
+		{"git timeout above 300", `{"event_log": {"git": {"timeout_seconds": 301}}}`, []string{"/event_log/git/timeout_seconds", "maximum"}},
+		{"unknown git key", `{"event_log": {"git": {"sign": true}}}`, []string{"/event_log/git", "additional properties"}},
+		{"git enabled without author", `{"event_log": {"git": {"enabled": true, "author_email": "epitrop@example.invalid"}}}`, []string{"event_log/git", "author_name and author_email are required"}},
+		{"git enabled without email", `{"event_log": {"git": {"enabled": true, "author_name": "epitrop"}}}`, []string{"event_log/git", "author_name and author_email are required"}},
+		{"git compact not a boolean", `{"event_log": {"git": {"compact": "yes"}}}`, []string{"/event_log/git/compact", "boolean"}},
+		{"git compact without enabled", `{"event_log": {"git": {"compact": true}}}`, []string{"event_log/git", "compact needs enabled"}},
 		{"bad job restart policy", `{"jobs": [
   {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "schedule": "always", "restart": {"policy": "sometimes"}}
 ]}`, []string{"/jobs/0/restart/policy", "valid"}},
@@ -131,6 +144,21 @@ func TestLoadNegativeValidation(t *testing.T) {
 	}
 }
 
+func TestLoadEventLogGit(t *testing.T) {
+	for _, seconds := range []int{1, 300} {
+		compact := seconds == 300
+		body := fmt.Sprintf(`{"event_log": {"git": {"enabled": true, "ref": "refs/epitrop/log-2.x", "author_name": "epitrop", "author_email": "epitrop@example.invalid", "timeout_seconds": %d, "compact": %t}}}`, seconds, compact)
+		cfg, err := Load(testContext(t), writeConfig(t, body))
+		if err != nil {
+			t.Fatalf("Load(timeout %d) = %v, want nil", seconds, err)
+		}
+		want := EventLogGitConfig{Enabled: true, Ref: "refs/epitrop/log-2.x", AuthorName: "epitrop", AuthorEmail: "epitrop@example.invalid", TimeoutSeconds: seconds, Compact: compact}
+		if cfg.EventLog.Git != want {
+			t.Fatalf("Load() event_log.git = %+v, want %+v", cfg.EventLog.Git, want)
+		}
+	}
+}
+
 func TestLoadBoundaryMaxDepth(t *testing.T) {
 	for _, depth := range []int{1, MaxGraphDepth} {
 		body := `{"graph": {"max_depth": ` + jsonInt(depth) + `}}`
@@ -163,6 +191,7 @@ func TestLoadBoundaryArrays(t *testing.T) {
 
 func TestLoadDisablesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("APP_GRAPH_MAX_DEPTH", "64")
+	t.Setenv("GRAPH", "64")
 	cfg, err := Load(testContext(t), writeConfig(t, "{}\n"))
 	if err != nil {
 		t.Fatalf("Load() = %v, want nil", err)
@@ -254,6 +283,12 @@ func TestConfigSchemaDefaultsAgreeWithGoTypes(t *testing.T) {
 	assertSchemaDefault(t, doc, def.EventLog.PublicKey, "event_log", "public_key")
 	assertSchemaDefault(t, doc, def.EventLog.LockTimeoutSeconds, "event_log", "lock_timeout_seconds")
 	assertSchemaDefault(t, doc, def.EventLog.MaxReplayRecords, "event_log", "max_replay_records")
+	assertSchemaDefault(t, doc, def.EventLog.Git.Enabled, "event_log", "git", "enabled")
+	assertSchemaDefault(t, doc, def.EventLog.Git.Ref, "event_log", "git", "ref")
+	assertSchemaDefault(t, doc, def.EventLog.Git.AuthorName, "event_log", "git", "author_name")
+	assertSchemaDefault(t, doc, def.EventLog.Git.AuthorEmail, "event_log", "git", "author_email")
+	assertSchemaDefault(t, doc, def.EventLog.Git.TimeoutSeconds, "event_log", "git", "timeout_seconds")
+	assertSchemaDefault(t, doc, def.EventLog.Git.Compact, "event_log", "git", "compact")
 	assertSchemaDefault(t, doc, def.Router.Aliases, "router", "aliases")
 	assertSchemaDefault(t, doc, def.Jobs, "jobs")
 	assertSchemaDefault(t, doc, def.Watches, "watches")
@@ -309,6 +344,9 @@ func TestJobRuntimeBoundIsTheSchemaBound(t *testing.T) {
 }
 
 func TestExampleConfigValidates(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the example uses Unix paths")
+	}
 	path := filepath.Join("..", "..", "docs", "config.example.yaml")
 	if _, err := Load(testContext(t), path); err != nil {
 		t.Fatalf("Load(docs/config.example.yaml) = %v, want nil", err)
@@ -476,6 +514,9 @@ func TestLoadRefusesReservedSandboxEnv(t *testing.T) {
 }
 
 func TestLoadSandboxFailsClosedWithoutHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the sandbox does not run on Windows")
+	}
 	workspace := t.TempDir()
 	enforced := writeConfig(t, fmt.Sprintf(`{"jobs": [{"name": "daemon", "command": ["/bin/true"], "log_path": "/tmp/daemon.log", "sandbox": {"workspace": %q}}]}`, workspace))
 	off := writeConfig(t, `{"jobs": [{"name": "daemon", "command": ["/bin/true"], "log_path": "/tmp/daemon.log", "sandbox": {"mode": "off", "reason": "test"}}]}`)
@@ -489,6 +530,9 @@ func TestLoadSandboxFailsClosedWithoutHome(t *testing.T) {
 }
 
 func TestLoadRefusesHomeReachedThroughSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the sandbox does not run on Windows")
+	}
 	home := t.TempDir()
 	link := filepath.Join(t.TempDir(), "home-link")
 	if err := os.Symlink(home, link); err != nil {
@@ -730,6 +774,9 @@ func (w sandboxPathWorld) loadWithRoots(t *testing.T, roots []string, workspace 
 }
 
 func TestLoadRefusesSandboxPathsReachingTheControlPlane(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the sandbox does not run on Windows")
+	}
 	w := newSandboxPathWorld(t)
 	ws := filepath.Join(w.root, "ws")
 	cases := []struct {
@@ -779,9 +826,10 @@ func TestLoadSandboxFailsClosedWithoutExecutable(t *testing.T) {
 }
 
 func TestReleaseWatchPositive(t *testing.T) {
-	body := `{
+	stateDir := t.TempDir()
+	body := fmt.Sprintf(`{
 		"release_watch": {
-			"state_dir": "/var/tmp/epitrop",
+			"state_dir": %s,
 			"rate_limit_floor": 150,
 			"max_actions_per_run": 25,
 			"per_source_cap": 5,
@@ -797,13 +845,13 @@ func TestReleaseWatchPositive(t *testing.T) {
 				]
 			}]
 		}
-	}`
+	}`, jsonQuote(stateDir))
 	cfg, err := Load(testContext(t), writeConfig(t, body))
 	if err != nil {
 		t.Fatalf("Load() = %v, want nil", err)
 	}
 	rw := cfg.ReleaseWatch
-	if rw.StateDir != "/var/tmp/epitrop" || rw.RateLimitFloor != 150 || rw.MaxActionsPerRun != 25 || rw.PerSourceCap != 5 {
+	if rw.StateDir != stateDir || rw.RateLimitFloor != 150 || rw.MaxActionsPerRun != 25 || rw.PerSourceCap != 5 {
 		t.Fatalf("ReleaseWatch = %+v, want configured values", rw)
 	}
 	if len(rw.Routes) != 1 || rw.Routes[0].Name != "route-one" {
@@ -815,6 +863,7 @@ func TestReleaseWatchPositive(t *testing.T) {
 }
 
 func TestReleaseWatchNegative(t *testing.T) {
+	st := jsonQuote(t.TempDir())
 	cases := []struct {
 		name    string
 		body    string
@@ -822,55 +871,55 @@ func TestReleaseWatchNegative(t *testing.T) {
 	}{
 		{
 			name:    "route with empty sinks",
-			body:    `{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "route-a", "sources": [{"github": "owner/repo"}], "sinks": []}]}}`,
+			body:    fmt.Sprintf(`{"release_watch": {"state_dir": %s, "routes": [{"name": "route-a", "sources": [{"github": "owner/repo"}], "sinks": []}]}}`, st),
 			wantErr: "sinks",
 		},
 		{
 			name:    "github_issue without repo",
-			body:    `{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "route-a", "sources": [{"github": "owner/repo"}], "sinks": [{"github_issue": {"repo": ""}}]}]}}`,
+			body:    fmt.Sprintf(`{"release_watch": {"state_dir": %s, "routes": [{"name": "route-a", "sources": [{"github": "owner/repo"}], "sinks": [{"github_issue": {"repo": ""}}]}]}}`, st),
 			wantErr: "repo",
 		},
 		{
 			name:    "repo not owner/name",
-			body:    `{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "route-a", "sources": [{"github": "owner/repo"}], "sinks": [{"github_issue": {"repo": "no-slash-here"}}]}]}}`,
+			body:    fmt.Sprintf(`{"release_watch": {"state_dir": %s, "routes": [{"name": "route-a", "sources": [{"github": "owner/repo"}], "sinks": [{"github_issue": {"repo": "no-slash-here"}}]}]}}`, st),
 			wantErr: "pattern",
 		},
 		{
 			name:    "sink repo of dot segments",
-			body:    `{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "route-a", "sources": [{"github": "owner/repo"}], "sinks": [{"github_issue": {"repo": "../.."}}]}]}}`,
+			body:    fmt.Sprintf(`{"release_watch": {"state_dir": %s, "routes": [{"name": "route-a", "sources": [{"github": "owner/repo"}], "sinks": [{"github_issue": {"repo": "../.."}}]}]}}`, st),
 			wantErr: "invalid repository",
 		},
 		{
 			name:    "source repo name ..",
-			body:    `{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "route-a", "sources": [{"github": "owner/.."}], "sinks": [{"github_issue": {"repo": "owner/consumer"}}]}]}}`,
+			body:    fmt.Sprintf(`{"release_watch": {"state_dir": %s, "routes": [{"name": "route-a", "sources": [{"github": "owner/.."}], "sinks": [{"github_issue": {"repo": "owner/consumer"}}]}]}}`, st),
 			wantErr: "invalid repository",
 		},
 		{
 			name:    "source owner .",
-			body:    `{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "route-a", "sources": [{"github": "./repo"}], "sinks": [{"github_issue": {"repo": "owner/consumer"}}]}]}}`,
+			body:    fmt.Sprintf(`{"release_watch": {"state_dir": %s, "routes": [{"name": "route-a", "sources": [{"github": "./repo"}], "sinks": [{"github_issue": {"repo": "owner/consumer"}}]}]}}`, st),
 			wantErr: "invalid repository",
 		},
 		{
 			name:    "huggingface org ..",
-			body:    `{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "route-a", "sources": [{"huggingface_org": ".."}], "sinks": [{"github_issue": {"repo": "owner/consumer"}}]}]}}`,
+			body:    fmt.Sprintf(`{"release_watch": {"state_dir": %s, "routes": [{"name": "route-a", "sources": [{"huggingface_org": ".."}], "sinks": [{"github_issue": {"repo": "owner/consumer"}}]}]}}`, st),
 			wantErr: "invalid org",
 		},
 		{
 			name:    "source with zero kinds",
-			body:    `{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "route-a", "sources": [{}], "sinks": [{"github_issue": {"repo": "owner/consumer"}}]}]}}`,
+			body:    fmt.Sprintf(`{"release_watch": {"state_dir": %s, "routes": [{"name": "route-a", "sources": [{}], "sinks": [{"github_issue": {"repo": "owner/consumer"}}]}]}}`, st),
 			wantErr: "exactly one of github or huggingface_org",
 		},
 		{
 			name:    "source with two kinds",
-			body:    `{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "route-a", "sources": [{"github": "owner/repo", "huggingface_org": "SomeOrg"}], "sinks": [{"github_issue": {"repo": "owner/consumer"}}]}]}}`,
+			body:    fmt.Sprintf(`{"release_watch": {"state_dir": %s, "routes": [{"name": "route-a", "sources": [{"github": "owner/repo", "huggingface_org": "SomeOrg"}], "sinks": [{"github_issue": {"repo": "owner/consumer"}}]}]}}`, st),
 			wantErr: "exactly one of github or huggingface_org",
 		},
 		{
 			name: "duplicate route names",
-			body: `{"release_watch": {"state_dir": "/tmp", "routes": [
+			body: fmt.Sprintf(`{"release_watch": {"state_dir": %s, "routes": [
 				{"name": "route-dup", "sources": [{"github": "owner/repo"}], "sinks": [{"github_issue": {"repo": "owner/consumer"}}]},
 				{"name": "route-dup", "sources": [{"github": "owner/other"}], "sinks": [{"github_issue": {"repo": "owner/consumer"}}]}
-			]}}`,
+			]}}`, st),
 			wantErr: "duplicate route name",
 		},
 		{
@@ -890,26 +939,27 @@ func TestReleaseWatchNegative(t *testing.T) {
 }
 
 func TestReleaseWatchBoundaryNumericCaps(t *testing.T) {
+	st := jsonQuote(t.TempDir())
 	for _, maxActions := range []int{1, 100} {
-		body := fmt.Sprintf(`{"release_watch": {"state_dir": "/tmp", "max_actions_per_run": %d, "routes": [{"name": "r", "sources": [{"github": "a/b"}], "sinks": [{"github_issue": {"repo": "c/d"}}]}]}}`, maxActions)
+		body := fmt.Sprintf(`{"release_watch": {"state_dir": %s, "max_actions_per_run": %d, "routes": [{"name": "r", "sources": [{"github": "a/b"}], "sinks": [{"github_issue": {"repo": "c/d"}}]}]}}`, st, maxActions)
 		if _, err := Load(testContext(t), writeConfig(t, body)); err != nil {
 			t.Fatalf("Load(max_actions_per_run=%d) = %v, want nil", maxActions, err)
 		}
 	}
 	for _, maxActions := range []int{0, 101} {
-		body := fmt.Sprintf(`{"release_watch": {"state_dir": "/tmp", "max_actions_per_run": %d, "routes": [{"name": "r", "sources": [{"github": "a/b"}], "sinks": [{"github_issue": {"repo": "c/d"}}]}]}}`, maxActions)
+		body := fmt.Sprintf(`{"release_watch": {"state_dir": %s, "max_actions_per_run": %d, "routes": [{"name": "r", "sources": [{"github": "a/b"}], "sinks": [{"github_issue": {"repo": "c/d"}}]}]}}`, st, maxActions)
 		if _, err := Load(testContext(t), writeConfig(t, body)); err == nil {
 			t.Fatalf("Load(max_actions_per_run=%d) = nil, want boundary error", maxActions)
 		}
 	}
 	for _, perSource := range []int{1, 20} {
-		body := fmt.Sprintf(`{"release_watch": {"state_dir": "/tmp", "per_source_cap": %d, "routes": [{"name": "r", "sources": [{"github": "a/b"}], "sinks": [{"github_issue": {"repo": "c/d"}}]}]}}`, perSource)
+		body := fmt.Sprintf(`{"release_watch": {"state_dir": %s, "per_source_cap": %d, "routes": [{"name": "r", "sources": [{"github": "a/b"}], "sinks": [{"github_issue": {"repo": "c/d"}}]}]}}`, st, perSource)
 		if _, err := Load(testContext(t), writeConfig(t, body)); err != nil {
 			t.Fatalf("Load(per_source_cap=%d) = %v, want nil", perSource, err)
 		}
 	}
 	for _, perSource := range []int{0, 21} {
-		body := fmt.Sprintf(`{"release_watch": {"state_dir": "/tmp", "per_source_cap": %d, "routes": [{"name": "r", "sources": [{"github": "a/b"}], "sinks": [{"github_issue": {"repo": "c/d"}}]}]}}`, perSource)
+		body := fmt.Sprintf(`{"release_watch": {"state_dir": %s, "per_source_cap": %d, "routes": [{"name": "r", "sources": [{"github": "a/b"}], "sinks": [{"github_issue": {"repo": "c/d"}}]}]}}`, st, perSource)
 		if _, err := Load(testContext(t), writeConfig(t, body)); err == nil {
 			t.Fatalf("Load(per_source_cap=%d) = nil, want boundary error", perSource)
 		}
@@ -917,19 +967,20 @@ func TestReleaseWatchBoundaryNumericCaps(t *testing.T) {
 }
 
 func TestReleaseWatchBoundaryArrayCaps(t *testing.T) {
+	st := jsonQuote(t.TempDir())
 	labels8 := `["l1","l2","l3","l4","l5","l6","l7","l8"]`
-	body8 := fmt.Sprintf(`{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "r", "sources": [{"github": "a/b"}], "sinks": [{"github_issue": {"repo": "c/d", "labels": %s}}]}]}}`, labels8)
+	body8 := fmt.Sprintf(`{"release_watch": {"state_dir": %s, "routes": [{"name": "r", "sources": [{"github": "a/b"}], "sinks": [{"github_issue": {"repo": "c/d", "labels": %s}}]}]}}`, st, labels8)
 	if _, err := Load(testContext(t), writeConfig(t, body8)); err != nil {
 		t.Fatalf("Load(labels=8) = %v, want nil", err)
 	}
 	labels9 := `["l1","l2","l3","l4","l5","l6","l7","l8","l9"]`
-	body9 := fmt.Sprintf(`{"release_watch": {"state_dir": "/tmp", "routes": [{"name": "r", "sources": [{"github": "a/b"}], "sinks": [{"github_issue": {"repo": "c/d", "labels": %s}}]}]}}`, labels9)
+	body9 := fmt.Sprintf(`{"release_watch": {"state_dir": %s, "routes": [{"name": "r", "sources": [{"github": "a/b"}], "sinks": [{"github_issue": {"repo": "c/d", "labels": %s}}]}]}}`, st, labels9)
 	if _, err := Load(testContext(t), writeConfig(t, body9)); err == nil {
 		t.Fatal("Load(labels=9) = nil error, want error")
 	}
 	emptyRoutes := `{"release_watch": {"state_dir": "", "routes": []}}`
 	if _, err := Load(testContext(t), writeConfig(t, emptyRoutes)); err != nil {
-		t.Fatalf("Load(empty routes and empty state_dir) = %v, want nil", err)
+		t.Fatalf("Load(empty routes with empty state_dir) = %v, want nil", err)
 	}
 }
 
@@ -1055,4 +1106,12 @@ func TestCheckMemoryLimits(t *testing.T) {
 			t.Errorf("CheckMemoryLimits(%q, %q) = %v, want %q", tc.max, tc.high, err, tc.want)
 		}
 	}
+}
+
+func jsonQuote(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
 }

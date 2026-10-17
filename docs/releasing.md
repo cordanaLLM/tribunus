@@ -72,3 +72,12 @@ Praetor reads snapshots through the catalog package, pinned as a Go module: `git
    ```
 
 5. Check the run with `gh run list --workflow release.yml --limit 1` and the result with `gh release view <tag>`.
+
+## Upgrade fixtures
+
+A new build must read what earlier releases wrote. `testdata/v0.1.0/` holds the state the published v0.1.0 binary wrote: an event log with unit and graph records, a snapshot, a release watch seen-set, and one finished run of a supervised job (its `job.started` and `job.exited` records and the shim's job record `jobs/fixture-job.json`, in an event log of its own). `testdata/v0.1.0/generate.sh` is the command that wrote them; `bash generate.sh jobs` rewrites one part and leaves the others as they are.
+
+The tests copy the set and never change it in place:
+
+- `TestSystemUpgrade_*` in `cmd/epitropctl/system_upgrade_test.go` run the current binary against the copy: show, resume and append to the event log, run the release watch, and report and restart the job.
+- `TestReadJobRecordReadsTheV010Record` and `TestJobReducerReplaysTheV010Events` in `internal/supervisor/upgrade_test.go` check the job record and the job events field by field. The shim writes and reads the record through one struct, so a renamed field passes every other test.

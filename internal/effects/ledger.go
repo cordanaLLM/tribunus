@@ -73,7 +73,16 @@ func (l *Ledger) Replay(ctx context.Context) (eventlog.State, error) {
 	} else if err != nil {
 		return eventlog.State{}, fmt.Errorf("effects: stat %s: %w", events, err)
 	}
-	return eventlog.ReplayStable(ctx, l.dir, l.signer.PublicKey(), l.limits, Reducer)
+	return eventlog.ReplayFoldStable(ctx, l.dir, l.signer.PublicKey(), l.limits, FoldName, Reducer)
+}
+
+// FoldName names the effects state in the base of a compacted log.
+const FoldName = "effects"
+
+// Fold is the effects state as a compacted log's base holds it. Every effect key stays in
+// the state, so a base loses nothing the ledger reads.
+func Fold() eventlog.Fold {
+	return eventlog.Fold{Name: FoldName, Reduce: Reducer}
 }
 
 // Do runs the side effect of key at most once.

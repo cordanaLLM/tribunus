@@ -32,6 +32,11 @@ jobs:
     stop:
       signal: TERM
       grace_seconds: 10
+    # A running job silent longer than this (no log write since the last one or since its
+    # start) is hung: the supervisor records job.stale, ends it like `jobs stop`, and the
+    # restart policy decides. 0 (the default) turns the check off.
+    heartbeat:
+      max_age_seconds: 0
     sandbox:
       mode: enforce
       # Use a dedicated directory per job; it is the only path the job can write.

@@ -119,6 +119,15 @@ func TestLoadNegativeValidation(t *testing.T) {
 		{"job runtime above a year", `{"jobs": [
   {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "max_runtime_seconds": 31536001, "sandbox": {"mode": "off", "reason": "test"}}
 ]}`, []string{"/jobs/0/max_runtime_seconds", "maximum"}},
+		{"job heartbeat above a day", `{"jobs": [
+  {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "heartbeat": {"max_age_seconds": 86401}, "sandbox": {"mode": "off", "reason": "test"}}
+]}`, []string{"/jobs/0/heartbeat/max_age_seconds", "maximum"}},
+		{"negative job heartbeat", `{"jobs": [
+  {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "heartbeat": {"max_age_seconds": -1}, "sandbox": {"mode": "off", "reason": "test"}}
+]}`, []string{"/jobs/0/heartbeat/max_age_seconds", "minimum"}},
+		{"unknown job heartbeat field", `{"jobs": [
+  {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "heartbeat": {"interval": 5}, "sandbox": {"mode": "off", "reason": "test"}}
+]}`, []string{"/jobs/0/heartbeat", "interval"}},
 		{"negative job runtime", `{"jobs": [
   {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "max_runtime_seconds": -1, "sandbox": {"mode": "off", "reason": "test"}}
 ]}`, []string{"/jobs/0/max_runtime_seconds", "minimum"}},
@@ -344,6 +353,19 @@ func TestJobRuntimeBoundIsTheSchemaBound(t *testing.T) {
 	above := fmt.Sprintf(`{"jobs": [{"name": "edge", "command": ["/bin/true"], "log_path": "/tmp/edge.log", "max_runtime_seconds": %d, "sandbox": {"mode": "off", "reason": "test"}}]}`, MaxJobRuntimeSeconds+1)
 	if _, err = Load(testContext(t), writeConfig(t, above)); err == nil {
 		t.Fatalf("Load(runtime above the bound) = nil, want the schema to refuse it")
+	}
+}
+
+// TestJobHeartbeatBoundIsTheSchemaBound: the Go constant and the schema's maximum are one
+// bound, and a heartbeat at it loads.
+func TestJobHeartbeatBoundIsTheSchemaBound(t *testing.T) {
+	body := `{"jobs": [{"name": "edge", "command": ["/bin/true"], "log_path": "/tmp/edge.log", "heartbeat": {"max_age_seconds": %d}, "sandbox": {"mode": "off", "reason": "test"}}]}`
+	cfg, err := Load(testContext(t), writeConfig(t, fmt.Sprintf(body, MaxHeartbeatSeconds)))
+	if err != nil || cfg.Jobs[0].Heartbeat.MaxAgeSeconds != MaxHeartbeatSeconds {
+		t.Fatalf("Load(heartbeat at the bound %d) = %v, want it accepted", MaxHeartbeatSeconds, err)
+	}
+	if _, err = Load(testContext(t), writeConfig(t, fmt.Sprintf(body, MaxHeartbeatSeconds+1))); err == nil {
+		t.Fatalf("Load(heartbeat above the bound) = nil, want the schema to refuse it")
 	}
 }
 

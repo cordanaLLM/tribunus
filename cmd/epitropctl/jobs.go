@@ -88,8 +88,17 @@ func printJobsStatus(ctx context.Context, sup *supervisor.Supervisor, name strin
 		return err
 	}
 	for i := 0; i < len(statuses); i++ {
-		st := statuses[i]
-		fmt.Println(st.Name + "\t" + string(st.State) + "\t" + strconv.Itoa(st.PID) + "\t" + st.Since + "\t" + strconv.Itoa(st.Restarts) + "\t" + st.Sandbox)
+		fmt.Println(jobsStatusLine(statuses[i]))
 	}
 	return nil
+}
+
+// jobsStatusLine is one job's status row; a running job whose heartbeat is stale gets a
+// last column naming its last beat.
+func jobsStatusLine(st supervisor.JobStatus) string {
+	line := st.Name + "\t" + string(st.State) + "\t" + strconv.Itoa(st.PID) + "\t" + st.Since + "\t" + strconv.Itoa(st.Restarts) + "\t" + st.Sandbox
+	if st.Stale {
+		line += "\tstale since " + st.LastBeat
+	}
+	return line
 }

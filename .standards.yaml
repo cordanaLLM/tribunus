@@ -7,6 +7,10 @@ repository:
   description: ""
   homepage: ""
   topics: []
+# Agent clients and editors in use. The engine compiles, generates and verifies files for
+# these ids only; files of every other id are not tracked here.
+agent_clients: [claude, codex, gemini]
+editors: [universal, vscode, antigravity]
 profiles:
   - framework
 facets:

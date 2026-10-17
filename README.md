@@ -51,6 +51,7 @@ go test -race ./...
 ```bash
 epitropctl sync [--sources=a,b] [--out=file]
 epitropctl show [--in=file]
+epitropctl headroom --max-age=duration [--in=file]
 epitropctl schema
 epitropctl version
 epitropctl jobs start|status|stop --config=file [name]
@@ -75,7 +76,7 @@ epitrop-server --config=file
 
 `epitrop-server` serves the run record over the Model Context Protocol on stdin and stdout, for a client that starts it as a subprocess. Its tools only read, and no tool appends to the event log or signals a job:
 
-- `jobs_status` lists the configured jobs as `epitropctl jobs status` does. On a platform without the supervisor (anything but Linux) the tool returns the reason as a tool error.
+- `jobs_status` lists the configured jobs as `epitropctl jobs status` does, including `stale` and `last_beat` for a job that declares `heartbeat.max_age_seconds`. On a platform without the supervisor (anything but Linux) the tool returns the reason as a tool error.
 - `units_list` lists the work units of the run record, sorted by id, optionally narrowed to one status.
 - `unit_status` shows one unit as `epitropctl units show` does, with the count of unread notes in place of the notes. Reading does not mark a note read.
 

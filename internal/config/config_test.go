@@ -95,6 +95,9 @@ func TestLoadNegativeValidation(t *testing.T) {
 		{"out of range", `{"graph": {"max_depth": 65}}`, []string{"/graph/max_depth", "maximum"}},
 		{"bad alias", `{"router": {"aliases": ["public/alias"]}}`, []string{"/router/aliases/0", "pattern"}},
 		{"bad event public key", `{"event_log": {"public_key": "xyz"}}`, []string{"/event_log/public_key", "pattern"}},
+		{"negative platform budget", `{"budgets": {"platform": {"frontier_tokens": -1}}}`, []string{"/budgets/platform/frontier_tokens", "minimum"}},
+		{"platform budget above 10^12", `{"budgets": {"platform": {"frontier_tokens": 1000000000001}}}`, []string{"/budgets/platform/frontier_tokens", "maximum"}},
+		{"unknown platform budget key", `{"budgets": {"platform": {"tokens": 5}}}`, []string{"/budgets/platform", "additional properties"}},
 		{"bad replay max", `{"event_log": {"max_replay_records": 1000001}}`, []string{"/event_log/max_replay_records", "maximum"}},
 		{"git ref outside refs/", `{"event_log": {"git": {"ref": "heads/events"}}}`, []string{"/event_log/git/ref", "pattern"}},
 		{"git ref with a space", `{"event_log": {"git": {"ref": "refs/epitrop/my events"}}}`, []string{"/event_log/git/ref", "pattern"}},
@@ -124,6 +127,15 @@ func TestLoadNegativeValidation(t *testing.T) {
 		{"job runtime above a year", `{"jobs": [
   {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "max_runtime_seconds": 31536001, "sandbox": {"mode": "off", "reason": "test"}}
 ]}`, []string{"/jobs/0/max_runtime_seconds", "maximum"}},
+		{"job heartbeat above a day", `{"jobs": [
+  {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "heartbeat": {"max_age_seconds": 86401}, "sandbox": {"mode": "off", "reason": "test"}}
+]}`, []string{"/jobs/0/heartbeat/max_age_seconds", "maximum"}},
+		{"negative job heartbeat", `{"jobs": [
+  {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "heartbeat": {"max_age_seconds": -1}, "sandbox": {"mode": "off", "reason": "test"}}
+]}`, []string{"/jobs/0/heartbeat/max_age_seconds", "minimum"}},
+		{"unknown job heartbeat field", `{"jobs": [
+  {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "heartbeat": {"interval": 5}, "sandbox": {"mode": "off", "reason": "test"}}
+]}`, []string{"/jobs/0/heartbeat", "interval"}},
 		{"negative job runtime", `{"jobs": [
   {"name": "bad-job", "command": ["/bin/true"], "log_path": "/tmp/bad.log", "max_runtime_seconds": -1, "sandbox": {"mode": "off", "reason": "test"}}
 ]}`, []string{"/jobs/0/max_runtime_seconds", "minimum"}},
@@ -295,6 +307,7 @@ func TestConfigSchemaDefaultsAgreeWithGoTypes(t *testing.T) {
 	assertSchemaDefault(t, doc, def.Graph.MaxDepth, "graph", "max_depth")
 	assertSchemaDefault(t, doc, def.Budgets.Default.Tokens, "budgets", "default", "tokens")
 	assertSchemaDefault(t, doc, def.Budgets.Default.WallClockSeconds, "budgets", "default", "wall_clock_seconds")
+	assertSchemaDefault(t, doc, def.Budgets.Platform.FrontierTokens, "budgets", "platform", "frontier_tokens")
 	assertSchemaDefault(t, doc, def.Admission.Probe.TimeoutSeconds, "admission", "probe", "timeout_seconds")
 	assertSchemaDefault(t, doc, def.Admission.Probe.IntervalSeconds, "admission", "probe", "interval_seconds")
 	assertSchemaDefault(t, doc, def.Admission.Probe.ReadyThreshold, "admission", "probe", "ready_threshold")
@@ -362,6 +375,19 @@ func TestJobRuntimeBoundIsTheSchemaBound(t *testing.T) {
 	above := fmt.Sprintf(`{"jobs": [{"name": "edge", "command": ["/bin/true"], "log_path": "/tmp/edge.log", "max_runtime_seconds": %d, "sandbox": {"mode": "off", "reason": "test"}}]}`, MaxJobRuntimeSeconds+1)
 	if _, err = Load(testContext(t), writeConfig(t, above)); err == nil {
 		t.Fatalf("Load(runtime above the bound) = nil, want the schema to refuse it")
+	}
+}
+
+// TestJobHeartbeatBoundIsTheSchemaBound: the Go constant and the schema's maximum are one
+// bound, and a heartbeat at it loads.
+func TestJobHeartbeatBoundIsTheSchemaBound(t *testing.T) {
+	body := `{"jobs": [{"name": "edge", "command": ["/bin/true"], "log_path": "/tmp/edge.log", "heartbeat": {"max_age_seconds": %d}, "sandbox": {"mode": "off", "reason": "test"}}]}`
+	cfg, err := Load(testContext(t), writeConfig(t, fmt.Sprintf(body, MaxHeartbeatSeconds)))
+	if err != nil || cfg.Jobs[0].Heartbeat.MaxAgeSeconds != MaxHeartbeatSeconds {
+		t.Fatalf("Load(heartbeat at the bound %d) = %v, want it accepted", MaxHeartbeatSeconds, err)
+	}
+	if _, err = Load(testContext(t), writeConfig(t, fmt.Sprintf(body, MaxHeartbeatSeconds+1))); err == nil {
+		t.Fatalf("Load(heartbeat above the bound) = nil, want the schema to refuse it")
 	}
 }
 
@@ -511,7 +537,7 @@ func normalizeSchemaValue(v any) any {
 // TestLoadPartialFileKeepsSiblingDefaults: a file that sets one key of a
 // section keeps the schema defaults of every key it leaves out.
 func TestLoadPartialFileKeepsSiblingDefaults(t *testing.T) {
-	cfg, err := Load(testContext(t), writeConfig(t, `{"graph":{"max_depth":5},"admission":{"probe":{"timeout_seconds":9}},"budgets":{"default":{"tokens":7}}}`+"\n"))
+	cfg, err := Load(testContext(t), writeConfig(t, `{"graph":{"max_depth":5},"admission":{"probe":{"timeout_seconds":9}},"budgets":{"default":{"tokens":7},"platform":{"frontier_tokens":1000000000000}}}`+"\n"))
 	if err != nil {
 		t.Fatalf("Load() = %v, want nil", err)
 	}
@@ -519,6 +545,7 @@ func TestLoadPartialFileKeepsSiblingDefaults(t *testing.T) {
 	want.Graph.MaxDepth = 5
 	want.Admission.Probe.TimeoutSeconds = 9
 	want.Budgets.Default.Tokens = 7
+	want.Budgets.Platform.FrontierTokens = 1000000000000
 	if !reflect.DeepEqual(cfg, want) {
 		t.Fatalf("Load() = %+v, want %+v", cfg, want)
 	}

@@ -68,14 +68,15 @@ func run() int {
 }
 
 var plainCommands = map[string]func([]string) error{
-	"sync":    runSync,
-	"jobs":    runJobs,
-	"watch":   runWatch,
-	"units":   runUnits,
-	"graph":   runGraph,
-	"effects": runEffects,
-	"slot":    runSlot,
-	"show":    runShow,
+	"sync":     runSync,
+	"jobs":     runJobs,
+	"watch":    runWatch,
+	"units":    runUnits,
+	"graph":    runGraph,
+	"effects":  runEffects,
+	"slot":     runSlot,
+	"show":     runShow,
+	"headroom": runHeadroom,
 }
 
 func dispatchCommand(cmd string, args []string) error {
@@ -103,6 +104,7 @@ func printUsage() {
 	fmt.Println("Usage:")
 	fmt.Println("  epitropctl sync [--sources=a,b] [--out=file] [--litellm-base=url] [--litellm-token-file=path] [--ollama=url]")
 	fmt.Println("  epitropctl show [--in=file]")
+	fmt.Println("  epitropctl headroom --max-age=duration [--in=file]")
 	fmt.Println("  epitropctl schema")
 	fmt.Println("  epitropctl version")
 	fmt.Println("  epitropctl jobs start|status|stop|supervise --config=file [name]")

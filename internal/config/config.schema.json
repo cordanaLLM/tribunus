@@ -735,7 +735,8 @@
       "type": "object",
       "default": {
         "transport": "stdio",
-        "listen": "127.0.0.1:8899"
+        "listen": "127.0.0.1:8899",
+        "allow_mutations": false
       },
       "additionalProperties": false,
       "properties": {
@@ -752,6 +753,10 @@
           "default": "127.0.0.1:8899",
           "minLength": 1,
           "maxLength": 255
+        },
+        "allow_mutations": {
+          "type": "boolean",
+          "default": false
         }
       }
     },

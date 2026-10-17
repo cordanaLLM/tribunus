@@ -43,6 +43,15 @@ func UnitsService(cfg config.Config) (*units.Service, error) {
 	return svc, nil
 }
 
+// EffectsLedger opens the effect ledger over the configured event log.
+func EffectsLedger(cfg config.Config) (*effects.Ledger, error) {
+	signer, clk, err := Signer(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return effects.NewLedger(cfg.EventLog.Dir, signer, clk, Limits(cfg, clk))
+}
+
 // Folds names every reader of the shared event log, so that a compacted log's base holds
 // the state each one replays from.
 func Folds(cfg config.Config) []eventlog.Fold {

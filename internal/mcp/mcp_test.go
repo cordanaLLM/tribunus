@@ -14,6 +14,7 @@ import (
 	corereceipt "github.com/golusoris/golusoris/core/crypto/receipt"
 	"github.com/jonboulle/clockwork"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/tekmora/epitrop/internal/effects"
 	"github.com/tekmora/epitrop/internal/eventlog"
 	"github.com/tekmora/epitrop/internal/supervisor"
 	"github.com/tekmora/epitrop/internal/units"
@@ -45,6 +46,13 @@ func testContext(t *testing.T) context.Context {
 
 func testUnits(t *testing.T) *units.Service {
 	t.Helper()
+	svc, _ := testLog(t, t.TempDir())
+	return svc
+}
+
+// testLog opens the units service and the effect ledger over one event log in dir.
+func testLog(t *testing.T, dir string) (*units.Service, *effects.Ledger) {
+	t.Helper()
 	clk := clockwork.NewFakeClock()
 	seed := make([]byte, 32)
 	for i := 0; i < len(seed); i++ {
@@ -54,11 +62,16 @@ func testUnits(t *testing.T) *units.Service {
 	if err != nil {
 		t.Fatalf("NewSignerFromSeed() = %v, want nil", err)
 	}
-	svc, err := units.NewService(t.TempDir(), signer, clk, eventlog.Limits{Clock: clk, LockTimeout: time.Second, MaxReplayRecords: 1000})
+	limits := eventlog.Limits{Clock: clk, LockTimeout: time.Second, MaxReplayRecords: 1000}
+	svc, err := units.NewService(dir, signer, clk, limits)
 	if err != nil {
 		t.Fatalf("NewService() = %v, want nil", err)
 	}
-	return svc
+	ledger, err := effects.NewLedger(dir, signer, clk, limits)
+	if err != nil {
+		t.Fatalf("NewLedger() = %v, want nil", err)
+	}
+	return svc, ledger
 }
 
 func strPtr(s string) *string { return &s }

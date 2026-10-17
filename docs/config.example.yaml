@@ -159,3 +159,32 @@ server:
   transport: http
   listen: 127.0.0.1:8899
   allow_mutations: false
+
+# The in-process broker gives each subscriber a queue of queue_capacity messages; a publish
+# that would overflow one is refused with a retryable error. dead_letter sorts a failed
+# attempt into the first class, in this order, one of whose signatures (RE2, multi-line, so
+# ^ and $ match at line ends) matches its output; failures no class matches go to the
+# fallback class, which grants no retry. A class grants at most one retry (max_retries 0 or
+# 1); a failure past it waits in the class's queue of capacity failures.
+broker:
+  queue_capacity: 64
+  dead_letter:
+    capacity: 64
+    fallback: real-failure
+    classes:
+      - name: known-flake
+        signatures:
+          - 'TestSelfTest.*SIGSEGV'
+        max_retries: 1
+      - name: time-limit
+        signatures:
+          - 'context deadline exceeded'
+          - 'exceeded the maximum execution time'
+        max_retries: 1
+      - name: rebase-conflict
+        signatures:
+          - '^CONFLICT \('
+      - name: generated-drift
+        signatures:
+          - 'go mod tidy -diff'
+          - 'generated file .* differs'

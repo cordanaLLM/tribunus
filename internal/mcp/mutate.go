@@ -16,7 +16,7 @@ import (
 )
 
 // Tools that change the run record or the jobs. The server registers them only when the
-// configuration allows mutations; their names are provisional like the read-only ones.
+// configuration allows mutations; their names are fixed like the read-only ones.
 const (
 	ToolJobsStart = "jobs_start"
 	ToolJobsStop  = "jobs_stop"

@@ -18,7 +18,7 @@ import (
 )
 
 // Paths the HTTP transport serves beside the health probes /livez, /readyz and /startupz.
-// They are provisional with the tool names.
+// They are provisional until the first release that ships the server.
 const (
 	PathMCP    = "/mcp"
 	PathEvents = "/events"

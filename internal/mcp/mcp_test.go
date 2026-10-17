@@ -153,7 +153,7 @@ func TestToolsListedReadOnly(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	want := []string{ToolJobsStatus, ToolUnitStatus, ToolUnitsList}
+	want := []string{ToolJobsStatus, ToolRunStatus, ToolRunsList, ToolUnitStatus, ToolUnitsList, ToolWatchStatus, ToolWatchesList}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("tools = %v, want %v", names, want)
 	}

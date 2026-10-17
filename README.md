@@ -55,6 +55,7 @@ epitropctl headroom --max-age=duration [--in=file]
 epitropctl schema
 epitropctl version
 epitropctl jobs start|status|stop --config=file [name]
+epitropctl jobs history --config=file [--since=RFC3339] [name]
 epitropctl jobs supervise --config=file [--poll-interval-seconds=1]
 ```
 

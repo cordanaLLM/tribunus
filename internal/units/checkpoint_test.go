@@ -289,3 +289,60 @@ func TestDivergenceLoggedOnceWhenTwoReplaysSeeIt(t *testing.T) {
 		t.Fatalf("head seq = %d, want 2: one log.diverged record", got)
 	}
 }
+
+func TestStatusChangeRotatesClosedRanges(t *testing.T) {
+	dir := t.TempDir()
+	ctx := testContext(t)
+	svc, _, signer, limits := newTestServiceInDir(t, dir)
+	fillTo259(t, svc)
+	before, err := eventlog.Replay(ctx, dir, signer.PublicKey(), limits, UnitReducer)
+	if err != nil {
+		t.Fatalf("Replay() before rotation = %v", err)
+	}
+	if _, err = svc.Record(ctx, unitA, RecordPayload{Status: "claimed"}); err != nil {
+		t.Fatalf("Record(claimed) = %v", err)
+	}
+	assertRotatedTo256(t, dir)
+	after, err := eventlog.Replay(ctx, dir, signer.PublicKey(), limits, UnitReducer)
+	if err != nil {
+		t.Fatalf("Replay() after rotation = %v", err)
+	}
+	if len(after.Units[unitA].Notes) != len(before.Units[unitA].Notes) || after.Units[unitA].Status != "claimed" {
+		t.Fatalf("after rotation unit = %d notes, status %q", len(after.Units[unitA].Notes), after.Units[unitA].Status)
+	}
+	_, use, err := svc.ReplayCheckpointed(ctx)
+	if err != nil || use.Seq != 260 {
+		t.Fatalf("ReplayCheckpointed() = seq %d, %v; want seq 260", use.Seq, err)
+	}
+}
+
+// fillTo259 records unitA as ready, then two rounds of 128 notes and the inbox read that
+// marks them: records 1 to 259, with no status change after the first.
+func fillTo259(t *testing.T, svc *Service) {
+	t.Helper()
+	ctx := testContext(t)
+	if _, err := svc.Record(ctx, unitA, RecordPayload{Status: "ready"}); err != nil {
+		t.Fatalf("Record(ready) = %v", err)
+	}
+	for round := 0; round < 2; round++ {
+		for i := 0; i < 128; i++ {
+			if _, err := svc.Note(ctx, unitA, "tester", fmt.Sprintf("note %d.%d", round, i)); err != nil {
+				t.Fatalf("Note(%d.%d) = %v", round, i, err)
+			}
+		}
+		if _, err := svc.Inbox(ctx, unitA); err != nil {
+			t.Fatalf("Inbox(round %d) = %v", round, err)
+		}
+	}
+}
+
+func assertRotatedTo256(t *testing.T, dir string) {
+	t.Helper()
+	segment := filepath.Join(dir, "events", "segments", fmt.Sprintf("%020d-%020d.jsonl", 1, 256))
+	if _, err := os.Stat(segment); err != nil {
+		t.Fatalf("segment after status change: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "events", fmt.Sprintf("%020d.json", 1))); !os.IsNotExist(err) {
+		t.Fatalf("record 1 after rotation: stat = %v, want not exist", err)
+	}
+}

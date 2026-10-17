@@ -293,6 +293,8 @@ const (
 type ServerConfig struct {
 	Transport string `koanf:"transport" json:"transport"`
 	Listen    string `koanf:"listen" json:"listen"`
+	// AllowMutations adds the tools that start and stop jobs and record unit status.
+	AllowMutations bool `koanf:"allow_mutations" json:"allow_mutations"`
 }
 
 // SchemaJSON returns the embedded JSON Schema document used by Load.

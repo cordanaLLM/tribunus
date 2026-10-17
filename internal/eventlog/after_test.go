@@ -74,8 +74,9 @@ func TestReplayAfterOnAnEmptyLogReturnsNothing(t *testing.T) {
 	dir, signer, limits := testLog(t)
 	openWriter(t, dir, signer, limits)
 	assertSeqs(t, replayAfter(t, dir, signer.PublicKey(), limits, 0), 1, 0)
-	_, err := ReplayAfter(testContext(t), dir, signer.PublicKey(), limits, 1)
-	assertErrContains(t, err, "no such file")
+	if _, err := ReplayAfter(testContext(t), dir, signer.PublicKey(), limits, 1); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ReplayAfter(1) before the first append = %v, want a missing events directory", err)
+	}
 }
 
 func TestReplayAfterAtHeadReturnsNothing(t *testing.T) {

@@ -16,6 +16,7 @@ import (
 
 	coreconfig "github.com/golusoris/golusoris/core/config"
 	golusorisschema "github.com/golusoris/golusoris/jsonschema"
+	"github.com/tekmora/epitrop/internal/broker"
 	"github.com/tekmora/epitrop/internal/egressproxy"
 )
 
@@ -62,6 +63,8 @@ const (
 	defaultEventLogRef      = "refs/epitrop/events"
 	defaultGitSeconds       = 30
 	defaultServerListen     = "127.0.0.1:8899"
+	defaultBrokerQueue      = 64
+	defaultFallbackClass    = "real-failure"
 	defaultJobSchedule      = "always"
 	defaultRestart          = "never"
 	defaultStopSignal       = "TERM"
@@ -114,9 +117,42 @@ type Config struct {
 	EventLog     EventLogConfig     `koanf:"event_log" json:"event_log"`
 	ReleaseWatch ReleaseWatchConfig `koanf:"release_watch" json:"release_watch"`
 	Server       ServerConfig       `koanf:"server" json:"server"`
+	Broker       BrokerConfig       `koanf:"broker" json:"broker"`
 	// SandboxInputRoots are the directories a sandboxed job's workspace and inputs must lie
 	// in once symlinks are resolved. With none, no job runs sandboxed.
 	SandboxInputRoots []string `koanf:"sandbox_input_roots" json:"sandbox_input_roots"`
+}
+
+// BrokerConfig sizes the in-process broker: the queue of each subscriber, and the
+// dead-letter class set failed attempts are sorted into.
+type BrokerConfig struct {
+	QueueCapacity int              `koanf:"queue_capacity" json:"queue_capacity"`
+	DeadLetter    DeadLetterConfig `koanf:"dead_letter" json:"dead_letter"`
+}
+
+// DeadLetterConfig declares the dead-letter classes. Classes lists the classes with
+// signatures, in match order; Fallback names the class that takes every failure none of
+// them matched, and grants no retry.
+type DeadLetterConfig struct {
+	Capacity int               `koanf:"capacity" json:"capacity"`
+	Fallback string            `koanf:"fallback" json:"fallback"`
+	Classes  []DeadLetterClass `koanf:"classes" json:"classes"`
+}
+
+type DeadLetterClass struct {
+	Name       string   `koanf:"name" json:"name"`
+	Signatures []string `koanf:"signatures" json:"signatures"`
+	MaxRetries int      `koanf:"max_retries" json:"max_retries"`
+}
+
+// Specs returns the class set for broker.NewDeadLetters: the declared classes in order, then
+// the fallback class.
+func (c DeadLetterConfig) Specs() []broker.ClassSpec {
+	specs := make([]broker.ClassSpec, 0, len(c.Classes)+1)
+	for _, class := range c.Classes {
+		specs = append(specs, broker.ClassSpec{Name: class.Name, Signatures: class.Signatures, MaxRetries: class.MaxRetries})
+	}
+	return append(specs, broker.ClassSpec{Name: c.Fallback})
 }
 
 type ReleaseWatchConfig struct {
@@ -333,7 +369,11 @@ func Default() Config {
 			PerSourceCap:     DefaultPerSourceCap,
 			Routes:           []ReleaseWatchRoute{},
 		},
-		Server:            ServerConfig{Transport: TransportStdio, Listen: defaultServerListen},
+		Server: ServerConfig{Transport: TransportStdio, Listen: defaultServerListen},
+		Broker: BrokerConfig{
+			QueueCapacity: defaultBrokerQueue,
+			DeadLetter:    DeadLetterConfig{Capacity: defaultBrokerQueue, Fallback: defaultFallbackClass, Classes: []DeadLetterClass{}},
+		},
 		SandboxInputRoots: []string{},
 	}
 }
@@ -398,6 +438,9 @@ func validateLoaded(cfg *Config, path string) error {
 		return err
 	}
 	if err := ValidateListen(cfg.Server.Listen); err != nil {
+		return err
+	}
+	if err := validateBroker(cfg.Broker); err != nil {
 		return err
 	}
 	return validateJobSandboxes(cfg, path)
@@ -1098,6 +1141,19 @@ func ValidateListen(addr string) error {
 	}
 	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
 		return fmt.Errorf("config: server/listen: host %q is not loopback", host)
+	}
+	return nil
+}
+
+// validateBroker builds the broker and the class set the block declares, so the config
+// refuses exactly what the broker would.
+func validateBroker(b BrokerConfig) error {
+	if _, err := broker.New(b.QueueCapacity); err != nil {
+		return fmt.Errorf("config: broker/queue_capacity: %w", err)
+	}
+	dl := b.DeadLetter
+	if _, err := broker.NewDeadLetters(dl.Specs(), dl.Fallback, dl.Capacity); err != nil {
+		return fmt.Errorf("config: broker/dead_letter: %w", err)
 	}
 	return nil
 }

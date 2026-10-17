@@ -348,6 +348,10 @@ func TestConfigSchemaDefaultsAgreeWithGoTypes(t *testing.T) {
 	assertSchemaDefault(t, doc, def.Router.Aliases, "router", "aliases")
 	assertSchemaDefault(t, doc, def.Jobs, "jobs")
 	assertSchemaDefault(t, doc, def.Watches, "watches")
+	assertSchemaDefault(t, doc, def.Broker.QueueCapacity, "broker", "queue_capacity")
+	assertSchemaDefault(t, doc, def.Broker.DeadLetter.Capacity, "broker", "dead_letter", "capacity")
+	assertSchemaDefault(t, doc, def.Broker.DeadLetter.Fallback, "broker", "dead_letter", "fallback")
+	assertSchemaDefault(t, doc, def.Broker.DeadLetter.Classes, "broker", "dead_letter", "classes")
 }
 
 func TestLoadJobDefaults(t *testing.T) {
@@ -550,6 +554,8 @@ func normalizeSchemaValue(v any) any {
 	case []JobConfig:
 		return []string{}
 	case []WatchConfig:
+		return []string{}
+	case []DeadLetterClass:
 		return []string{}
 	default:
 		return typed

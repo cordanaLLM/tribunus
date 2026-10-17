@@ -1,5 +1,8 @@
 // Command epitrop-server serves the run record over the Model Context Protocol, on stdio
-// or over HTTP on a loopback address. Every tool it serves only reads; see internal/mcp.
+// or over HTTP on a loopback address. It serves the read-only tools, and with
+// server.allow_mutations the tools that start and stop jobs and record unit status; see
+// internal/mcp. Like epitropctl it answers to the job shim and the egress relay, which the
+// supervisor runs as this executable.
 package main
 
 import (
@@ -18,6 +21,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tekmora/epitrop/internal/config"
+	"github.com/tekmora/epitrop/internal/egressproxy"
 	"github.com/tekmora/epitrop/internal/logsetup"
 	"github.com/tekmora/epitrop/internal/mcp"
 	"github.com/tekmora/epitrop/internal/supervisor"
@@ -35,10 +39,20 @@ const (
 	watchInterval = 2 * time.Second
 )
 
-// newSupervisor opens the supervisor; tests replace it.
-var newSupervisor = supervisor.New
+// newSupervisor and newEffectsLedger open the supervisor and the effect ledger; tests
+// replace them.
+var (
+	newSupervisor    = supervisor.New
+	newEffectsLedger = func(cfg config.Config) (mcp.EffectRunner, error) { return logsetup.EffectsLedger(cfg) }
+)
+
+// jobShimCommand is the argument the supervisor starts its job shim with.
+const jobShimCommand = "__job-shim"
 
 func main() {
+	if code, ok := helper(os.Args[1:]); ok {
+		os.Exit(code)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	err := serve(ctx, os.Args[1:], os.Stdin, os.Stdout)
 	stop()
@@ -46,6 +60,21 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// helper runs the job shim or the egress relay when args name one, and reports whether
+// they did. The supervisor starts both as this executable.
+func helper(args []string) (int, bool) {
+	if len(args) == 0 {
+		return 0, false
+	}
+	switch args[0] {
+	case jobShimCommand:
+		return supervisor.RunShim(args), true
+	case egressproxy.RelayCommand:
+		return egressproxy.RunRelay(args, os.Stderr), true
+	}
+	return 0, false
 }
 
 // serve loads the config named by args and serves the tools on the configured transport
@@ -118,21 +147,46 @@ func load(args []string) (config.Config, mcp.Sources, error) {
 	if err != nil {
 		return config.Config{}, mcp.Sources{}, err
 	}
-	unitsSvc, err := logsetup.UnitsService(cfg)
+	src, err := sources(cfg)
 	if err != nil {
 		return config.Config{}, mcp.Sources{}, err
 	}
-	jobs, err := jobLister(cfg)
-	if err != nil {
-		return config.Config{}, mcp.Sources{}, err
-	}
-	return cfg, mcp.Sources{Jobs: jobs, Units: unitsSvc}, nil
+	return cfg, src, nil
 }
 
-// jobLister opens the supervisor for status reads only: no tool starts a job, so the shim
-// command it defaults to is never run. Where the platform has no supervisor, the jobs tool
-// answers with the reason instead of the server refusing to start; any other error does.
-func jobLister(cfg config.Config) (mcp.JobLister, error) {
+// sources opens what the tools read, and with server.allow_mutations what they change and
+// the effect ledger that runs each call at most once.
+func sources(cfg config.Config) (mcp.Sources, error) {
+	unitsSvc, err := logsetup.UnitsService(cfg)
+	if err != nil {
+		return mcp.Sources{}, err
+	}
+	jobs, err := openJobs(cfg)
+	if err != nil {
+		return mcp.Sources{}, err
+	}
+	src := mcp.Sources{Jobs: jobs, Units: unitsSvc}
+	if !cfg.Server.AllowMutations {
+		return src, nil
+	}
+	ledger, err := newEffectsLedger(cfg)
+	if err != nil {
+		return mcp.Sources{}, err
+	}
+	src.Mutate = &mcp.Mutators{Jobs: jobs, Units: unitsSvc, Effects: ledger}
+	return src, nil
+}
+
+// jobService reads the jobs' state and, for the mutating tools, starts and stops them.
+type jobService interface {
+	mcp.JobLister
+	mcp.JobControl
+}
+
+// openJobs opens the supervisor. It starts a job through the shim this executable answers
+// to. Where the platform has no supervisor, the jobs tools answer with the reason instead
+// of the server refusing to start; any other error does.
+func openJobs(cfg config.Config) (jobService, error) {
 	sup, err := newSupervisor(cfg, supervisor.Options{})
 	if errors.Is(err, supervisor.ErrNotSupported) {
 		return unavailableJobs{err: err}, nil
@@ -143,12 +197,16 @@ func jobLister(cfg config.Config) (mcp.JobLister, error) {
 	return sup, nil
 }
 
-// unavailableJobs answers every status request with why jobs cannot be read.
+// unavailableJobs answers every request with why jobs cannot be read or run.
 type unavailableJobs struct{ err error }
 
 func (u unavailableJobs) Status(context.Context, string) ([]supervisor.JobStatus, error) {
 	return nil, u.err
 }
+
+func (u unavailableJobs) Start(context.Context, string) error { return u.err }
+
+func (u unavailableJobs) Stop(context.Context, string) error { return u.err }
 
 func appVersion() string {
 	if version != "" {

@@ -111,7 +111,8 @@ func TestLoadNegativeValidation(t *testing.T) {
 		{"git compact not a boolean", `{"event_log": {"git": {"compact": "yes"}}}`, []string{"/event_log/git/compact", "boolean"}},
 		{"git compact without enabled", `{"event_log": {"git": {"compact": true}}}`, []string{"event_log/git", "compact needs enabled"}},
 		{"unknown server transport", `{"server": {"transport": "sse"}}`, []string{"/server/transport", "valid"}},
-		{"unknown server key", `{"server": {"allow_mutations": true}}`, []string{"/server", "additional properties"}},
+		{"unknown server key", `{"server": {"allow_writes": true}}`, []string{"/server", "additional properties"}},
+		{"server allow_mutations not a boolean", `{"server": {"allow_mutations": "yes"}}`, []string{"/server/allow_mutations", "boolean"}},
 		{"server listen on every interface", `{"server": {"listen": "0.0.0.0:8899"}}`, []string{"server/listen", "not loopback"}},
 		{"server listen without host", `{"server": {"listen": ":8899"}}`, []string{"server/listen", "not loopback"}},
 		{"server listen on a name", `{"server": {"listen": "example.com:8899"}}`, []string{"server/listen", "not loopback"}},
@@ -187,6 +188,25 @@ func TestLoadServerListensOnLoopback(t *testing.T) {
 		}
 		if want := (ServerConfig{Transport: TransportHTTP, Listen: addr}); cfg.Server != want {
 			t.Fatalf("Load() server = %+v, want %+v", cfg.Server, want)
+		}
+	}
+}
+
+func TestLoadServerAllowsMutationsOnlyWhenSet(t *testing.T) {
+	for _, tc := range []struct {
+		body string
+		want bool
+	}{
+		{`{}`, false},
+		{`{"server": {"allow_mutations": false}}`, false},
+		{`{"server": {"allow_mutations": true}}`, true},
+	} {
+		cfg, err := Load(testContext(t), writeConfig(t, tc.body))
+		if err != nil {
+			t.Fatalf("Load(%s) = %v, want nil", tc.body, err)
+		}
+		if cfg.Server.AllowMutations != tc.want {
+			t.Fatalf("Load(%s) server.allow_mutations = %v, want %v", tc.body, cfg.Server.AllowMutations, tc.want)
 		}
 	}
 }
@@ -324,6 +344,7 @@ func TestConfigSchemaDefaultsAgreeWithGoTypes(t *testing.T) {
 	assertSchemaDefault(t, doc, def.EventLog.Git.Compact, "event_log", "git", "compact")
 	assertSchemaDefault(t, doc, def.Server.Transport, "server", "transport")
 	assertSchemaDefault(t, doc, def.Server.Listen, "server", "listen")
+	assertSchemaDefault(t, doc, def.Server.AllowMutations, "server", "allow_mutations")
 	assertSchemaDefault(t, doc, def.Router.Aliases, "router", "aliases")
 	assertSchemaDefault(t, doc, def.Jobs, "jobs")
 	assertSchemaDefault(t, doc, def.Watches, "watches")

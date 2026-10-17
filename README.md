@@ -74,7 +74,7 @@ Releases, their signed artefacts and how to verify them are described in [Releas
 epitrop-server --config=file
 ```
 
-`epitrop-server` serves the run record over the Model Context Protocol on stdin and stdout, for a client that starts it as a subprocess. Its tools only read, and no tool appends to the event log or signals a job:
+`epitrop-server` serves the run record over the Model Context Protocol on stdin and stdout, for a client that starts it as a subprocess. By default its tools only read, and no tool appends to the event log or signals a job:
 
 - `jobs_status` lists the configured jobs as `epitropctl jobs status` does, including `stale` and `last_beat` for a job that declares `heartbeat.max_age_seconds`. On a platform without the supervisor (anything but Linux) the tool returns the reason as a tool error.
 - `units_list` lists the work units of the run record, sorted by id, optionally narrowed to one status.
@@ -84,6 +84,13 @@ With `server.transport: http` in the config, the server serves the same tools ov
 
 - `/livez`, `/readyz` and `/startupz`. `/readyz` answers 503 until the event log has replayed, and again whenever a replay fails; the server replays every two seconds.
 - `/events`, a server-sent event stream with one `unit` event per unit and one `job` event per job whose summary changed since the last replay. The stream starts with the state at the first replay and sends no snapshot; a client that falls behind loses events and reads the state back with the tools.
+
+With `server.allow_mutations: true` the server also serves three tools that change state:
+
+- `jobs_start` starts one configured job and leaves a running job alone; `jobs_stop` stops one with its stop signal, the grace period and then a kill. The supervisor starts the job shim as `epitrop-server` itself.
+- `unit_set` records a unit's status, under the same transition rules as `epitropctl units record`.
+
+Each call names a `key` for the request. The effect ledger runs a key with the same arguments at most once: a repeat answers `skipped` and changes nothing, and the same key with other arguments is a new request. A call that failed leaves its key open, and a repeat is refused until the claim is resolved with `epitropctl effects resolve`.
 
 The tool names and config keys are fixed; the HTTP paths stay provisional until the first release that ships the server.
 
